@@ -14,20 +14,23 @@ const sbPatch = async (p, d) => { const r = await fetch(`${SB}/rest/v1/${p}`, { 
 const PASS = 'jlab2024';
 const DAYS = ['日', '一', '二', '三', '四', '五', '六'];
 
-// 用於下拉選單（模板時間、休息時間、範圍選擇）
 const ALL_TIMES = [];
-for (let h = 0; h < 24; h++) for (let m = 0; m < 60; m += 30) ALL_TIMES.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
+for (let h = 0; h < 24; h++) for (let m = 0; m < 60; m += 30)
+  ALL_TIMES.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
 
 const ALL_TIMES_15 = [];
-for (let h = 0; h < 24; h++) for (let m = 0; m < 60; m += 15) ALL_TIMES_15.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
+for (let h = 0; h < 24; h++) for (let m = 0; m < 60; m += 15)
+  ALL_TIMES_15.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
 
 const TEMPLATES = [
-  { label: '全日班', from: '10:00', to: '19:00', icon: '☀️' },
-  { label: '上午班', from: '10:00', to: '13:30', icon: '🌅' },
-  { label: '下午班', from: '14:00', to: '19:00', icon: '🌇' },
-  { label: '晚間班', from: '17:00', to: '20:00', icon: '🌙' },
+  { label: '全日班', from: '10:00', to: '20:00', icon: '☀️' },
+  { label: '上午班', from: '10:00', to: '14:00', icon: '🌅' },
+  { label: '下午班', from: '14:00', to: '20:00', icon: '🌇' },
+  { label: '晚間班', from: '17:00', to: '21:00', icon: '🌙' },
   { label: '休息日', from: null, to: null, icon: '💤' },
 ];
+
+const INTERVAL_OPTIONS = [30, 45, 60, 90];
 
 /* ═══════════════════ STYLES ═══════════════════ */
 const card = { background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 2px 10px rgba(0,0,0,0.05)', marginBottom: 20 };
@@ -72,13 +75,23 @@ export default function Admin() {
   const [breakFrom, setBreakFrom] = useState('13:00');
   const [breakTo, setBreakTo] = useState('14:00');
 
-  /* ── Grid Settings（核心改動）── */
-  const [gridStart, setGridStart] = useState('09:00');
-  const [gridEnd, setGridEnd] = useState('21:00');
-  const [gridInterval, setGridInterval] = useState(30);
+  /* ══ Grid Settings — 自動記住 ══ */
+  const [gridStart, setGridStart] = useState(() => localStorage.getItem('jlab_grid_start') || '10:00');
+  const [gridEnd, setGridEnd] = useState(() => localStorage.getItem('jlab_grid_end') || '20:00');
+  const [gridInterval, setGridInterval] = useState(() => Number(localStorage.getItem('jlab_grid_interval')) || 30);
+  const [settingSaved, setSettingSaved] = useState(false);
+
+  useEffect(() => {
+    localStorage.setItem('jlab_grid_start', gridStart);
+    localStorage.setItem('jlab_grid_end', gridEnd);
+    localStorage.setItem('jlab_grid_interval', String(gridInterval));
+    setSettingSaved(true);
+    const t = setTimeout(() => setSettingSaved(false), 1500);
+    return () => clearTimeout(t);
+  }, [gridStart, gridEnd, gridInterval]);
 
   /* ── DB state for active date ── */
-  const [dbDisabled, setDbDisabled] = useState(new Set());
+  const [dbTimes, setDbTimes] = useState(new Set());
   const [dbStatus, setDbStatus] = useState(null);
   const [gridLoading, setGridLoading] = useState(false);
 
@@ -105,46 +118,45 @@ export default function Admin() {
     return times;
   }, [gridStart, gridEnd, gridInterval]);
 
-  // 下拉選單嘅時間選項（按 interval 分粒度）
-  const rangeOptions = useMemo(() => {
-    return gridInterval === 15 ? ALL_TIMES_15 : ALL_TIMES;
-  }, [gridInterval]);
-
-  // 自動適應模板範圍
   const autoFitRange = () => {
     const starts = templates.filter(t => t.from).map(t => toMins(t.from));
     const ends = templates.filter(t => t.to).map(t => toMins(t.to));
     if (!starts.length || !ends.length) return;
-    const earliest = Math.max(0, Math.min(...starts) - 30);
-    const latest = Math.min(23 * 60 + 30, Math.max(...ends) + 30);
+    const earliest = Math.max(0, Math.min(...starts) - gridInterval);
+    const latest = Math.min(23 * 60 + 30, Math.max(...ends) + gridInterval);
     setGridStart(toTimeStr(earliest));
     setGridEnd(toTimeStr(latest));
-    showToast(`📐 已自動適應：${toTimeStr(earliest)} – ${toTimeStr(latest)}`);
+    showToast(`📐 已自動適應範圍`);
   };
 
   /* ── Derived ── */
-  const dbTimes = useMemo(() => {
-    if (dbStatus !== 'available') return new Set();
-    return new Set(gridTimes.filter(t => !dbDisabled.has(t)));
-  }, [dbStatus, dbDisabled, gridTimes]);
-
   const displayTimes = pending[activeDate] || dbTimes;
   const isInPending = !!pending[activeDate];
   const pendingCount = Object.keys(pending).length;
   const activeDow = activeDate ? new Date(activeDate + 'T00:00:00').getDay() : 0;
 
-  /* ═══════════════════ LOAD DB FOR ACTIVE DATE ═══════════════════ */
+  // 檢查 DB 有冇唔喺目前 grid 嘅時段
+  const extraDbTimes = useMemo(() => {
+    const gridSet = new Set(gridTimes);
+    return [...(pending[activeDate] || dbTimes)].filter(t => !gridSet.has(t)).sort();
+  }, [gridTimes, dbTimes, pending, activeDate]);
+
+  /* ═══════════════════ LOAD DB — 讀 enabled_timeslots ═══════════════════ */
   const loadActiveFromDB = useCallback(async (date) => {
     if (!date) return;
     setGridLoading(true);
     try {
-      const [dateData, disData] = await Promise.all([
+      const [dateData, enabledData] = await Promise.all([
         sbGet(`date_availability?available_date=eq.${date}`),
-        sbGet(`disabled_timeslots?slot_date=eq.${date}`)
+        sbGet(`enabled_timeslots?slot_date=eq.${date}&order=slot_time`)
       ]);
       const info = dateData?.[0];
       setDbStatus(info?.status || null);
-      setDbDisabled(new Set((disData || []).map(r => r.slot_time?.slice(0, 5))));
+      if (!info || info.status !== 'available') {
+        setDbTimes(new Set());
+      } else {
+        setDbTimes(new Set((enabledData || []).map(r => r.slot_time?.slice(0, 5))));
+      }
     } catch (e) { console.error(e); }
     setGridLoading(false);
   }, []);
@@ -254,7 +266,7 @@ export default function Admin() {
     showToast(`🍽️ 已關閉 ${breakFrom}–${breakTo} 休息時段（${dates.length} 個日期）`);
   };
 
-  /* ═══════════════════ SYNC TO DB ═══════════════════ */
+  /* ═══════════════════ SYNC — 寫入 enabled_timeslots ═══════════════════ */
   const syncPending = async () => {
     const entries = Object.entries(pending);
     if (!entries.length) return;
@@ -267,26 +279,30 @@ export default function Admin() {
     setBatchLoading(true);
     try {
       const dates = entries.map(([d]) => d);
-      await sbDel(`date_availability?available_date=in.(${dates.join(',')})`);
-      await sbDel(`disabled_timeslots?slot_date=in.(${dates.join(',')})`);
 
+      // 清除舊資料
+      await sbDel(`date_availability?available_date=in.(${dates.join(',')})`);
+      await sbDel(`enabled_timeslots?slot_date=in.(${dates.join(',')})`);
+      // 也清舊嘅 disabled_timeslots（向下兼容）
+      try { await sbDel(`disabled_timeslots?slot_date=in.(${dates.join(',')})`); } catch (_) {}
+
+      // 寫入日期狀態
       const availRows = entries.map(([d, times]) => ({
         available_date: d,
         status: times.size > 0 ? 'available' : 'closed'
       }));
       await sbPost('date_availability', availRows);
 
-      const disRows = [];
+      // 寫入開放嘅時段
+      const enabledRows = [];
       entries.forEach(([d, times]) => {
-        if (times.size > 0) {
-          gridTimes.forEach(t => {
-            if (!times.has(t)) disRows.push({ slot_date: d, slot_time: t });
-          });
-        }
+        [...times].forEach(t => {
+          enabledRows.push({ slot_date: d, slot_time: t });
+        });
       });
-      if (disRows.length > 0) {
-        for (let i = 0; i < disRows.length; i += 500) {
-          await sbPost('disabled_timeslots', disRows.slice(i, i + 500));
+      if (enabledRows.length > 0) {
+        for (let i = 0; i < enabledRows.length; i += 500) {
+          await sbPost('enabled_timeslots', enabledRows.slice(i, i + 500));
         }
       }
 
@@ -372,7 +388,7 @@ export default function Admin() {
         </div>
       )}
 
-      {/* ── Header ── */}
+      {/* Header */}
       <div style={{ background: '#fff', padding: '20px 30px', boxShadow: '0 2px 10px rgba(0,0,0,0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <h1 style={{ fontSize: 20, color: '#5c4a3a', margin: 0 }}>J.LAB 管理後台</h1>
@@ -381,7 +397,7 @@ export default function Admin() {
         <button onClick={() => setAuth(false)} style={{ padding: '8px 20px', background: 'transparent', border: '1px solid #ccc', borderRadius: 6, cursor: 'pointer', color: '#666', fontFamily: font }}>登出</button>
       </div>
 
-      {/* ── Tabs ── */}
+      {/* Tabs */}
       <div style={{ background: '#fff', borderTop: '1px solid #f0ebe3', padding: '0 30px', display: 'flex', gap: 0, boxShadow: '0 2px 10px rgba(0,0,0,0.03)', overflowX: 'auto' }}>
         {[{ key: 'bookings', label: '📋 預約管理' }, { key: 'timeslots', label: '🕐 時段管理' }, { key: 'blocked', label: '📅 封鎖日期' }].map(t => (
           <button key={t.key} onClick={() => setTab(t.key)} style={{
@@ -393,7 +409,7 @@ export default function Admin() {
         ))}
       </div>
 
-      {/* ══════════ Sticky Sync Bar ══════════ */}
+      {/* Sticky Sync Bar */}
       {pendingCount > 0 && tab === 'timeslots' && (
         <div style={{ position: 'sticky', top: 0, zIndex: 100, background: 'linear-gradient(135deg, #FFF3E0, #FFE0B2)', borderBottom: '2px solid #FFB74D' }}>
           <div style={{ padding: '14px 30px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
@@ -496,7 +512,6 @@ export default function Admin() {
         {/* ══════════════════════ TIME SLOTS TAB ══════════════════════ */}
         {tab === 'timeslots' && (
           <>
-            {/* 使用說明 */}
             <div style={{ ...card, background: '#e8f5e9', border: '1px solid #a5d6a7' }}>
               <div style={{ fontSize: 14, color: '#2e7d32', lineHeight: 2 }}>
                 💡 <b>使用流程：</b>喺月曆選日期 → 套用模板或逐個調時段 → 按頂部「<b>確認同步到前台</b>」<br />
@@ -504,7 +519,6 @@ export default function Admin() {
               </div>
             </div>
 
-            {/* ── 月曆 + 時段格（左右並排）── */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 20 }}>
 
               {/* 左：月曆 */}
@@ -564,7 +578,7 @@ export default function Admin() {
                 )}
               </div>
 
-              {/* ════════ 右：時段格（核心改動）════════ */}
+              {/* ════════ 右：時段格 ════════ */}
               <div style={card}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
                   <div style={{ fontSize: 15, fontWeight: 600, color: '#5c4a3a' }}>
@@ -577,36 +591,40 @@ export default function Admin() {
                   </div>
                 </div>
 
-                {/* ── 顯示範圍設定 ── */}
+                {/* ── 範圍設定（自動記住）── */}
                 <div style={{
                   padding: '10px 14px', borderRadius: 8, marginBottom: 12,
                   background: '#f9f6f3', border: '1px solid #e8e0d8',
-                  display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', fontSize: 13,
                 }}>
-                  <span style={{ color: '#5c4a3a', fontWeight: 500 }}>範圍</span>
-                  <select value={gridStart} onChange={e => setGridStart(e.target.value)} style={{ padding: '4px 8px', border: '1px solid #ddd', borderRadius: 4, fontSize: 13, fontFamily: font }}>
-                    {rangeOptions.map(t => <option key={t} value={t}>{t}</option>)}
-                  </select>
-                  <span style={{ color: '#999' }}>至</span>
-                  <select value={gridEnd} onChange={e => setGridEnd(e.target.value)} style={{ padding: '4px 8px', border: '1px solid #ddd', borderRadius: 4, fontSize: 13, fontFamily: font }}>
-                    {rangeOptions.map(t => <option key={t} value={t}>{t}</option>)}
-                  </select>
-
-                  <span style={{ color: '#5c4a3a', fontWeight: 500, marginLeft: 4 }}>間隔</span>
-                  {[15, 30, 60].map(m => (
-                    <button key={m} onClick={() => setGridInterval(m)} style={{
-                      padding: '4px 10px', borderRadius: 4, border: 'none', cursor: 'pointer', fontSize: 12, fontFamily: font,
-                      background: gridInterval === m ? '#5c4a3a' : '#e8e0d8',
-                      color: gridInterval === m ? '#fff' : '#5c4a3a',
-                      fontWeight: gridInterval === m ? 600 : 400,
-                    }}>{m}分</button>
-                  ))}
-
-                  <button onClick={autoFitRange} style={{
-                    padding: '4px 10px', borderRadius: 4, border: '1px solid #a5d6a7',
-                    background: '#e8f5e9', color: '#2e7d32', cursor: 'pointer', fontSize: 12, fontFamily: font,
-                    marginLeft: 'auto',
-                  }}>📐 自動</button>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', fontSize: 13 }}>
+                    <span style={{ color: '#5c4a3a', fontWeight: 500 }}>範圍</span>
+                    <select value={gridStart} onChange={e => setGridStart(e.target.value)} style={{ padding: '4px 8px', border: '1px solid #ddd', borderRadius: 4, fontSize: 13, fontFamily: font }}>
+                      {ALL_TIMES_15.map(t => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                    <span style={{ color: '#999' }}>至</span>
+                    <select value={gridEnd} onChange={e => setGridEnd(e.target.value)} style={{ padding: '4px 8px', border: '1px solid #ddd', borderRadius: 4, fontSize: 13, fontFamily: font }}>
+                      {ALL_TIMES_15.map(t => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                    <button onClick={autoFitRange} style={{
+                      padding: '4px 10px', borderRadius: 4, border: '1px solid #a5d6a7',
+                      background: '#e8f5e9', color: '#2e7d32', cursor: 'pointer', fontSize: 12, fontFamily: font,
+                    }}>📐 自動</button>
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 8 }}>
+                    <span style={{ color: '#5c4a3a', fontWeight: 500, fontSize: 13 }}>間隔</span>
+                    {INTERVAL_OPTIONS.map(m => (
+                      <button key={m} onClick={() => setGridInterval(m)} style={{
+                        padding: '4px 12px', borderRadius: 4, border: 'none', cursor: 'pointer', fontSize: 12, fontFamily: font,
+                        background: gridInterval === m ? '#5c4a3a' : '#e8e0d8',
+                        color: gridInterval === m ? '#fff' : '#5c4a3a',
+                        fontWeight: gridInterval === m ? 600 : 400,
+                      }}>{m}分</button>
+                    ))}
+                    {settingSaved && <span style={{ fontSize: 11, color: '#4CAF50', marginLeft: 6 }}>✓ 已記住</span>}
+                  </div>
+                  <div style={{ fontSize: 11, color: '#aaa', marginTop: 6 }}>
+                    💾 設定會自動記住，下次打開唔使重設
+                  </div>
                 </div>
 
                 {/* 狀態 Banner */}
@@ -619,16 +637,24 @@ export default function Admin() {
                   {isInPending
                     ? `⏳ 有未同步嘅變更 — ${displayTimes.size} / ${gridTimes.length} 個時段開放`
                     : dbStatus === 'available'
-                    ? `✅ 已同步 — ${displayTimes.size} / ${gridTimes.length} 個時段開放`
+                    ? `✅ 已同步 — ${displayTimes.size} 個時段開放`
                     : '🔒 未開放（前台不顯示）'
                   }
                 </div>
 
-                {/* 時段格（動態列數）*/}
+                {/* 隱藏時段警告 */}
+                {extraDbTimes.length > 0 && (
+                  <div style={{ padding: '8px 12px', borderRadius: 6, marginBottom: 12, fontSize: 12, background: '#FFF8E1', border: '1px solid #FFE082', color: '#F57F17' }}>
+                    ⚠️ 有 {extraDbTimes.length} 個已開放時段唔喺目前格仔範圍內：{extraDbTimes.slice(0, 5).join(', ')}{extraDbTimes.length > 5 ? '...' : ''}
+                    <br /><span style={{ fontSize: 11 }}>請調整範圍 / 間隔以顯示佢哋</span>
+                  </div>
+                )}
+
+                {/* 時段格 */}
                 {gridLoading ? <p style={{ textAlign: 'center', color: '#999', padding: 30 }}>載入中...</p> : (
                   <div style={{
                     display: 'grid',
-                    gridTemplateColumns: `repeat(auto-fill, minmax(${gridInterval === 15 ? '58px' : '68px'}, 1fr))`,
+                    gridTemplateColumns: `repeat(auto-fill, minmax(${gridInterval >= 60 ? '80px' : '68px'}, 1fr))`,
                     gap: 5,
                     maxHeight: 480,
                     overflowY: 'auto',
@@ -638,28 +664,24 @@ export default function Admin() {
                       const isOn = displayTimes.has(t);
                       return (
                         <button key={t} onClick={() => toggleTime(t)} style={{
-                          padding: gridInterval === 15 ? '8px 2px' : '10px 4px',
-                          borderRadius: 6,
+                          padding: '10px 4px', borderRadius: 6,
                           border: `2px solid ${isOn ? '#5c4a3a' : '#e0d8cc'}`,
                           background: isOn ? '#5c4a3a' : '#faf6f0',
                           color: isOn ? '#fff' : '#c0b8aa',
-                          fontSize: gridInterval === 15 ? 12 : 13,
-                          fontWeight: 500, cursor: 'pointer', fontFamily: font,
+                          fontSize: 13, fontWeight: 500, cursor: 'pointer', fontFamily: font,
                           transition: 'all 0.15s',
                         }}>{t}</button>
                       );
                     })}
                   </div>
                 )}
-
-                {/* 時段統計 */}
                 <div style={{ marginTop: 10, fontSize: 11, color: '#999', textAlign: 'right' }}>
                   {gridTimes.length} 個時段（{gridStart}–{gridEnd}，每 {gridInterval} 分鐘）
                 </div>
               </div>
             </div>
 
-            {/* ── 營業模板 ── */}
+            {/* 營業模板 */}
             <div style={card}>
               <div style={sTitle}>⚡ 套用營業模板</div>
               <div style={sDesc}>
@@ -697,7 +719,7 @@ export default function Admin() {
               </div>
             </div>
 
-            {/* ── 自訂休息 ── */}
+            {/* 自訂休息 */}
             <div style={card}>
               <div style={sTitle}>🍽️ 自訂休息時段（可選）</div>
               <div style={sDesc}>喺已套用模板嘅日期內關閉休息時段，效果即時顯示喺時段格</div>
