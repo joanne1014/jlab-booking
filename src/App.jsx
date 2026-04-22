@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Check, ChevronUp, MessageCircle, Clock, Loader, AlertTriangle, RefreshCw } from 'lucide-react';
 
@@ -32,7 +32,8 @@ export default function App(){
   const [addonsList,setAddons]=useState([]);
   const [techList,setTechs]=useState([]);
   const [dateList,setDates]=useState([]);
-  const [slots,setSlots]=useState([]);
+  const [disabledTimes,setDisabledTimes]=useState(new Set());
+  const [dateBookings,setDateBookings]=useState([]);
   const [loading,setLoading]=useState(true);
   const [loadErr,setLoadErr]=useState(null);
   const [slotsLoading,setSlotsLoading]=useState(false);
@@ -49,6 +50,7 @@ export default function App(){
   const [done,setDone]=useState(false);
   const [submitting,setSubmitting]=useState(false);
   const [submitErr,setSubmitErr]=useState(null);
+  const [techConflict,setTechConflict]=useState(false);
   const r2=useRef(null),r3=useRef(null),r4=useRef(null),r5=useRef(null),r6=useRef(null),rS=useRef(null);
   const refs={2:r2,3:r3,4:r4,5:r5,6:r6,7:rS};
   const scrollTo=n=>setTimeout(()=>refs[n]?.current?.scrollIntoView({behavior:'smooth',block:'start'}),280);
@@ -76,19 +78,59 @@ export default function App(){
   useEffect(()=>{loadAll();},[loadAll]);
 
   useEffect(()=>{
-    if(!selDate){setSlots([]);return;}
+    if(!selDate){setDisabledTimes(new Set());setDateBookings([]);return;}
     let c=false;
     (async()=>{
       setSlotsLoading(true);
       try{
-        const dis=await sbGet(`disabled_timeslots?slot_date=eq.${selDate}`);
-        const disSet=new Set(dis.map(s=>s.slot_time));
-        if(!c)setSlots(ALL_TIMES.map(t=>({slot_time:t,is_available:!disSet.has(t)})));
-      }catch(e){if(!c)setSlots(ALL_TIMES.map(t=>({slot_time:t,is_available:true})));}
+        const [dis,bks]=await Promise.all([
+          sbGet(`disabled_timeslots?slot_date=eq.${selDate}`),
+          sbGet(`bookings?select=booking_time,technician_id&booking_date=eq.${selDate}&status=neq.cancelled`)
+        ]);
+        if(!c){
+          setDisabledTimes(new Set((dis||[]).map(s=>s.slot_time)));
+          setDateBookings(bks||[]);
+        }
+      }catch(e){
+        if(!c){setDisabledTimes(new Set());setDateBookings([]);}
+      }
       if(!c)setSlotsLoading(false);
     })();
     return()=>{c=true;};
   },[selDate]);
+
+  const randomTechId=useMemo(()=>{
+    const rt=techList.find(t=>t.label.includes('隨機'));
+    return rt?rt.id:null;
+  },[techList]);
+
+  const maxPerSlot=useMemo(()=>{
+    const real=techList.filter(t=>!t.label.includes('隨機'));
+    return Math.max(real.length,1);
+  },[techList]);
+
+  const slots=useMemo(()=>{
+    return ALL_TIMES.map(t=>{
+      if(disabledTimes.has(t))return{slot_time:t,is_available:false,booked:false};
+      const bks=dateBookings.filter(b=>b.booking_time===t);
+      if(bks.length>=maxPerSlot)return{slot_time:t,is_available:false,booked:true};
+      if(tid&&tid!==randomTechId){
+        if(bks.some(b=>b.technician_id===tid))return{slot_time:t,is_available:false,booked:true};
+      }
+      return{slot_time:t,is_available:true,booked:false};
+    });
+  },[disabledTimes,dateBookings,tid,randomTechId,maxPerSlot]);
+
+  useEffect(()=>{
+    if(!tm||!selDate)return;
+    const slot=slots.find(s=>s.slot_time===tm);
+    if(slot&&!slot.is_available){
+      setTm(null);
+      setTechConflict(true);
+      setTimeout(()=>setTechConflict(false),3500);
+      scrollTo(5);
+    }
+  },[slots,tm,selDate]);
 
   const sv=services.find(s=>s.id===sid);
   const svcVars=variants.filter(v=>v.service_id===sid);
@@ -105,9 +147,9 @@ export default function App(){
   const pmSlots=slots.filter(s=>{const h=parseInt(s.slot_time);return h>=13&&h<17;});
   const evSlots=slots.filter(s=>{const h=parseInt(s.slot_time);return h>=17;});
   const tao=id=>setAo(p=>p.includes(id)?p.filter(x=>x!==id):[...p,id]);
-  const pick=id=>{setSid(id);setSelDate(null);setTm(null);setSlots([]);if(step<2)setStep(2);scrollTo(2);};
-  const pickDate=ds=>{setSelDate(ds);setTm(null);if(step<3)setStep(3);scrollTo(3);};
-  const pickTime=t=>{setTm(t);if(step<4)setStep(4);scrollTo(4);};
+  const pick=id=>{setSid(id);setSelDate(null);setTm(null);setDisabledTimes(new Set());setDateBookings([]);if(step<2)setStep(2);scrollTo(2);};
+  const pickDate=ds=>{setSelDate(ds);setTm(null);if(step<3)setStep(3);scrollTo(5);};
+  const pickTime=t=>{setTm(t);if(step<4)setStep(4);scrollTo(6);};
 
   const submitBooking=async()=>{
     if(!canGo||submitting)return;
@@ -126,8 +168,10 @@ export default function App(){
       <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:7}}>
         {arr.map(s=>{const sel=tm===s.slot_time;const dis=!s.is_available;return(
           <motion.div key={s.slot_time} whileTap={dis?{}:{scale:0.96}} onClick={()=>{if(!dis)pickTime(s.slot_time);}}
-            style={{textAlign:'center',padding:'13px 6px',borderRadius:3,fontFamily:fc,fontSize:'0.88rem',letterSpacing:'0.06em',fontWeight:sel?500:400,border:`1px solid ${sel?PD:CB}`,cursor:dis?'not-allowed':'pointer',background:sel?P:dis?'#ebe4da':'#fff',color:sel?'#fff':dis?TLL:TX,opacity:dis?0.3:1,textDecoration:dis?'line-through':'none',transition:'all 0.2s'}}>
-            {s.slot_time}</motion.div>);})}
+            style={{textAlign:'center',padding:s.booked?'9px 6px':'13px 6px',borderRadius:3,fontFamily:fc,fontSize:'0.88rem',letterSpacing:'0.06em',fontWeight:sel?500:400,border:`1px solid ${sel?PD:dis&&s.booked?DR_BD:CB}`,cursor:dis?'not-allowed':'pointer',background:sel?P:dis&&s.booked?'#f5ece8':dis?'#ebe4da':'#fff',color:sel?'#fff':dis?TLL:TX,opacity:dis?0.35:1,textDecoration:dis?'line-through':'none',transition:'all 0.2s'}}>
+            {s.slot_time}
+            {dis&&s.booked&&<div style={{fontSize:'0.34rem',color:DR_TX,marginTop:1,textDecoration:'none',opacity:1}}>已約滿</div>}
+          </motion.div>);})}
       </div></div>);};
 
   if(loading)return(
@@ -162,11 +206,12 @@ export default function App(){
         </div>
 
         <div style={{display:'flex',alignItems:'center',justifyContent:'center',gap:0,marginBottom:28,padding:'0 10px'}}>
-          {[1,2,3,4,5,6].map((n,i)=>{const a=step>=n;return(<React.Fragment key={n}>
-            <div style={{width:22,height:22,borderRadius:'50%',background:a?P:'transparent',border:`1.5px solid ${a?P:CB}`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:'0.48rem',fontFamily:fp,fontWeight:500,color:a?'#fff':TLL,transition:'all 0.3s'}}>{a&&step>n?<Check size={10} strokeWidth={3}/>:n}</div>
-            {i<5&&<div style={{flex:1,height:1,background:step>n?PL:DV,transition:'all 0.3s'}}/>}
+          {[1,2,3,4,5,6].map((n,i)=>{const a=n<=5?step>=n:canGo;const dn=n<=5?step>n:canGo;return(<React.Fragment key={n}>
+            <div style={{width:22,height:22,borderRadius:'50%',background:a?P:'transparent',border:`1.5px solid ${a?P:CB}`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:'0.48rem',fontFamily:fp,fontWeight:500,color:a?'#fff':TLL,transition:'all 0.3s'}}>{dn?<Check size={10} strokeWidth={3}/>:n}</div>
+            {i<5&&<div style={{flex:1,height:1,background:n<5?(step>n?PL:DV):(canGo?PL:DV),transition:'all 0.3s'}}/>}
           </React.Fragment>);})}</div>
 
+        {/* STEP 1: SERVICE */}
         <div style={crd()}>
           <SH n="1" z="選擇預約項目" e="SELECT SERVICE" fp={fp} fc={fc}/>
           {services.map(s=>{const sel=sid===s.id;const sv_=variants.filter(v=>v.service_id===s.id);const hv=sv_.length>0;return(
@@ -187,6 +232,7 @@ export default function App(){
             </div>);})}
         </div>
 
+        {/* STEP 2: ADD-ONS */}
         <div ref={r2} style={crd(step>=2)}>
           <SH n="2" z="可選加購項目" e="ADD-ONS" fp={fp} fc={fc}/>
           <div style={{fontSize:'0.6rem',color:TL,marginBottom:16,fontWeight:300}}>非必選項目，可根據需要加選。</div>
@@ -198,8 +244,23 @@ export default function App(){
             </div>);})}
         </div>
 
+        {/* STEP 3: TECHNICIAN (moved before date) */}
         <div ref={r3} style={crd(step>=2)}>
-          <SH n="3" z="選擇日期" e="SELECT DATE" fp={fp} fc={fc}/>
+          <SH n="3" z="指定技師" e="TECHNICIAN" fp={fp} fc={fc}/>
+          <div style={{fontSize:'0.56rem',color:TL,marginBottom:14,fontWeight:300,lineHeight:1.7}}>
+            選擇技師後，系統會根據該技師的預約情況顯示可用時段。
+          </div>
+          {techList.map(t=>{const sel=tid===t.id;return(
+            <motion.div key={t.id} whileTap={{scale:0.98}} onClick={()=>{setTid(t.id);if(!selDate)scrollTo(4);}}
+              style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'16px 18px',borderRadius:3,marginBottom:8,cursor:'pointer',background:sel?P:'#fff',border:`1px solid ${sel?PD:CB}`,transition:'all 0.25s'}}>
+              <div><div style={{fontSize:'0.76rem',fontWeight:sel?500:300,color:sel?'#fff':TX}}>{t.label}</div><div style={{fontFamily:fc,fontSize:'0.58rem',fontStyle:'italic',color:sel?'rgba(255,255,255,0.7)':TL,marginTop:2}}>{t.label_en}</div></div>
+              <div style={{fontFamily:fp,fontWeight:500,color:sel?'#fff':TM,fontSize:'0.76rem'}}>{t.surcharge?`+$${t.surcharge}`:'免費'}</div>
+            </motion.div>);})}
+        </div>
+
+        {/* STEP 4: DATE */}
+        <div ref={r4} style={crd(step>=2)}>
+          <SH n="4" z="選擇日期" e="SELECT DATE" fp={fp} fc={fc}/>
           {dateList.length===0?(<div style={{textAlign:'center',padding:20,fontSize:'0.68rem',color:TL}}>暫無可預約日期</div>):(
             <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:7}}>
               {dateList.map(d=>{const sel=selDate===d.available_date;const full=d.status==='full';const c=getDC(d.status);return(
@@ -216,8 +277,22 @@ export default function App(){
           </div>
         </div>
 
-        <div ref={r4} style={crd(step>=3)}>
-          <SH n="4" z="選擇時段" e="SELECT TIME" fp={fp} fc={fc}/>
+        {/* STEP 5: TIME */}
+        <div ref={r5} style={crd(step>=3)}>
+          <SH n="5" z="選擇時段" e="SELECT TIME" fp={fp} fc={fc}/>
+          <AnimatePresence>
+            {techConflict&&(
+              <motion.div initial={{opacity:0,height:0}} animate={{opacity:1,height:'auto'}} exit={{opacity:0,height:0}}
+                style={{background:DA_BG,border:`1px solid ${DA_BD}`,color:DA_TX,padding:'10px 14px',borderRadius:3,fontSize:'0.6rem',marginBottom:14,lineHeight:1.6,overflow:'hidden'}}>
+                ⚠️ 所選時段已被此技師預約，請重新選擇時段
+              </motion.div>
+            )}
+          </AnimatePresence>
+          {tc&&selDate&&(
+            <div style={{fontSize:'0.52rem',color:TL,marginBottom:14,fontWeight:300,background:IB,padding:'8px 12px',borderRadius:3,border:`1px solid ${DV}`}}>
+              顯示「<span style={{color:TX,fontWeight:500}}>{tc.label}</span>」於 <span style={{fontFamily:fp,fontWeight:500,color:TX}}>{selDate}</span> 的可預約時段
+            </div>
+          )}
           {slotsLoading?(<div style={{textAlign:'center',padding:'24px 0'}}><motion.div animate={{rotate:360}} transition={{repeat:Infinity,duration:1,ease:'linear'}} style={{display:'inline-block'}}><Loader size={20} color={P} strokeWidth={1.5}/></motion.div></div>):(<>
             {renderTG('上午 MORNING',amSlots)}
             {renderTG('下午 AFTERNOON',pmSlots)}
@@ -225,8 +300,9 @@ export default function App(){
           </>)}
         </div>
 
-        <div ref={r5} style={crd(step>=4)}>
-          <SH n="5" z="聯絡資料" e="CONTACT" fp={fp} fc={fc}/>
+        {/* STEP 6: CONTACT */}
+        <div ref={r6} style={crd(step>=4)}>
+          <SH n="6" z="聯絡資料" e="CONTACT" fp={fp} fc={fc}/>
           <div style={{marginBottom:18}}>
             <div style={{fontSize:'0.6rem',color:TL,marginBottom:8,fontWeight:300}}>您的姓名 <span style={{color:DR_TX}}>*</span></div>
             <input value={nm} onChange={e=>setNm(e.target.value)} placeholder="e.g. Miss Chan" style={{width:'100%',padding:'13px 16px',borderRadius:3,border:`1px solid ${CB}`,background:IB,fontSize:'0.76rem',fontFamily:ff,fontWeight:300,outline:'none',boxSizing:'border-box',color:TX}}/>
@@ -240,21 +316,12 @@ export default function App(){
             <textarea value={rk} onChange={e=>setRk(e.target.value)} placeholder="如有特別需要..." rows={3} style={{width:'100%',padding:'13px 16px',borderRadius:3,border:`1px solid ${CB}`,background:IB,fontSize:'0.72rem',fontFamily:ff,fontWeight:300,outline:'none',boxSizing:'border-box',color:TX,resize:'vertical',lineHeight:1.6}}/>
           </div>
           {nm.trim()&&ph.trim()&&step<5&&(
-            <motion.button whileTap={{scale:0.97}} onClick={()=>{if(step<5)setStep(5);scrollTo(5);}}
+            <motion.button whileTap={{scale:0.97}} onClick={()=>{if(step<5)setStep(5);scrollTo(7);}}
               style={{width:'100%',padding:'14px',marginTop:14,borderRadius:3,border:'none',background:BTN,color:'#fff',fontFamily:ff,fontSize:'0.72rem',cursor:'pointer',fontWeight:400}}>下一步 →</motion.button>)}
         </div>
 
-        <div ref={r6} style={crd(step>=5)}>
-          <SH n="6" z="指定技師" e="TECHNICIAN" fp={fp} fc={fc}/>
-          {techList.map(t=>{const sel=tid===t.id;return(
-            <motion.div key={t.id} whileTap={{scale:0.98}} onClick={()=>{setTid(t.id);if(step<6)setStep(6);}}
-              style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'16px 18px',borderRadius:3,marginBottom:8,cursor:'pointer',background:sel?P:'#fff',border:`1px solid ${sel?PD:CB}`,transition:'all 0.25s'}}>
-              <div><div style={{fontSize:'0.76rem',fontWeight:sel?500:300,color:sel?'#fff':TX}}>{t.label}</div><div style={{fontFamily:fc,fontSize:'0.58rem',fontStyle:'italic',color:sel?'rgba(255,255,255,0.7)':TL,marginTop:2}}>{t.label_en}</div></div>
-              <div style={{fontFamily:fp,fontWeight:500,color:sel?'#fff':TM,fontSize:'0.76rem'}}>{t.surcharge?`+$${t.surcharge}`:'免費'}</div>
-            </motion.div>);})}
-        </div>
-
-        <div ref={rS} style={crd(step>=5)}>
+        {/* SUMMARY */}
+        <div ref={rS} style={crd(step>=4)}>
           <div style={{textAlign:'center',marginBottom:22}}>
             <div style={{fontFamily:fc,fontSize:'0.54rem',letterSpacing:'0.24em',color:P}}>ORDER SUMMARY</div>
             <div style={{fontSize:'1.05rem',fontWeight:500,marginTop:6}}>預約摘要</div>
@@ -268,11 +335,9 @@ export default function App(){
               <div style={{fontSize:'0.56rem',color:TL,marginBottom:8}}>加購項目</div>
               {selAddons.map(a=>(<div key={a.id} style={{display:'flex',justifyContent:'space-between',fontSize:'0.68rem',marginBottom:6}}><span>{a.name_zh}</span><span style={{fontFamily:fp,fontWeight:500}}>+${a.price}</span></div>))}</div>)}
             <div style={{borderTop:`1px solid ${DV}`,paddingTop:12,marginBottom:12}}>
+              <div style={{display:'flex',justifyContent:'space-between',fontSize:'0.68rem',marginBottom:8}}><span style={{color:TL}}>技師</span><span>{tc?.label} {tp?`+$${tp}`:'免費'}</span></div>
               <div style={{display:'flex',justifyContent:'space-between',fontSize:'0.68rem',marginBottom:8}}><span style={{color:TL}}>日期</span><span style={{fontFamily:fp,fontWeight:500}}>{ad?`${ad.available_date}（週${WDN[ad.wd]}）`:'—'}</span></div>
               <div style={{display:'flex',justifyContent:'space-between',fontSize:'0.68rem'}}><span style={{color:TL}}>時段</span><span style={{fontFamily:fp,fontWeight:500}}>{tm||'—'}</span></div>
-            </div>
-            <div style={{borderTop:`1px solid ${DV}`,paddingTop:12,marginBottom:12}}>
-              <div style={{display:'flex',justifyContent:'space-between',fontSize:'0.68rem'}}><span style={{color:TL}}>技師</span><span>{tc?.label} {tp?`+$${tp}`:'免費'}</span></div>
             </div>
             <div style={{borderTop:`1px solid ${DV}`,paddingTop:12}}>
               <div style={{fontSize:'0.56rem',color:TL,marginBottom:8}}>聯絡資料</div>
@@ -312,9 +377,9 @@ export default function App(){
               <div><b>服務：</b>{sv?.name}</div>
               {hasV&&<div><b>類型：</b>{svcVars[vi[sid]||0]?.label}</div>}
               {selAddons.length>0&&<div><b>加購：</b>{selAddons.map(a=>a.name_zh).join('、')}</div>}
+              <div><b>技師：</b>{tc?.label}</div>
               <div><b>日期：</b>{ad?.available_date}（週{WDN[ad?.wd||0]}）</div>
               <div><b>時段：</b>{tm}</div>
-              <div><b>技師：</b>{tc?.label}</div>
               <div><b>姓名：</b>{nm}</div>
               <div><b>電話：</b>{ph}</div>
               {rk&&<div><b>備註：</b>{rk}</div>}
@@ -322,7 +387,7 @@ export default function App(){
             </div>
             <div style={{display:'flex',gap:10}}>
               <button onClick={()=>setDone(false)} style={{flex:1,padding:'12px',borderRadius:3,border:`1px solid ${CB}`,background:'#fff',fontSize:'0.68rem',fontFamily:ff,cursor:'pointer',color:TM}}>關閉</button>
-              <button onClick={()=>{let m=`Hi J.Lab\n\n服務：${sv?.name}\n日期：${ad?.available_date}\n時段：${tm}\n技師：${tc?.label}\n姓名：${nm}\n電話：${ph}\n總額：$${total}\n\n請確認，謝謝！`;window.open(`https://wa.me/?text=${encodeURIComponent(m)}`,'_blank');}}
+              <button onClick={()=>{let m=`Hi J.Lab\n\n服務：${sv?.name}\n技師：${tc?.label}\n日期：${ad?.available_date}\n時段：${tm}\n姓名：${nm}\n電話：${ph}\n總額：$${total}\n\n請確認，謝謝！`;window.open(`https://wa.me/?text=${encodeURIComponent(m)}`,'_blank');}}
                 style={{flex:1,padding:'12px',borderRadius:3,border:'none',background:BTN,fontSize:'0.68rem',fontFamily:ff,cursor:'pointer',color:'#fff',display:'flex',alignItems:'center',justifyContent:'center',gap:6}}>
                 <MessageCircle size={13} strokeWidth={1.5}/>WhatsApp</button>
             </div>
