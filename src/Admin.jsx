@@ -11,7 +11,14 @@ const sbDel = async (p) => { const r = await fetch(`${SB}/rest/v1/${p}`, { metho
 
 const PASS = 'jlab2024';
 const DAYS = ['日', '一', '二', '三', '四', '五', '六'];
-const ALL_TIMES = ['10:00','10:30','11:00','11:30','12:00','12:30','13:00','13:30','14:00','14:30','15:00','15:30','16:00','16:30','17:00','17:30','18:00','18:30','19:00','19:30','20:00'];
+
+/* ── 24 小時時段（每 30 分鐘） ── */
+const ALL_TIMES = [];
+for (let h = 0; h < 24; h++) {
+  for (let m = 0; m < 60; m += 30) {
+    ALL_TIMES.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
+  }
+}
 
 const TEMPLATES = [
   { label: '全日班', desc: '10:00 — 19:00', from: '10:00', to: '19:00', icon: '☀️' },
@@ -40,11 +47,14 @@ export default function Admin() {
   const [selDay, setSelDay] = useState(1);
   const [slLoading, setSlLoading] = useState(false);
 
-  // NEW: Batch
+  /* ── 月曆 ── */
+  const [calYear, setCalYear] = useState(new Date().getFullYear());
+  const [calMonth, setCalMonth] = useState(new Date().getMonth());
+
+  /* ── 批量 ── */
   const [selDays, setSelDays] = useState([]);
   const [rangeFrom, setRangeFrom] = useState('10:00');
   const [rangeTo, setRangeTo] = useState('19:00');
-  const [copyFrom, setCopyFrom] = useState(1);
   const [batchLoading, setBatchLoading] = useState(false);
   const [toast, setToast] = useState('');
 
@@ -56,13 +66,39 @@ export default function Admin() {
 
   const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(''), 3000); };
 
+  /* ══════ 月曆工具 ══════ */
+  const getCalendarDays = () => {
+    const startDow = new Date(calYear, calMonth, 1).getDay();
+    const totalDays = new Date(calYear, calMonth + 1, 0).getDate();
+    const days = [];
+    for (let i = 0; i < startDow; i++) days.push(null);
+    for (let d = 1; d <= totalDays; d++) days.push(d);
+    return days;
+  };
+
+  const todayStr = new Date().toISOString().split('T')[0];
+  const isToday = (dayNum) => {
+    if (!dayNum) return false;
+    return `${calYear}-${String(calMonth + 1).padStart(2, '0')}-${String(dayNum).padStart(2, '0')}` === todayStr;
+  };
+
+  const prevMonth = () => { if (calMonth === 0) { setCalYear(y => y - 1); setCalMonth(11); } else setCalMonth(m => m - 1); };
+  const nextMonth = () => { if (calMonth === 11) { setCalYear(y => y + 1); setCalMonth(0); } else setCalMonth(m => m + 1); };
+
+  const toggleBatchDay = (dow) => {
+    setSelDays(prev => prev.includes(dow) ? prev.filter(d => d !== dow) : [...prev, dow].sort());
+  };
+
+  const calendarDays = getCalendarDays();
+
+  /* ══════ 登入 ══════ */
   const handleLogin = (e) => {
     e.preventDefault();
     if (pw === PASS) { setAuth(true); fetchBookings(); fetchSlots(); fetchBlocked(); }
     else alert('密碼錯誤！');
   };
 
-  // ── Bookings ──
+  /* ══════ 預約 ══════ */
   const fetchBookings = async () => {
     setBkLoading(true);
     try {
@@ -103,7 +139,7 @@ export default function Admin() {
 
   useEffect(() => { if (auth) fetchBookings(); }, [filterDate, filterStatus]);
 
-  // ── Time Slots ──
+  /* ══════ 時段 ══════ */
   const fetchSlots = async () => {
     setSlLoading(true);
     try { const data = await sbGet('time_slots?order=day_of_week,time'); setSlots(data || []); } catch (e) { console.error(e); }
@@ -124,11 +160,7 @@ export default function Admin() {
     } catch (e) { console.error(e); }
   };
 
-  // ── NEW: Batch Operations ──
-  const toggleBatchDay = (day) => {
-    setSelDays(prev => prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day].sort());
-  };
-
+  /* ══════ 批量操作 ══════ */
   const applyTemplate = async (tmpl) => {
     if (selDays.length === 0) { alert('請先選擇要套用嘅日期！'); return; }
     const dayNames = selDays.map(d => `週${DAYS[d]}`).join('、');
@@ -159,27 +191,7 @@ export default function Admin() {
     setBatchLoading(false);
   };
 
-  const copySchedule = async () => {
-    const targets = selDays.filter(d => d !== copyFrom);
-    if (targets.length === 0) { alert('請選擇至少一個目標日期（不能與來源相同）！'); return; }
-    const targetNames = targets.map(d => `週${DAYS[d]}`).join('、');
-    if (!window.confirm(`複製「週${DAYS[copyFrom]}」→ ${targetNames}？\n\n⚠️ 目標日期嘅設定會被覆蓋`)) return;
-    setBatchLoading(true);
-    try {
-      const sourceSlots = slots.filter(s => s.day_of_week === copyFrom);
-      const activeTimes = sourceSlots.filter(s => s.is_active).map(s => s.time);
-      const dayList = targets.join(',');
-      await sbPatch(`time_slots?day_of_week=in.(${dayList})`, { is_active: false });
-      for (const time of activeTimes) {
-        await sbPatch(`time_slots?day_of_week=in.(${dayList})&time=eq.${time}`, { is_active: true });
-      }
-      await fetchSlots();
-      showToast(`✅ 已將週${DAYS[copyFrom]}排程複製到 ${targetNames}`);
-    } catch (e) { console.error(e); alert('操作失敗：' + e.message); }
-    setBatchLoading(false);
-  };
-
-  // ── Blocked Dates ──
+  /* ══════ 封鎖日期 ══════ */
   const fetchBlocked = async () => {
     try { const data = await sbGet('blocked_dates?order=date'); setBlocked(data || []); } catch (e) { console.error(e); }
   };
@@ -195,21 +207,22 @@ export default function Admin() {
     try { await sbDel(`blocked_dates?id=eq.${id}`); setBlocked(prev => prev.filter(b => b.id !== id)); } catch (e) { console.error(e); }
   };
 
-  // ── Helpers ──
+  /* ══════ Helpers ══════ */
   const statusColor = (s) => s === 'confirmed' ? '#4CAF50' : s === 'cancelled' ? '#f44336' : s === 'completed' ? '#2196F3' : '#FF9800';
   const statusText = (s) => s === 'confirmed' ? '已確認' : s === 'cancelled' ? '已取消' : s === 'completed' ? '已完成' : '待確認';
 
   const daySlots = slots.filter(s => s.day_of_week === selDay);
   const activeCount = daySlots.filter(s => s.is_active).length;
 
-  // ── Summary for batch preview ──
   const batchSummary = selDays.map(d => {
     const ds = slots.filter(s => s.day_of_week === d);
     const ac = ds.filter(s => s.is_active).length;
     return { day: d, total: ds.length, active: ac };
   });
 
-  // ══════════════════════════════
+  /* ══════════════════════════════ */
+  /* 登入畫面                        */
+  /* ══════════════════════════════ */
   if (!auth) {
     return (
       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(135deg, #f5f0eb 0%, #e8e0d8 100%)', fontFamily: font }}>
@@ -224,12 +237,14 @@ export default function Admin() {
     );
   }
 
-  // ══════════════════════════════
+  /* ══════════════════════════════ */
+  /* 主介面                          */
+  /* ══════════════════════════════ */
   return (
     <div style={{ minHeight: '100vh', background: '#f5f0eb', fontFamily: font }}>
       {/* Toast */}
       {toast && (
-        <div style={{ position: 'fixed', top: 20, left: '50%', transform: 'translateX(-50%)', background: '#5c4a3a', color: '#fff', padding: '12px 28px', borderRadius: 8, fontSize: 14, zIndex: 9999, boxShadow: '0 4px 20px rgba(0,0,0,0.2)', animation: 'fadeIn 0.3s' }}>
+        <div style={{ position: 'fixed', top: 20, left: '50%', transform: 'translateX(-50%)', background: '#5c4a3a', color: '#fff', padding: '12px 28px', borderRadius: 8, fontSize: 14, zIndex: 9999, boxShadow: '0 4px 20px rgba(0,0,0,0.2)' }}>
           {toast}
         </div>
       )}
@@ -346,7 +361,7 @@ export default function Admin() {
           </>
         )}
 
-        {/* ══════ TAB: TIME SLOTS (全新批量版) ══════ */}
+        {/* ══════ TAB: TIME SLOTS ══════ */}
         {tab === 'timeslots' && (
           <>
             {/* Loading overlay */}
@@ -359,33 +374,57 @@ export default function Admin() {
               </div>
             )}
 
-            {/* ─── Section 1: 選擇日期 ─── */}
+            {/* ─── Section 1: 月曆選擇星期 ─── */}
             <div style={card}>
-              <div style={sectionTitle}>📅 選擇日期（可多選）</div>
-              <div style={sectionDesc}>先選擇要設定嘅日期，再用下方工具批量操作</div>
+              <div style={sectionTitle}>📅 選擇星期（月曆檢視）</div>
+              <div style={sectionDesc}>點選日期或星期標題，選取對應「星期幾」嘅每週時段設定</div>
 
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
+              {/* 月份導航 */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                <button onClick={prevMonth} style={{ padding: '8px 16px', background: '#f5f0eb', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 16, color: '#5c4a3a', fontFamily: font }}>◀</button>
+                <span style={{ fontSize: 17, fontWeight: 600, color: '#5c4a3a' }}>{calYear}年 {calMonth + 1}月</span>
+                <button onClick={nextMonth} style={{ padding: '8px 16px', background: '#f5f0eb', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 16, color: '#5c4a3a', fontFamily: font }}>▶</button>
+              </div>
+
+              {/* 月曆 */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 4 }}>
+                {/* 星期標題列（可點選） */}
                 {DAYS.map((d, i) => {
                   const sel = selDays.includes(i);
-                  const ds = slots.filter(s => s.day_of_week === i);
-                  const ac = ds.filter(s => s.is_active).length;
                   return (
-                    <button key={i} onClick={() => toggleBatchDay(i)} style={{
-                      padding: '12px 16px', borderRadius: 8, border: `2px solid ${sel ? '#5c4a3a' : '#e0d8cc'}`,
-                      background: sel ? '#5c4a3a' : '#fff', color: sel ? '#fff' : '#5c4a3a',
-                      cursor: 'pointer', fontFamily: font, fontSize: 14, fontWeight: 500, minWidth: 70, textAlign: 'center',
+                    <button key={`h${i}`} onClick={() => toggleBatchDay(i)} style={{
+                      padding: '10px 0', borderRadius: 8, border: 'none', cursor: 'pointer',
+                      background: sel ? '#5c4a3a' : '#f0ebe3',
+                      color: sel ? '#fff' : '#5c4a3a',
+                      fontSize: 13, fontWeight: 600, fontFamily: font,
                       transition: 'all 0.2s',
-                    }}>
-                      <div>週{d}</div>
-                      <div style={{ fontSize: 11, opacity: 0.7, marginTop: 2 }}>{ac}/{ds.length}</div>
-                    </button>
+                    }}>{d}</button>
+                  );
+                })}
+
+                {/* 日期格子 */}
+                {calendarDays.map((day, i) => {
+                  if (!day) return <div key={`e${i}`} />;
+                  const dow = new Date(calYear, calMonth, day).getDay();
+                  const sel = selDays.includes(dow);
+                  const today = isToday(day);
+                  return (
+                    <button key={`d${i}`} onClick={() => toggleBatchDay(dow)} style={{
+                      padding: '12px 4px', borderRadius: 8, cursor: 'pointer',
+                      border: today ? '2px solid #FF9800' : '2px solid transparent',
+                      background: sel ? '#e8e0d8' : 'transparent',
+                      color: sel ? '#5c4a3a' : '#bbb',
+                      fontSize: 14, fontWeight: today ? 700 : 400,
+                      fontFamily: font, transition: 'all 0.15s',
+                    }}>{day}</button>
                   );
                 })}
               </div>
 
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <button onClick={() => setSelDays([1, 2, 3, 4, 5])} style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid #d0c8bc', background: '#faf6f0', color: '#5c4a3a', cursor: 'pointer', fontSize: 12, fontFamily: font }}>平日 (一至五)</button>
-                <button onClick={() => setSelDays([0, 6])} style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid #d0c8bc', background: '#faf6f0', color: '#5c4a3a', cursor: 'pointer', fontSize: 12, fontFamily: font }}>週末 (六日)</button>
+              {/* 快速選擇 */}
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 16 }}>
+                <button onClick={() => setSelDays([1, 2, 3, 4, 5])} style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid #d0c8bc', background: '#faf6f0', color: '#5c4a3a', cursor: 'pointer', fontSize: 12, fontFamily: font }}>平日（一至五）</button>
+                <button onClick={() => setSelDays([0, 6])} style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid #d0c8bc', background: '#faf6f0', color: '#5c4a3a', cursor: 'pointer', fontSize: 12, fontFamily: font }}>週末（六日）</button>
                 <button onClick={() => setSelDays([0, 1, 2, 3, 4, 5, 6])} style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid #d0c8bc', background: '#faf6f0', color: '#5c4a3a', cursor: 'pointer', fontSize: 12, fontFamily: font }}>全選</button>
                 <button onClick={() => setSelDays([])} style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid #d0c8bc', background: '#faf6f0', color: '#999', cursor: 'pointer', fontSize: 12, fontFamily: font }}>清除</button>
               </div>
@@ -418,9 +457,9 @@ export default function Admin() {
               </div>
             </div>
 
-            {/* ─── Section 3: 自訂範圍 ─── */}
+            {/* ─── Section 3: 自訂範圍（24 小時） ─── */}
             <div style={card}>
-              <div style={sectionTitle}>🎯 自訂時段範圍</div>
+              <div style={sectionTitle}>🎯 自訂時段範圍（24 小時）</div>
               <div style={sectionDesc}>選擇時間範圍，批量開放或關閉{selDays.length === 0 && <span style={{ color: '#c00' }}> — 請先選擇日期</span>}</div>
 
               <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -443,25 +482,7 @@ export default function Admin() {
               </div>
             </div>
 
-            {/* ─── Section 4: 複製排程 ─── */}
-            <div style={card}>
-              <div style={sectionTitle}>📋 複製排程</div>
-              <div style={sectionDesc}>將某一日嘅排程複製到已選日期{selDays.length === 0 && <span style={{ color: '#c00' }}> — 請先選擇目標日期</span>}</div>
-
-              <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-                <span style={{ fontSize: 13, color: '#666' }}>將</span>
-                <select value={copyFrom} onChange={e => setCopyFrom(Number(e.target.value))} style={{ padding: '10px 14px', border: '1px solid #ddd', borderRadius: 6, fontSize: 14, fontFamily: font }}>
-                  {DAYS.map((d, i) => <option key={i} value={i}>週{d}</option>)}
-                </select>
-                <span style={{ fontSize: 13, color: '#666' }}>嘅排程複製到已選日期</span>
-                <button onClick={copySchedule} disabled={selDays.length === 0} style={{
-                  padding: '10px 20px', borderRadius: 6, border: 'none', background: selDays.length === 0 ? '#ccc' : '#5c4a3a',
-                  color: '#fff', cursor: selDays.length === 0 ? 'not-allowed' : 'pointer', fontSize: 13, fontFamily: font, fontWeight: 500,
-                }}>執行複製</button>
-              </div>
-            </div>
-
-            {/* ─── Section 5: 已選日期摘要 ─── */}
+            {/* ─── Section 4: 已選日期摘要 ─── */}
             {batchSummary.length > 0 && (
               <div style={card}>
                 <div style={sectionTitle}>📊 已選日期時段概覽</div>
@@ -477,7 +498,7 @@ export default function Admin() {
               </div>
             )}
 
-            {/* ─── Section 6: 單日微調 ─── */}
+            {/* ─── Section 5: 單日微調 ─── */}
             <div style={card}>
               <div style={sectionTitle}>🔧 單日微調</div>
               <div style={sectionDesc}>撳個別時段開/關，啡色 = 開放，淺色 = 關閉</div>
