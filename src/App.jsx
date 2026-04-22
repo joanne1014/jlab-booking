@@ -17,7 +17,11 @@ const DA_BG='#ece4d0',DA_BD='#ccc0a4',DA_TX='#7a7258';
 const DR_BG='#e6d4cc',DR_BD='#c4aea4',DR_TX='#785a50';
 const WDN=['日','一','二','三','四','五','六'];
 const MEN=['','JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
-const ALL_TIMES=['10:00','10:30','11:00','11:30','12:00','12:30','13:00','13:30','14:00','14:30','15:00','15:30','16:00','16:30','17:00','17:30','18:00','18:30','19:00','19:30','20:00'];
+
+/* ═══════════════════════════════════════════════════════
+   🔥 移除咗舊嘅 ALL_TIMES
+   前台唔再寫死時段，全部由 admin 後台 enabled_timeslots 決定
+   ═══════════════════════════════════════════════════════ */
 
 const parseD=s=>{const[y,m,d]=s.split('-').map(Number);const dt=new Date(y,m-1,d);return{day:d,mo:m,me:MEN[m],wd:dt.getDay()};};
 const getDC=s=>{if(s==='limited')return{bg:DA_BG,bd:DA_BD,tx:DA_TX};if(s==='full')return{bg:DR_BG,bd:DR_BD,tx:DR_TX};return{bg:DV_BG,bd:DV_BD,tx:DV_TX};};
@@ -32,8 +36,14 @@ export default function App(){
   const [addonsList,setAddons]=useState([]);
   const [techList,setTechs]=useState([]);
   const [dateList,setDates]=useState([]);
-  const [disabledTimes,setDisabledTimes]=useState(new Set());
+
+  /* ═══════════════════════════════════════════════════════
+     🔥 新：用 enabledTimes 取代舊嘅 disabledTimes
+     enabledTimes = admin 後台開放嘅時段（從 enabled_timeslots 讀取）
+     ═══════════════════════════════════════════════════════ */
+  const [enabledTimes,setEnabledTimes]=useState([]);
   const [dateBookings,setDateBookings]=useState([]);
+
   const [loading,setLoading]=useState(true);
   const [loadErr,setLoadErr]=useState(null);
   const [slotsLoading,setSlotsLoading]=useState(false);
@@ -57,11 +67,6 @@ export default function App(){
 
   useEffect(()=>{if(!document.getElementById('p3f')){const l=document.createElement('link');l.id='p3f';l.rel='stylesheet';l.href='https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,600;1,400&family=Noto+Serif+TC:wght@200;300;400;500;600&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300;1,400&display=swap';document.head.appendChild(l);}},[]);
 
-  /* ═══════════════════════════════════════════════════════
-     🔧 修正 1：載入可用日期
-     - 改用 status=eq.available（只顯示明確開放嘅日期）
-     - 加入 blocked_dates 過濾
-     ═══════════════════════════════════════════════════════ */
   const loadAll=useCallback(async()=>{
     setLoading(true);setLoadErr(null);
     try{
@@ -76,7 +81,6 @@ export default function App(){
       ]);
       setSvcs(svcs);setVars(vars);setAddons(adds);setTechs(techs);
 
-      // 過濾掉封鎖日期
       const blockedSet=new Set((blocked||[]).map(b=>b.date));
       const availDates=(dts||[]).filter(d=>!blockedSet.has(d.available_date));
 
@@ -89,28 +93,28 @@ export default function App(){
   useEffect(()=>{loadAll();},[loadAll]);
 
   /* ═══════════════════════════════════════════════════════
-     🔧 修正 2：載入時段
-     - slot_time 加 .slice(0,5) 統一格式
-       DB 返回 '10:00:00'，前台用 '10:00'
-       唔 slice 就永遠 match 唔到 → 呢個係同步失敗嘅根本原因
+     🔥 新：載入時段 — 讀 enabled_timeslots 而唔係 disabled_timeslots
+     
+     舊邏輯：讀 disabled → 從 ALL_TIMES 扣除 → 剩低嘅係可用
+     新邏輯：讀 enabled → 呢啲就係可用時段（admin 開咗咩就顯示咩）
      ═══════════════════════════════════════════════════════ */
   useEffect(()=>{
-    if(!selDate){setDisabledTimes(new Set());setDateBookings([]);return;}
+    if(!selDate){setEnabledTimes([]);setDateBookings([]);return;}
     let c=false;
     const fetchSlots=async(showLoading)=>{
       if(showLoading)setSlotsLoading(true);
       try{
-        const [dis,bks]=await Promise.all([
-          sbGet(`disabled_timeslots?slot_date=eq.${selDate}`),
+        const [enabled,bks]=await Promise.all([
+          sbGet(`enabled_timeslots?slot_date=eq.${selDate}&order=slot_time`),
           sbGet(`bookings?select=booking_time,technician_id&booking_date=eq.${selDate}&status=neq.cancelled`)
         ]);
         if(!c){
-          // ✅ 關鍵修正：.slice(0,5) 將 '10:00:00' 轉為 '10:00'
-          setDisabledTimes(new Set((dis||[]).map(s=>(s.slot_time||'').slice(0,5))));
+          // ✅ 直接用 admin 開放嘅時段，.slice(0,5) 統一格式
+          setEnabledTimes((enabled||[]).map(s=>(s.slot_time||'').slice(0,5)));
           setDateBookings((bks||[]).map(b=>({...b,booking_time:(b.booking_time||'').slice(0,5)})));
         }
       }catch(e){
-        if(!c){setDisabledTimes(new Set());setDateBookings([]);}
+        if(!c){setEnabledTimes([]);setDateBookings([]);}
       }
       if(!c&&showLoading)setSlotsLoading(false);
     };
@@ -131,9 +135,26 @@ export default function App(){
     return Math.max(real.length,1);
   },[techList]);
 
+  /* ═══════════════════════════════════════════════════════
+     🔥 新：slots 計算邏輯
+     
+     舊：ALL_TIMES.map → 檢查 disabledTimes → 檢查 bookings
+     新：enabledTimes.map → 檢查 bookings（已經只有 admin 開放嘅時段）
+     
+     額外：過濾今日已過嘅時段
+     ═══════════════════════════════════════════════════════ */
   const slots=useMemo(()=>{
-    return ALL_TIMES.map(t=>{
-      if(disabledTimes.has(t))return{slot_time:t,is_available:false,booked:false};
+    const now=new Date();
+    const todayStr=now.toISOString().split('T')[0];
+    const currentMins=now.getHours()*60+now.getMinutes();
+
+    return enabledTimes.map(t=>{
+      // 今日已過嘅時段
+      if(selDate===todayStr){
+        const [h,m]=t.split(':').map(Number);
+        if(h*60+m<=currentMins)return{slot_time:t,is_available:false,booked:false,passed:true};
+      }
+
       const bks=dateBookings.filter(b=>b.booking_time===t);
       if(bks.length>=maxPerSlot)return{slot_time:t,is_available:false,booked:true};
       if(tid&&tid!==randomTechId){
@@ -141,7 +162,7 @@ export default function App(){
       }
       return{slot_time:t,is_available:true,booked:false};
     });
-  },[disabledTimes,dateBookings,tid,randomTechId,maxPerSlot]);
+  },[enabledTimes,dateBookings,tid,randomTechId,maxPerSlot,selDate]);
 
   useEffect(()=>{
     if(!tm||!selDate)return;
@@ -165,11 +186,17 @@ export default function App(){
   const total=sp+ap+tp;
   const ad=dateList.find(d=>d.available_date===selDate);
   const canGo=sid!==null&&selDate!==null&&tm&&nm.trim()&&ph.trim()&&tid!==null;
+
+  /* ═══════════════════════════════════════════════════════
+     🔥 時段分組：上午 / 下午 / 晚間
+     用 slots（來自 enabledTimes）而唔係 ALL_TIMES
+     ═══════════════════════════════════════════════════════ */
   const amSlots=slots.filter(s=>{const h=parseInt(s.slot_time);return h<13;});
   const pmSlots=slots.filter(s=>{const h=parseInt(s.slot_time);return h>=13&&h<17;});
   const evSlots=slots.filter(s=>{const h=parseInt(s.slot_time);return h>=17;});
+
   const tao=id=>setAo(p=>p.includes(id)?p.filter(x=>x!==id):[...p,id]);
-  const pick=id=>{setSid(id);setSelDate(null);setTm(null);setDisabledTimes(new Set());setDateBookings([]);if(step<2)setStep(2);scrollTo(2);};
+  const pick=id=>{setSid(id);setSelDate(null);setTm(null);setEnabledTimes([]);setDateBookings([]);if(step<2)setStep(2);scrollTo(2);};
   const pickDate=ds=>{setSelDate(ds);setTm(null);if(step<3)setStep(3);scrollTo(5);};
   const pickTime=t=>{setTm(t);if(step<4)setStep(4);scrollTo(6);};
 
@@ -190,9 +217,10 @@ export default function App(){
       <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:7}}>
         {arr.map(s=>{const sel=tm===s.slot_time;const dis=!s.is_available;return(
           <motion.div key={s.slot_time} whileTap={dis?{}:{scale:0.96}} onClick={()=>{if(!dis)pickTime(s.slot_time);}}
-            style={{textAlign:'center',padding:s.booked?'9px 6px':'13px 6px',borderRadius:3,fontFamily:fc,fontSize:'0.88rem',letterSpacing:'0.06em',fontWeight:sel?500:400,border:`1px solid ${sel?PD:dis&&s.booked?DR_BD:CB}`,cursor:dis?'not-allowed':'pointer',background:sel?P:dis&&s.booked?'#f5ece8':dis?'#ebe4da':'#fff',color:sel?'#fff':dis?TLL:TX,opacity:dis?0.35:1,textDecoration:dis?'line-through':'none',transition:'all 0.2s'}}>
+            style={{textAlign:'center',padding:s.booked?'9px 6px':s.passed?'9px 6px':'13px 6px',borderRadius:3,fontFamily:fc,fontSize:'0.88rem',letterSpacing:'0.06em',fontWeight:sel?500:400,border:`1px solid ${sel?PD:dis&&s.booked?DR_BD:CB}`,cursor:dis?'not-allowed':'pointer',background:sel?P:dis&&s.booked?'#f5ece8':dis?'#ebe4da':'#fff',color:sel?'#fff':dis?TLL:TX,opacity:dis?0.35:1,textDecoration:dis?'line-through':'none',transition:'all 0.2s'}}>
             {s.slot_time}
             {dis&&s.booked&&<div style={{fontSize:'0.34rem',color:DR_TX,marginTop:1,textDecoration:'none',opacity:1}}>已約滿</div>}
+            {dis&&s.passed&&<div style={{fontSize:'0.34rem',color:TLL,marginTop:1,textDecoration:'none',opacity:1}}>已過</div>}
           </motion.div>);})}
       </div></div>);};
 
@@ -323,6 +351,12 @@ export default function App(){
             </div>
           )}
           {slotsLoading?(<div style={{textAlign:'center',padding:'24px 0'}}><motion.div animate={{rotate:360}} transition={{repeat:Infinity,duration:1,ease:'linear'}} style={{display:'inline-block'}}><Loader size={20} color={P} strokeWidth={1.5}/></motion.div></div>):(<>
+            {/* 🔥 新：如果 admin 無開放任何時段 */}
+            {enabledTimes.length===0&&selDate&&!slotsLoading&&(
+              <div style={{textAlign:'center',padding:'24px 0',fontSize:'0.68rem',color:TL}}>
+                此日期暫無可預約時段
+              </div>
+            )}
             {renderTG('上午 MORNING',amSlots)}
             {renderTG('下午 AFTERNOON',pmSlots)}
             {renderTG('晚間 EVENING',evSlots)}
