@@ -77,11 +77,9 @@ export default function App(){
 
   useEffect(()=>{loadAll();},[loadAll]);
 
-  /* ========== 改咗呢段：自動刷新時段 ========== */
   useEffect(()=>{
     if(!selDate){setDisabledTimes(new Set());setDateBookings([]);return;}
     let c=false;
-
     const fetchSlots=async(showLoading)=>{
       if(showLoading)setSlotsLoading(true);
       try{
@@ -98,20 +96,12 @@ export default function App(){
       }
       if(!c&&showLoading)setSlotsLoading(false);
     };
-
-    // 第一次載入（顯示 loading）
     fetchSlots(true);
-
-    // 每 30 秒靜默刷新（Admin 刪除後客人自動見到）
     const interval=setInterval(()=>fetchSlots(false),30000);
-
-    // 客人切回瀏覽器 tab 時即時刷新
     const onFocus=()=>fetchSlots(false);
     window.addEventListener('focus',onFocus);
-
     return()=>{c=true;clearInterval(interval);window.removeEventListener('focus',onFocus);};
   },[selDate]);
-  /* ========== 改完 ========== */
 
   const randomTechId=useMemo(()=>{
     const rt=techList.find(t=>t.label.includes('隨機'));
@@ -237,7 +227,17 @@ export default function App(){
               </div>
               <div style={{fontSize:'0.66rem',color:TM,margin:'8px 0 4px',lineHeight:1.7,fontWeight:300}}>{s.description_zh}</div>
               <div style={{fontFamily:fc,fontSize:'0.62rem',color:TL,lineHeight:1.6,fontStyle:'italic'}}>{s.description_en}</div>
-              <div style={{display:'flex',alignItems:'center',gap:5,marginTop:10}}><Clock size={11} color={TL} strokeWidth={1.5}/><span style={{fontSize:'0.56rem',color:TL,fontWeight:300}}>{s.duration_zh}</span></div>
+
+              {/* ✅ 修改 1：時間顯示 — 加咗 fallback，冇 duration_zh 就用 duration 數字 */}
+              {(s.duration_zh || s.duration) ? (
+                <div style={{display:'flex',alignItems:'center',gap:5,marginTop:10}}>
+                  <Clock size={11} color={TL} strokeWidth={1.5}/>
+                  <span style={{fontSize:'0.56rem',color:TL,fontWeight:300}}>
+                    {s.duration_zh || `約 ${s.duration} 分鐘`}
+                  </span>
+                </div>
+              ) : null}
+
               {hv&&sel&&(<div style={{display:'flex',flexWrap:'wrap',gap:8,marginTop:14}}>
                 {sv_.map((v,idx)=>{const vs=(vi[s.id]||0)===idx;return(
                   <button key={v.id} onClick={e=>{e.stopPropagation();setVi(p=>({...p,[s.id]:idx}));}}
@@ -375,9 +375,27 @@ export default function App(){
         <div style={{textAlign:'center',fontSize:'0.48rem',color:TLL,lineHeight:1.8,marginTop:8}}>提交後我們將透過 WhatsApp 與您確認預約</div>
       </div>
 
+      {/* ✅ 修改 2：Footer 加入 Admin 登入連結 */}
       <div style={{background:'#1a1814',padding:'28px 22px',textAlign:'center'}}>
         <div style={{fontFamily:fp,fontSize:'0.9rem',fontWeight:500,color:P,fontStyle:'italic'}}>J.LAB</div>
         <div style={{fontFamily:fc,fontSize:'0.5rem',letterSpacing:'0.2em',color:'#665e52',marginTop:8,fontStyle:'italic'}}>LASH & BEAUTY STUDIO</div>
+        <a href="/admin" style={{
+          display:'inline-block',
+          marginTop:18,
+          fontSize:'0.42rem',
+          color:'#565248',
+          textDecoration:'none',
+          letterSpacing:'0.12em',
+          fontFamily:fc,
+          fontStyle:'italic',
+          borderBottom:'1px solid #3a3632',
+          paddingBottom:2,
+          opacity:0.6,
+          transition:'opacity 0.2s'
+        }}
+        onMouseEnter={e=>e.target.style.opacity='1'}
+        onMouseLeave={e=>e.target.style.opacity='0.6'}
+        >ADMIN</a>
       </div>
 
       <AnimatePresence>{done&&(
