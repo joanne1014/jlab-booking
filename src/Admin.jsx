@@ -1,29 +1,28 @@
 import { useState, useEffect, useCallback } from 'react';
 
+/* ═══════════════════ API ═══════════════════ */
 const SB = 'https://vqyfbwnkdpncwvdonbcz.supabase.co';
 const SK = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZxeWZid25rZHBuY3d2ZG9uYmN6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY2MDk1MTksImV4cCI6MjA5MjE4NTUxOX0.hMHq_HcpnjiF-4zwSznyMpMx5Ooao5hDhaMi4aXME3M';
 const H = { apikey: SK, Authorization: `Bearer ${SK}`, 'Content-Type': 'application/json' };
 
 const sbGet = async (p) => { const r = await fetch(`${SB}/rest/v1/${p}`, { headers: H }); if (!r.ok) throw new Error(await r.text()); return r.json(); };
 const sbPost = async (t, d) => { const r = await fetch(`${SB}/rest/v1/${t}`, { method: 'POST', headers: { ...H, Prefer: 'return=representation' }, body: JSON.stringify(d) }); if (!r.ok) throw new Error(await r.text()); return r.json(); };
-const sbPatch = async (p, d) => { const r = await fetch(`${SB}/rest/v1/${p}`, { method: 'PATCH', headers: { ...H, Prefer: 'return=representation' }, body: JSON.stringify(d) }); if (!r.ok) throw new Error(await r.text()); return r.json(); };
 const sbDel = async (p) => { const r = await fetch(`${SB}/rest/v1/${p}`, { method: 'DELETE', headers: H }); if (!r.ok) throw new Error(await r.text()); };
-const sbUpsert = async (t, d) => { const r = await fetch(`${SB}/rest/v1/${t}`, { method: 'POST', headers: { ...H, Prefer: 'return=representation,resolution=merge-duplicates' }, body: JSON.stringify(d) }); if (!r.ok) throw new Error(await r.text()); return r.json(); };
+const sbPatch = async (p, d) => { const r = await fetch(`${SB}/rest/v1/${p}`, { method: 'PATCH', headers: { ...H, Prefer: 'return=representation' }, body: JSON.stringify(d) }); if (!r.ok) throw new Error(await r.text()); return r.json(); };
 
+/* ═══════════════════ CONSTANTS ═══════════════════ */
 const PASS = 'jlab2024';
 const DAYS = ['日', '一', '二', '三', '四', '五', '六'];
-
-/* 前台顯示嘅時段（必須同 App.jsx 一致） */
-const FRONT_TIMES = ['10:00','10:30','11:00','11:30','12:00','12:30','13:00','13:30','14:00','14:30','15:00','15:30','16:00','16:30','17:00','17:30','18:00','18:30','19:00','19:30','20:00'];
-
+const FRONT_TIMES = [
+  '10:00','10:30','11:00','11:30','12:00','12:30',
+  '13:00','13:30','14:00','14:30','15:00','15:30',
+  '16:00','16:30','17:00','17:30','18:00','18:30',
+  '19:00','19:30','20:00'
+];
 const ALL_TIMES = [];
-for (let h = 0; h < 24; h++) {
-  for (let m = 0; m < 60; m += 30) {
-    ALL_TIMES.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
-  }
-}
+for (let h = 0; h < 24; h++) for (let m = 0; m < 60; m += 30) ALL_TIMES.push(`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`);
 
-const TEMPLATE_INIT = [
+const TEMPLATES = [
   { label: '全日班', from: '10:00', to: '19:00', icon: '☀️' },
   { label: '上午班', from: '10:00', to: '13:30', icon: '🌅' },
   { label: '下午班', from: '14:00', to: '19:00', icon: '🌇' },
@@ -31,140 +30,282 @@ const TEMPLATE_INIT = [
   { label: '休息日', from: null, to: null, icon: '💤' },
 ];
 
-const BREAK_INIT = [
-  { label: '午休', from: '13:00', to: '14:00', icon: '🍽️' },
-  { label: '茶息', from: '15:30', to: '16:00', icon: '☕' },
-];
-
+/* ═══════════════════ STYLES ═══════════════════ */
 const card = { background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 2px 10px rgba(0,0,0,0.05)', marginBottom: 20 };
-const sectionTitle = { fontSize: 15, fontWeight: 600, color: '#5c4a3a', marginBottom: 6 };
-const sectionDesc = { fontSize: 13, color: '#999', marginBottom: 16 };
+const sTitle = { fontSize: 15, fontWeight: 600, color: '#5c4a3a', marginBottom: 6 };
+const sDesc = { fontSize: 13, color: '#999', marginBottom: 16 };
+const font = "'Noto Serif TC', serif";
 
+/* ═══════════════════ COMPONENT ═══════════════════ */
 export default function Admin() {
+  /* ── Auth ── */
   const [auth, setAuth] = useState(false);
   const [pw, setPw] = useState('');
   const [tab, setTab] = useState('bookings');
+  const [toast, setToast] = useState('');
 
+  /* ── Bookings ── */
   const [bookings, setBookings] = useState([]);
   const [bkLoading, setBkLoading] = useState(false);
   const [filterDate, setFilterDate] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
   const [stats, setStats] = useState({ today: 0, week: 0, month: 0, total: 0 });
 
-  /* ── 批量月曆 ── */
+  /* ── Batch Calendar ── */
   const [calYear, setCalYear] = useState(new Date().getFullYear());
   const [calMonth, setCalMonth] = useState(new Date().getMonth());
   const [selDates, setSelDates] = useState(new Set());
 
-  /* ── 模板 ── */
-  const [templates, setTemplates] = useState(TEMPLATE_INIT.map(t => ({ ...t })));
+  /* ── Pending Changes（核心！）── */
+  const [pending, setPending] = useState({}); // { '2026-04-10': Set(['10:00','10:30',...]) }
+  const [expandedDate, setExpandedDate] = useState(null);
+  const [batchLoading, setBatchLoading] = useState(false);
 
-  /* ── 休息時段 ── */
-  const [breakTemplates, setBreakTemplates] = useState(BREAK_INIT.map(t => ({ ...t })));
+  /* ── Templates ── */
+  const [templates, setTemplates] = useState(TEMPLATES.map(t => ({ ...t })));
+
+  /* ── Break & Range ── */
   const [breakFrom, setBreakFrom] = useState('13:00');
   const [breakTo, setBreakTo] = useState('14:00');
-
-  /* ── 自訂範圍 ── */
   const [rangeFrom, setRangeFrom] = useState('10:00');
   const [rangeTo, setRangeTo] = useState('19:00');
-  const [batchLoading, setBatchLoading] = useState(false);
-  const [toast, setToast] = useState('');
 
-  /* ── 單日微調 ── */
+  /* ── Micro Adjust ── */
   const [microYear, setMicroYear] = useState(new Date().getFullYear());
   const [microMonth, setMicroMonth] = useState(new Date().getMonth());
   const [microDate, setMicroDate] = useState(new Date().toISOString().split('T')[0]);
-  const [microDisabled, setMicroDisabled] = useState(new Set());
-  const [microDateInfo, setMicroDateInfo] = useState(null);
+  const [microTimes, setMicroTimes] = useState(new Set());
+  const [microStatus, setMicroStatus] = useState(null);
   const [microLoading, setMicroLoading] = useState(false);
+  const [microDirty, setMicroDirty] = useState(false);
 
-  /* ── 封鎖日期 ── */
+  /* ── Blocked ── */
   const [blocked, setBlocked] = useState([]);
   const [newBD, setNewBD] = useState('');
   const [newBR, setNewBR] = useState('');
 
-  const font = "'Noto Serif TC', serif";
-  const ddStyle = { padding: '6px 10px', border: '1px solid #ddd', borderRadius: 4, fontSize: 13, fontFamily: font, flex: 1, minWidth: 0 };
-  const navBtnStyle = { padding: '8px 16px', background: '#f5f0eb', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 16, color: '#5c4a3a', fontFamily: font };
-
-  const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(''), 3000); };
-
-  /* ══════ 通用工具 ══════ */
-  const toDateStr = (y, m, d) => `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  const showToast = (m) => { setToast(m); setTimeout(() => setToast(''), 3000); };
   const todayStr = new Date().toISOString().split('T')[0];
-  const isTodayFn = (y, m, dayNum) => dayNum ? toDateStr(y, m, dayNum) === todayStr : false;
+  const toDS = (y, m, d) => `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  const navBtn = { padding: '8px 16px', background: '#f5f0eb', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 16, color: '#5c4a3a', fontFamily: font };
+  const ddStyle = { padding: '6px 10px', border: '1px solid #ddd', borderRadius: 4, fontSize: 13, fontFamily: font, flex: 1, minWidth: 0 };
 
-  /* ══════ 批量月曆 ══════ */
-  const getCalendarDays = (y, m) => {
-    const startDow = new Date(y, m, 1).getDay();
-    const totalDays = new Date(y, m + 1, 0).getDate();
+  /* ═══════════════════ CALENDAR HELPERS ═══════════════════ */
+  const getCalDays = (y, m) => {
+    const dow = new Date(y, m, 1).getDay();
+    const total = new Date(y, m + 1, 0).getDate();
     const days = [];
-    for (let i = 0; i < startDow; i++) days.push(null);
-    for (let d = 1; d <= totalDays; d++) days.push(d);
+    for (let i = 0; i < dow; i++) days.push(null);
+    for (let d = 1; d <= total; d++) days.push(d);
     return days;
   };
 
-  const prevMonth = () => { if (calMonth === 0) { setCalYear(y => y - 1); setCalMonth(11); } else setCalMonth(m => m - 1); };
-  const nextMonth = () => { if (calMonth === 11) { setCalYear(y => y + 1); setCalMonth(0); } else setCalMonth(m => m + 1); };
+  const prevCal = () => { if (calMonth === 0) { setCalYear(y => y - 1); setCalMonth(11); } else setCalMonth(m => m - 1); };
+  const nextCal = () => { if (calMonth === 11) { setCalYear(y => y + 1); setCalMonth(0); } else setCalMonth(m => m + 1); };
 
   const toggleDate = (day) => {
     if (!day) return;
-    const ds = toDateStr(calYear, calMonth, day);
-    setSelDates(prev => { const n = new Set(prev); if (n.has(ds)) n.delete(ds); else n.add(ds); return n; });
+    const ds = toDS(calYear, calMonth, day);
+    setSelDates(prev => { const n = new Set(prev); n.has(ds) ? n.delete(ds) : n.add(ds); return n; });
   };
 
   const toggleWeekdayCol = (dow) => {
-    const totalDays = new Date(calYear, calMonth + 1, 0).getDate();
-    const colDates = [];
-    for (let d = 1; d <= totalDays; d++) {
-      if (new Date(calYear, calMonth, d).getDay() === dow) colDates.push(toDateStr(calYear, calMonth, d));
-    }
+    const total = new Date(calYear, calMonth + 1, 0).getDate();
+    const col = [];
+    for (let d = 1; d <= total; d++) if (new Date(calYear, calMonth, d).getDay() === dow) col.push(toDS(calYear, calMonth, d));
     setSelDates(prev => {
       const n = new Set(prev);
-      const allSel = colDates.every(d => n.has(d));
-      colDates.forEach(d => allSel ? n.delete(d) : n.add(d));
+      const allSel = col.every(d => n.has(d));
+      col.forEach(d => allSel ? n.delete(d) : n.add(d));
       return n;
     });
   };
 
-  const selectByFilter = (filterFn) => {
-    const totalDays = new Date(calYear, calMonth + 1, 0).getDate();
-    const dates = new Set(selDates);
-    for (let d = 1; d <= totalDays; d++) {
-      if (filterFn(new Date(calYear, calMonth, d).getDay())) dates.add(toDateStr(calYear, calMonth, d));
-    }
-    setSelDates(dates);
+  const selectByFilter = (fn) => {
+    const total = new Date(calYear, calMonth + 1, 0).getDate();
+    const n = new Set(selDates);
+    for (let d = 1; d <= total; d++) if (fn(new Date(calYear, calMonth, d).getDay())) n.add(toDS(calYear, calMonth, d));
+    setSelDates(n);
   };
 
-  const isColAllSelected = (dow) => {
-    const totalDays = new Date(calYear, calMonth + 1, 0).getDate();
-    let count = 0;
-    for (let d = 1; d <= totalDays; d++) {
-      if (new Date(calYear, calMonth, d).getDay() === dow) {
-        count++;
-        if (!selDates.has(toDateStr(calYear, calMonth, d))) return false;
+  const isColAllSel = (dow) => {
+    const total = new Date(calYear, calMonth + 1, 0).getDate();
+    let c = 0;
+    for (let d = 1; d <= total; d++) if (new Date(calYear, calMonth, d).getDay() === dow) { c++; if (!selDates.has(toDS(calYear, calMonth, d))) return false; }
+    return c > 0;
+  };
+
+  const calDays = getCalDays(calYear, calMonth);
+
+  /* ═══════════════════ PENDING（本地預覽，未同步）═══════════════════ */
+
+  const applyTemplateLocal = (tmpl) => {
+    const dates = [...selDates];
+    if (!dates.length) return alert('請先選擇日期！');
+    const next = { ...pending };
+    if (!tmpl.from) {
+      dates.forEach(d => { next[d] = new Set(); });
+    } else {
+      const times = FRONT_TIMES.filter(t => t >= tmpl.from && t <= tmpl.to);
+      dates.forEach(d => { next[d] = new Set(times); });
+    }
+    setPending(next);
+    showToast(`✏️ 已預覽「${tmpl.label}」— 請確認後同步到前台`);
+  };
+
+  const applyBreakLocal = () => {
+    const dates = [...selDates].filter(d => pending[d]);
+    if (!dates.length) return alert('請先套用營業模板，再設定休息時段！');
+    if (breakFrom >= breakTo) return alert('開始時間必須早於結束時間！');
+    const next = { ...pending };
+    const bTimes = FRONT_TIMES.filter(t => t >= breakFrom && t < breakTo);
+    dates.forEach(d => {
+      next[d] = new Set(next[d]);
+      bTimes.forEach(t => next[d].delete(t));
+    });
+    setPending(next);
+    showToast(`✏️ 已預覽休息 ${breakFrom}–${breakTo} — 請確認後同步`);
+  };
+
+  const applyRangeLocal = (activate) => {
+    const dates = [...selDates];
+    if (!dates.length) return alert('請先選擇日期！');
+    if (rangeFrom >= rangeTo) return alert('開始必須早於結束！');
+    const next = { ...pending };
+    const rTimes = FRONT_TIMES.filter(t => t >= rangeFrom && t <= rangeTo);
+    dates.forEach(d => {
+      if (!next[d]) next[d] = new Set();
+      else next[d] = new Set(next[d]);
+      rTimes.forEach(t => activate ? next[d].add(t) : next[d].delete(t));
+    });
+    setPending(next);
+    showToast(`✏️ 已預覽${activate ? '開放' : '關閉'} ${rangeFrom}–${rangeTo}`);
+  };
+
+  const togglePendingTime = (date, time) => {
+    setPending(prev => {
+      const next = { ...prev };
+      next[date] = new Set(next[date]);
+      next[date].has(time) ? next[date].delete(time) : next[date].add(time);
+      return next;
+    });
+  };
+
+  const removePendingDate = (date) => {
+    setPending(prev => { const next = { ...prev }; delete next[date]; return next; });
+  };
+
+  const pendingCount = Object.keys(pending).length;
+
+  /* ═══════════════════ SYNC TO DB ═══════════════════ */
+  const syncPending = async () => {
+    const entries = Object.entries(pending);
+    if (!entries.length) return;
+    if (!window.confirm(
+      `確定同步 ${entries.length} 個日期到前台？\n\n` +
+      `客人將立即睇到新嘅可預約時段。\n` +
+      `呢個操作會覆蓋呢啲日期嘅現有設定。`
+    )) return;
+
+    setBatchLoading(true);
+    try {
+      const dates = entries.map(([d]) => d);
+
+      // 1. 清除舊資料
+      await sbDel(`date_availability?available_date=in.(${dates.join(',')})`);
+      await sbDel(`disabled_timeslots?slot_date=in.(${dates.join(',')})`);
+
+      // 2. 寫入 date_availability
+      const availRows = entries.map(([d, times]) => ({
+        available_date: d,
+        status: times.size > 0 ? 'available' : 'closed'
+      }));
+      await sbPost('date_availability', availRows);
+
+      // 3. 寫入 disabled_timeslots（只為開放日期）
+      const disRows = [];
+      entries.forEach(([d, times]) => {
+        if (times.size > 0) {
+          FRONT_TIMES.forEach(t => {
+            if (!times.has(t)) disRows.push({ slot_date: d, slot_time: t });
+          });
+        }
+      });
+      if (disRows.length > 0) {
+        for (let i = 0; i < disRows.length; i += 500) {
+          await sbPost('disabled_timeslots', disRows.slice(i, i + 500));
+        }
       }
+
+      setPending({});
+      setSelDates(new Set());
+      showToast(`✅ 成功同步 ${dates.length} 個日期到前台！`);
+
+      // 如果微調中的日期被同步了，重新載入
+      if (dates.includes(microDate)) fetchMicroData();
+    } catch (e) {
+      console.error(e);
+      alert('同步失敗：' + e.message);
     }
-    return count > 0;
+    setBatchLoading(false);
   };
 
-  const calendarDays = getCalendarDays(calYear, calMonth);
-
-  /* ══════ 單日微調月曆 ══════ */
-  const prevMicroMonth = () => { if (microMonth === 0) { setMicroYear(y => y - 1); setMicroMonth(11); } else setMicroMonth(m => m - 1); };
-  const nextMicroMonth = () => { if (microMonth === 11) { setMicroYear(y => y + 1); setMicroMonth(0); } else setMicroMonth(m => m + 1); };
-  const microCalDays = getCalendarDays(microYear, microMonth);
+  /* ═══════════════════ MICRO ADJUST ═══════════════════ */
+  const prevMicro = () => { if (microMonth === 0) { setMicroYear(y => y - 1); setMicroMonth(11); } else setMicroMonth(m => m - 1); };
+  const nextMicro = () => { if (microMonth === 11) { setMicroYear(y => y + 1); setMicroMonth(0); } else setMicroMonth(m => m + 1); };
+  const microCalDays = getCalDays(microYear, microMonth);
   const microDow = new Date(microDate + 'T00:00:00').getDay();
-  const microActiveCount = FRONT_TIMES.length - microDisabled.size;
 
-  /* ══════ 登入 ══════ */
-  const handleLogin = (e) => {
-    e.preventDefault();
-    if (pw === PASS) { setAuth(true); fetchBookings(); fetchBlocked(); }
-    else alert('密碼錯誤！');
+  const fetchMicroData = useCallback(async () => {
+    setMicroLoading(true);
+    try {
+      const [dateData, disData] = await Promise.all([
+        sbGet(`date_availability?available_date=eq.${microDate}`),
+        sbGet(`disabled_timeslots?slot_date=eq.${microDate}`)
+      ]);
+      const info = dateData?.[0];
+      setMicroStatus(info?.status || null);
+
+      if (!info || info.status !== 'available') {
+        setMicroTimes(new Set());
+      } else {
+        const disSet = new Set((disData || []).map(r => r.slot_time?.slice(0, 5)));
+        setMicroTimes(new Set(FRONT_TIMES.filter(t => !disSet.has(t))));
+      }
+      setMicroDirty(false);
+    } catch (e) { console.error(e); }
+    setMicroLoading(false);
+  }, [microDate]);
+
+  useEffect(() => { if (auth) fetchMicroData(); }, [microDate, auth, fetchMicroData]);
+
+  const toggleMicroTime = (time) => {
+    setMicroTimes(prev => { const n = new Set(prev); n.has(time) ? n.delete(time) : n.add(time); return n; });
+    setMicroDirty(true);
   };
 
-  /* ══════ 預約管理 ══════ */
+  const saveMicro = async () => {
+    if (!window.confirm(`確定儲存 ${microDate}（週${DAYS[microDow]}）嘅時段設定到前台？`)) return;
+    setBatchLoading(true);
+    try {
+      const isOpen = microTimes.size > 0;
+      await sbDel(`date_availability?available_date=eq.${microDate}`);
+      await sbPost('date_availability', [{ available_date: microDate, status: isOpen ? 'available' : 'closed' }]);
+
+      await sbDel(`disabled_timeslots?slot_date=eq.${microDate}`);
+      if (isOpen) {
+        const dis = FRONT_TIMES.filter(t => !microTimes.has(t)).map(t => ({ slot_date: microDate, slot_time: t }));
+        if (dis.length > 0) await sbPost('disabled_timeslots', dis);
+      }
+
+      setMicroDirty(false);
+      setMicroStatus(isOpen ? 'available' : 'closed');
+      showToast(`✅ 已儲存 ${microDate} 到前台`);
+    } catch (e) { console.error(e); alert('儲存失敗：' + e.message); }
+    setBatchLoading(false);
+  };
+
+  /* ═══════════════════ BOOKINGS ═══════════════════ */
   const fetchBookings = async () => {
     setBkLoading(true);
     try {
@@ -173,230 +314,66 @@ export default function Admin() {
       if (filterStatus !== 'all') q += `&status=eq.${filterStatus}`;
       const data = await sbGet(q);
       setBookings(data || []);
-      calcStats(data || []);
+      const today = todayStr;
+      const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0];
+      const monthPre = new Date().toISOString().slice(0, 7);
+      setStats({
+        today: (data || []).filter(b => b.booking_date === today).length,
+        week: (data || []).filter(b => b.booking_date >= weekAgo).length,
+        month: (data || []).filter(b => b.booking_date?.startsWith(monthPre)).length,
+        total: (data || []).length,
+      });
     } catch (e) { console.error(e); }
     setBkLoading(false);
   };
 
-  const calcStats = (data) => {
-    const today = new Date().toISOString().split('T')[0];
-    const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString().split('T')[0];
-    const monthStart = new Date().toISOString().slice(0, 7);
-    setStats({
-      today: data.filter(b => b.booking_date === today).length,
-      week: data.filter(b => b.booking_date >= weekAgo).length,
-      month: data.filter(b => b.booking_date?.startsWith(monthStart)).length,
-      total: data.length,
-    });
-  };
-
-  const updateStatus = async (id, status) => {
-    try { await sbPatch(`bookings?id=eq.${id}`, { status }); fetchBookings(); } catch (e) { console.error(e); }
-  };
-
-  const deleteBooking = async (id) => {
-    if (!window.confirm('確定要刪除呢筆預約？')) return;
-    try { await sbDel(`bookings?id=eq.${id}`); fetchBookings(); showToast('✅ 預約已刪除'); } catch (e) { console.error(e); }
-  };
+  const updateStatus = async (id, s) => { try { await sbPatch(`bookings?id=eq.${id}`, { status: s }); fetchBookings(); } catch (e) { console.error(e); } };
+  const deleteBooking = async (id) => { if (!window.confirm('確定要刪除？')) return; try { await sbDel(`bookings?id=eq.${id}`); fetchBookings(); showToast('✅ 已刪除'); } catch (e) { console.error(e); } };
 
   useEffect(() => { if (auth) fetchBookings(); }, [filterDate, filterStatus]);
 
-  /* ══════════════════════════════════════════
-     核心改動：時段管理 → 直接寫 date_availability + disabled_timeslots
-     前台讀呢兩個表，所以改呢度就同步晒！
-     ══════════════════════════════════════════ */
-
-  /* ── 讀取單日微調數據 ── */
-  const fetchMicroData = useCallback(async () => {
-    if (!microDate) return;
-    setMicroLoading(true);
-    try {
-      const [disData, dateData] = await Promise.all([
-        sbGet(`disabled_timeslots?slot_date=eq.${microDate}`),
-        sbGet(`date_availability?available_date=eq.${microDate}`)
-      ]);
-      setMicroDisabled(new Set((disData || []).map(s => s.slot_time)));
-      setMicroDateInfo(dateData?.[0] || null);
-    } catch (e) { console.error(e); }
-    setMicroLoading(false);
-  }, [microDate]);
-
-  useEffect(() => { if (auth) fetchMicroData(); }, [microDate, auth, fetchMicroData]);
-
-  /* ── 套用模板（核心！寫入 date_availability + disabled_timeslots）── */
-  const applyTemplate = async (tmpl) => {
-    const dates = [...selDates];
-    if (dates.length === 0) { alert('請先選擇日期！'); return; }
-
-    const timeDesc = tmpl.from ? `${tmpl.from} — ${tmpl.to}` : '全部關閉';
-    if (!window.confirm(`套用「${tmpl.icon} ${tmpl.label}」\n\n時段：${timeDesc}\n影響：${dates.length} 個日期\n\n⚠️ 所選日期嘅時段設定會被覆蓋`)) return;
-
-    setBatchLoading(true);
-    try {
-      if (!tmpl.from) {
-        /* 休息日：設為 closed，刪除所有 disabled（因為整日關閉） */
-        await sbUpsert('date_availability', dates.map(d => ({ available_date: d, status: 'closed' })));
-        await sbDel(`disabled_timeslots?slot_date=in.(${dates.join(',')})`);
-      } else {
-        /* 工作日：設為 available，計算邊啲時段要 disable */
-        await sbUpsert('date_availability', dates.map(d => ({ available_date: d, status: 'available' })));
-
-        // 先清除舊嘅 disabled 記錄
-        await sbDel(`disabled_timeslots?slot_date=in.(${dates.join(',')})`);
-
-        // 計算要禁用嘅時段（唔喺開放範圍內嘅）
-        const disabledTimes = FRONT_TIMES.filter(t => t < tmpl.from || t > tmpl.to);
-
-        if (disabledTimes.length > 0) {
-          const rows = dates.flatMap(d => disabledTimes.map(t => ({ slot_date: d, slot_time: t })));
-          await sbPost('disabled_timeslots', rows);
-        }
-      }
-
-      await fetchMicroData();
-      showToast(`✅ 已套用「${tmpl.label}」到 ${dates.length} 個日期`);
-    } catch (e) { console.error(e); alert('操作失敗：' + e.message); }
-    setBatchLoading(false);
-  };
-
-  /* ── 模板 ── */
-  const updateTemplate = (idx, field, value) => {
-    setTemplates(prev => prev.map((t, i) => i === idx ? { ...t, [field]: value } : t));
-  };
-
-  /* ── 休息時段（將指定範圍加入 disabled）── */
-  const applyBreak = async (from, to) => {
-    const dates = [...selDates];
-    if (dates.length === 0) { alert('請先選擇日期！'); return; }
-    if (from >= to) { alert('開始時間必須早於結束時間！'); return; }
-    if (!window.confirm(`設定休息時段 ${from}–${to}\n影響：${dates.length} 個日期\n\n呢個範圍內嘅時段將被關閉`)) return;
-
-    setBatchLoading(true);
-    try {
-      const breakTimes = FRONT_TIMES.filter(t => t >= from && t < to);
-      if (breakTimes.length > 0) {
-        const rows = dates.flatMap(d => breakTimes.map(t => ({ slot_date: d, slot_time: t })));
-        await sbUpsert('disabled_timeslots', rows);
-      }
-      await fetchMicroData();
-      showToast(`✅ 已設定休息時段 ${from}–${to}（${dates.length} 日）`);
-    } catch (e) { console.error(e); alert('操作失敗：' + e.message); }
-    setBatchLoading(false);
-  };
-
-  const updateBreakTemplate = (idx, field, value) => {
-    setBreakTemplates(prev => prev.map((t, i) => i === idx ? { ...t, [field]: value } : t));
-  };
-
-  /* ── 自訂範圍 開放/關閉 ── */
-  const batchSetRange = async (activate) => {
-    const dates = [...selDates];
-    if (dates.length === 0) { alert('請先選擇日期！'); return; }
-    if (rangeFrom >= rangeTo) { alert('開始時間必須早於結束時間！'); return; }
-
-    setBatchLoading(true);
-    try {
-      const rangeTimes = FRONT_TIMES.filter(t => t >= rangeFrom && t <= rangeTo);
-
-      if (activate) {
-        /* 開放 = 從 disabled 中刪除 */
-        if (rangeTimes.length > 0) {
-          await sbDel(`disabled_timeslots?slot_date=in.(${dates.join(',')})&slot_time=in.(${rangeTimes.join(',')})`);
-        }
-        // 確保日期存在於 date_availability
-        await sbUpsert('date_availability', dates.map(d => ({ available_date: d, status: 'available' })));
-      } else {
-        /* 關閉 = 加入 disabled */
-        if (rangeTimes.length > 0) {
-          const rows = dates.flatMap(d => rangeTimes.map(t => ({ slot_date: d, slot_time: t })));
-          await sbUpsert('disabled_timeslots', rows);
-        }
-      }
-
-      await fetchMicroData();
-      showToast(`✅ 已${activate ? '開放' : '關閉'} ${rangeFrom}–${rangeTo}（${dates.length} 日）`);
-    } catch (e) { console.error(e); alert('操作失敗：' + e.message); }
-    setBatchLoading(false);
-  };
-
-  /* ── 單日微調：切換單個時段 ── */
-  const toggleMicroSlot = async (time) => {
-    const isDisabled = microDisabled.has(time);
-    try {
-      if (isDisabled) {
-        await sbDel(`disabled_timeslots?slot_date=eq.${microDate}&slot_time=eq.${time}`);
-        setMicroDisabled(prev => { const n = new Set(prev); n.delete(time); return n; });
-      } else {
-        await sbUpsert('disabled_timeslots', [{ slot_date: microDate, slot_time: time }]);
-        setMicroDisabled(prev => new Set([...prev, time]));
-      }
-    } catch (e) { console.error(e); showToast('❌ 操作失敗'); }
-  };
-
-  /* ── 單日微調：全部開放 ── */
-  const microAllOpen = async () => {
-    try {
-      await sbDel(`disabled_timeslots?slot_date=eq.${microDate}`);
-      setMicroDisabled(new Set());
-      await sbUpsert('date_availability', [{ available_date: microDate, status: 'available' }]);
-      setMicroDateInfo({ available_date: microDate, status: 'available' });
-      showToast('✅ 已開放全部時段');
-    } catch (e) { console.error(e); }
-  };
-
-  /* ── 單日微調：全部關閉 ── */
-  const microAllClose = async () => {
-    try {
-      await sbDel(`disabled_timeslots?slot_date=eq.${microDate}`);
-      const rows = FRONT_TIMES.map(t => ({ slot_date: microDate, slot_time: t }));
-      await sbPost('disabled_timeslots', rows);
-      setMicroDisabled(new Set(FRONT_TIMES));
-      showToast('✅ 已關閉全部時段');
-    } catch (e) { console.error(e); }
-  };
-
-  /* ── 單日微調：開放/關閉日期 ── */
-  const toggleMicroDateAvailability = async () => {
-    try {
-      if (microDateInfo) {
-        await sbDel(`date_availability?available_date=eq.${microDate}`);
-        setMicroDateInfo(null);
-        showToast('✅ 已從前台移除此日期');
-      } else {
-        await sbUpsert('date_availability', [{ available_date: microDate, status: 'available' }]);
-        setMicroDateInfo({ available_date: microDate, status: 'available' });
-        showToast('✅ 已開放此日期到前台');
-      }
-    } catch (e) { console.error(e); }
-  };
-
-  /* ══════ 封鎖日期 ══════ */
-  const fetchBlocked = async () => { try { const data = await sbGet('blocked_dates?order=date'); setBlocked(data || []); } catch (e) { console.error(e); } };
-  const addBlocked = async () => { if (!newBD) return; try { const data = await sbPost('blocked_dates', { date: newBD, reason: newBR }); setBlocked(prev => [...prev, ...data].sort((a, b) => a.date.localeCompare(b.date))); setNewBD(''); setNewBR(''); } catch (e) { console.error(e); } };
+  /* ═══════════════════ BLOCKED ═══════════════════ */
+  const fetchBlocked = async () => { try { setBlocked(await sbGet('blocked_dates?order=date') || []); } catch (e) { console.error(e); } };
+  const addBlocked = async () => { if (!newBD) return; try { const d = await sbPost('blocked_dates', { date: newBD, reason: newBR }); setBlocked(prev => [...prev, ...d].sort((a, b) => a.date.localeCompare(b.date))); setNewBD(''); setNewBR(''); } catch (e) { console.error(e); } };
   const removeBlocked = async (id) => { try { await sbDel(`blocked_dates?id=eq.${id}`); setBlocked(prev => prev.filter(b => b.id !== id)); } catch (e) { console.error(e); } };
 
-  /* ══════ Helpers ══════ */
+  /* ═══════════════════ AUTH ═══════════════════ */
+  const handleLogin = (e) => {
+    e.preventDefault();
+    if (pw === PASS) { setAuth(true); fetchBookings(); fetchBlocked(); }
+    else alert('密碼錯誤！');
+  };
+
   const statusColor = (s) => s === 'confirmed' ? '#4CAF50' : s === 'cancelled' ? '#f44336' : s === 'completed' ? '#2196F3' : '#FF9800';
   const statusText = (s) => s === 'confirmed' ? '已確認' : s === 'cancelled' ? '已取消' : s === 'completed' ? '已完成' : '待確認';
+  const updateTemplate = (i, f, v) => setTemplates(prev => prev.map((t, idx) => idx === i ? { ...t, [f]: v } : t));
 
-  /* ══════════════════════════════ RENDER ══════════════════════════════ */
-  if (!auth) {
-    return (
-      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(135deg, #f5f0eb 0%, #e8e0d8 100%)', fontFamily: font }}>
-        <form onSubmit={handleLogin} style={{ background: '#fff', padding: '60px 40px', borderRadius: 16, boxShadow: '0 10px 40px rgba(0,0,0,0.1)', textAlign: 'center', maxWidth: 400, width: '90%' }}>
-          <h1 style={{ fontSize: 24, color: '#5c4a3a', marginBottom: 8 }}>J.LAB</h1>
-          <p style={{ color: '#999', fontSize: 14, marginBottom: 40, letterSpacing: 2 }}>管理後台 ADMIN</p>
-          <input type="password" placeholder="請輸入管理密碼" value={pw} onChange={e => setPw(e.target.value)} style={{ width: '100%', padding: '14px 16px', border: '1px solid #ddd', borderRadius: 8, fontSize: 16, marginBottom: 20, boxSizing: 'border-box', textAlign: 'center' }} />
-          <button type="submit" style={{ width: '100%', padding: 14, background: '#5c4a3a', color: '#fff', border: 'none', borderRadius: 8, fontSize: 16, cursor: 'pointer' }}>登入</button>
-        </form>
-      </div>
-    );
-  }
+  /* ═══════════════════ RENDER ═══════════════════ */
+  if (!auth) return (
+    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(135deg,#f5f0eb,#e8e0d8)', fontFamily: font }}>
+      <form onSubmit={handleLogin} style={{ background: '#fff', padding: '60px 40px', borderRadius: 16, boxShadow: '0 10px 40px rgba(0,0,0,0.1)', textAlign: 'center', maxWidth: 400, width: '90%' }}>
+        <h1 style={{ fontSize: 24, color: '#5c4a3a', marginBottom: 8 }}>J.LAB</h1>
+        <p style={{ color: '#999', fontSize: 14, marginBottom: 40, letterSpacing: 2 }}>管理後台 ADMIN</p>
+        <input type="password" placeholder="請輸入管理密碼" value={pw} onChange={e => setPw(e.target.value)} style={{ width: '100%', padding: '14px 16px', border: '1px solid #ddd', borderRadius: 8, fontSize: 16, marginBottom: 20, boxSizing: 'border-box', textAlign: 'center' }} />
+        <button type="submit" style={{ width: '100%', padding: 14, background: '#5c4a3a', color: '#fff', border: 'none', borderRadius: 8, fontSize: 16, cursor: 'pointer' }}>登入</button>
+      </form>
+    </div>
+  );
 
   return (
     <div style={{ minHeight: '100vh', background: '#f5f0eb', fontFamily: font }}>
       {toast && <div style={{ position: 'fixed', top: 20, left: '50%', transform: 'translateX(-50%)', background: '#5c4a3a', color: '#fff', padding: '12px 28px', borderRadius: 8, fontSize: 14, zIndex: 9999, boxShadow: '0 4px 20px rgba(0,0,0,0.2)' }}>{toast}</div>}
 
+      {batchLoading && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.3)', zIndex: 999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: '#fff', padding: '30px 40px', borderRadius: 12, textAlign: 'center' }}>
+            <div style={{ fontSize: 24, marginBottom: 10 }}>⏳</div>
+            <div style={{ fontSize: 14, color: '#5c4a3a' }}>處理中...</div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Header ── */}
       <div style={{ background: '#fff', padding: '20px 30px', boxShadow: '0 2px 10px rgba(0,0,0,0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <h1 style={{ fontSize: 20, color: '#5c4a3a', margin: 0 }}>J.LAB 管理後台</h1>
@@ -405,6 +382,7 @@ export default function Admin() {
         <button onClick={() => setAuth(false)} style={{ padding: '8px 20px', background: 'transparent', border: '1px solid #ccc', borderRadius: 6, cursor: 'pointer', color: '#666', fontFamily: font }}>登出</button>
       </div>
 
+      {/* ── Tabs ── */}
       <div style={{ background: '#fff', borderTop: '1px solid #f0ebe3', padding: '0 30px', display: 'flex', gap: 0, boxShadow: '0 2px 10px rgba(0,0,0,0.03)', overflowX: 'auto' }}>
         {[{ key: 'bookings', label: '📋 預約管理' }, { key: 'timeslots', label: '🕐 時段管理' }, { key: 'blocked', label: '📅 封鎖日期' }].map(t => (
           <button key={t.key} onClick={() => setTab(t.key)} style={{
@@ -416,9 +394,31 @@ export default function Admin() {
         ))}
       </div>
 
+      {/* ── Pending Sticky Bar ── */}
+      {pendingCount > 0 && tab === 'timeslots' && (
+        <div style={{
+          position: 'sticky', top: 0, zIndex: 100,
+          background: 'linear-gradient(135deg, #FFF3E0, #FFE0B2)', padding: '14px 30px',
+          borderBottom: '2px solid #FFB74D',
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10,
+        }}>
+          <span style={{ color: '#E65100', fontSize: 14, fontWeight: 600 }}>
+            ⏳ {pendingCount} 個日期待同步到前台
+          </span>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={() => { setPending({}); showToast('已清除所有預覽'); }} style={{
+              padding: '8px 16px', background: '#fff', border: '1px solid #ccc', borderRadius: 6, cursor: 'pointer', fontSize: 13, color: '#666', fontFamily: font
+            }}>取消全部</button>
+            <button onClick={syncPending} style={{
+              padding: '8px 24px', background: '#4CAF50', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 14, fontWeight: 600, fontFamily: font
+            }}>✅ 確認同步到前台</button>
+          </div>
+        </div>
+      )}
+
       <div style={{ maxWidth: 1200, margin: '0 auto', padding: '30px 20px' }}>
 
-        {/* ══════ BOOKINGS ══════ */}
+        {/* ══════════════════════ BOOKINGS TAB ══════════════════════ */}
         {tab === 'bookings' && (
           <>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 16, marginBottom: 30 }}>
@@ -441,15 +441,15 @@ export default function Admin() {
               <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} style={{ padding: '8px 12px', border: '1px solid #ddd', borderRadius: 6, fontSize: 14 }}>
                 <option value="all">全部狀態</option><option value="pending">待確認</option><option value="confirmed">已確認</option><option value="completed">已完成</option><option value="cancelled">已取消</option>
               </select>
-              <button onClick={() => { setFilterDate(''); setFilterStatus('all'); }} style={{ padding: '8px 16px', background: '#f5f0eb', border: 'none', borderRadius: 6, cursor: 'pointer', color: '#5c4a3a', fontSize: 13 }}>清除篩選</button>
+              <button onClick={() => { setFilterDate(''); setFilterStatus('all'); }} style={{ padding: '8px 16px', background: '#f5f0eb', border: 'none', borderRadius: 6, cursor: 'pointer', color: '#5c4a3a', fontSize: 13 }}>清除</button>
               <button onClick={fetchBookings} style={{ padding: '8px 16px', background: '#5c4a3a', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', marginLeft: 'auto', fontSize: 13 }}>🔄 重新整理</button>
             </div>
 
             <div style={{ background: '#fff', borderRadius: 12, overflow: 'hidden', boxShadow: '0 2px 10px rgba(0,0,0,0.05)' }}>
               <div style={{ padding: 20, borderBottom: '1px solid #eee' }}>
-                <h2 style={{ margin: 0, color: '#5c4a3a', fontSize: 18 }}>預約列表 ({bookings.length} 筆)</h2>
+                <h2 style={{ margin: 0, color: '#5c4a3a', fontSize: 18 }}>預約列表 ({bookings.length})</h2>
               </div>
-              {bkLoading ? <p style={{ padding: 40, textAlign: 'center', color: '#999' }}>載入中...</p> : bookings.length === 0 ? <p style={{ padding: 40, textAlign: 'center', color: '#999' }}>暫無預約紀錄</p> : (
+              {bkLoading ? <p style={{ padding: 40, textAlign: 'center', color: '#999' }}>載入中...</p> : bookings.length === 0 ? <p style={{ padding: 40, textAlign: 'center', color: '#999' }}>暫無預約</p> : (
                 <div style={{ overflowX: 'auto' }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
                     <thead><tr style={{ background: '#f9f6f3' }}>
@@ -480,70 +480,63 @@ export default function Admin() {
           </>
         )}
 
-        {/* ══════ TIME SLOTS（核心改動區域）══════ */}
+        {/* ══════════════════════ TIME SLOTS TAB ══════════════════════ */}
         {tab === 'timeslots' && (
           <>
-            {batchLoading && (
-              <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.3)', zIndex: 999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <div style={{ background: '#fff', padding: '30px 40px', borderRadius: 12, textAlign: 'center' }}>
-                  <div style={{ fontSize: 24, marginBottom: 10 }}>⏳</div>
-                  <div style={{ fontSize: 14, color: '#5c4a3a' }}>批量操作中...</div>
-                </div>
-              </div>
-            )}
-
-            {/* ── 重要提示 ── */}
+            {/* ── 使用說明 ── */}
             <div style={{ ...card, background: '#e8f5e9', border: '1px solid #a5d6a7' }}>
-              <div style={{ fontSize: 14, color: '#2e7d32', lineHeight: 1.8 }}>
-                💡 <b>使用流程：</b><br/>
-                ① 喺下方月曆選擇日期 → ② 套用營業模板（開放時段）→ ③ 可選：設定休息時段<br/>
-                ④ 用「單日微調」逐日微調個別時段 → 前台即時同步！
+              <div style={{ fontSize: 14, color: '#2e7d32', lineHeight: 2 }}>
+                💡 <b>使用流程（3 步）：</b><br />
+                ① 喺月曆選擇日期 → ② 套用模板（本地預覽）→ ③ 按「<b>確認同步到前台</b>」按鈕<br />
+                🔒 <b>預設所有日期都係關閉</b>，只有你明確開放嘅日期先會出現喺前台
               </div>
             </div>
 
-            {/* ─── 1. 批量月曆 ─── */}
+            {/* ── 1. 批量月曆 ── */}
             <div style={card}>
-              <div style={sectionTitle}>📅 批量選擇日期</div>
-              <div style={sectionDesc}>逐日點選，或點星期標題選該欄全部日期（用於批量設定營業時間）</div>
+              <div style={sTitle}>📅 Step 1：選擇日期</div>
+              <div style={sDesc}>點日期逐日選，或點星期標題選該欄全部</div>
 
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                <button onClick={prevMonth} style={navBtnStyle}>◀</button>
+                <button onClick={prevCal} style={navBtn}>◀</button>
                 <span style={{ fontSize: 17, fontWeight: 600, color: '#5c4a3a' }}>{calYear}年 {calMonth + 1}月</span>
-                <button onClick={nextMonth} style={navBtnStyle}>▶</button>
+                <button onClick={nextCal} style={navBtn}>▶</button>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 4 }}>
-                {DAYS.map((d, i) => {
-                  const allSel = isColAllSelected(i);
-                  return (
-                    <button key={`h${i}`} onClick={() => toggleWeekdayCol(i)} style={{
-                      padding: '10px 0', borderRadius: 8, border: 'none', cursor: 'pointer',
-                      background: allSel ? '#5c4a3a' : '#f0ebe3', color: allSel ? '#fff' : '#5c4a3a',
-                      fontSize: 13, fontWeight: 600, fontFamily: font, transition: 'all 0.2s',
-                    }}>{d}</button>
-                  );
-                })}
-                {calendarDays.map((day, i) => {
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 4 }}>
+                {DAYS.map((d, i) => (
+                  <button key={`h${i}`} onClick={() => toggleWeekdayCol(i)} style={{
+                    padding: '10px 0', borderRadius: 8, border: 'none', cursor: 'pointer',
+                    background: isColAllSel(i) ? '#5c4a3a' : '#f0ebe3', color: isColAllSel(i) ? '#fff' : '#5c4a3a',
+                    fontSize: 13, fontWeight: 600, fontFamily: font, transition: 'all 0.2s',
+                  }}>{d}</button>
+                ))}
+                {calDays.map((day, i) => {
                   if (!day) return <div key={`e${i}`} />;
-                  const ds = toDateStr(calYear, calMonth, day);
+                  const ds = toDS(calYear, calMonth, day);
                   const sel = selDates.has(ds);
-                  const today = isTodayFn(calYear, calMonth, day);
+                  const isToday = ds === todayStr;
+                  const hasPend = !!pending[ds];
                   return (
                     <button key={`d${i}`} onClick={() => toggleDate(day)} style={{
-                      padding: '12px 4px', borderRadius: 8, cursor: 'pointer',
-                      border: today ? '2px solid #FF9800' : sel ? '2px solid #5c4a3a' : '2px solid transparent',
-                      background: sel ? '#5c4a3a' : 'transparent', color: sel ? '#fff' : today ? '#FF9800' : '#888',
-                      fontSize: 14, fontWeight: today || sel ? 700 : 400, fontFamily: font, transition: 'all 0.15s',
-                    }}>{day}</button>
+                      padding: '12px 4px', borderRadius: 8, cursor: 'pointer', position: 'relative',
+                      border: isToday ? '2px solid #FF9800' : sel ? '2px solid #5c4a3a' : '2px solid transparent',
+                      background: sel ? '#5c4a3a' : hasPend ? '#e8f5e9' : 'transparent',
+                      color: sel ? '#fff' : isToday ? '#FF9800' : '#888',
+                      fontSize: 14, fontWeight: isToday || sel ? 700 : 400, fontFamily: font, transition: 'all 0.15s',
+                    }}>
+                      {day}
+                      {hasPend && !sel && <div style={{ position: 'absolute', top: 3, right: 3, width: 6, height: 6, background: '#4CAF50', borderRadius: '50%' }} />}
+                    </button>
                   );
                 })}
               </div>
 
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 16 }}>
-                <button onClick={() => selectByFilter(d => d >= 1 && d <= 5)} style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid #d0c8bc', background: '#faf6f0', color: '#5c4a3a', cursor: 'pointer', fontSize: 12, fontFamily: font }}>本月平日</button>
-                <button onClick={() => selectByFilter(d => d === 0 || d === 6)} style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid #d0c8bc', background: '#faf6f0', color: '#5c4a3a', cursor: 'pointer', fontSize: 12, fontFamily: font }}>本月週末</button>
+                <button onClick={() => selectByFilter(d => d >= 1 && d <= 5)} style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid #d0c8bc', background: '#faf6f0', color: '#5c4a3a', cursor: 'pointer', fontSize: 12, fontFamily: font }}>平日</button>
+                <button onClick={() => selectByFilter(d => d === 0 || d === 6)} style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid #d0c8bc', background: '#faf6f0', color: '#5c4a3a', cursor: 'pointer', fontSize: 12, fontFamily: font }}>週末</button>
                 <button onClick={() => selectByFilter(() => true)} style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid #d0c8bc', background: '#faf6f0', color: '#5c4a3a', cursor: 'pointer', fontSize: 12, fontFamily: font }}>全月</button>
-                <button onClick={() => setSelDates(new Set())} style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid #d0c8bc', background: '#faf6f0', color: '#999', cursor: 'pointer', fontSize: 12, fontFamily: font }}>清除全部</button>
+                <button onClick={() => setSelDates(new Set())} style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid #d0c8bc', background: '#faf6f0', color: '#999', cursor: 'pointer', fontSize: 12, fontFamily: font }}>清除選擇</button>
               </div>
 
               {selDates.size > 0 && (
@@ -558,17 +551,17 @@ export default function Admin() {
               )}
             </div>
 
-            {/* ─── 2. 快速模板 ─── */}
+            {/* ── 2. 快速模板 ── */}
             <div style={card}>
-              <div style={sectionTitle}>⚡ 快速模板</div>
-              <div style={sectionDesc}>
-                設定營業時間模板，一鍵套用到已選日期
+              <div style={sTitle}>⚡ Step 2：套用營業模板</div>
+              <div style={sDesc}>
+                選擇模板設定營業時間（只影響已選日期，不會自動同步）
                 {selDates.size === 0 && <span style={{ color: '#c00' }}> — 請先選擇日期</span>}
               </div>
 
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))', gap: 12 }}>
                 {templates.map((t, i) => (
-                  <div key={i} style={{ padding: 16, borderRadius: 10, border: '1px solid #e0d8cc', background: '#fff', opacity: selDates.size === 0 ? 0.5 : 1, transition: 'opacity 0.2s' }}>
+                  <div key={i} style={{ padding: 16, borderRadius: 10, border: '1px solid #e0d8cc', background: '#fff', opacity: selDates.size === 0 ? 0.5 : 1 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
                       <span style={{ fontSize: 22 }}>{t.icon}</span>
                       <span style={{ fontSize: 14, fontWeight: 600, color: '#5c4a3a' }}>{t.label}</span>
@@ -578,91 +571,56 @@ export default function Admin() {
                         <select value={t.from} onChange={e => updateTemplate(i, 'from', e.target.value)} style={ddStyle}>
                           {ALL_TIMES.map(time => <option key={time} value={time}>{time}</option>)}
                         </select>
-                        <span style={{ color: '#999', fontSize: 12, flexShrink: 0 }}>至</span>
+                        <span style={{ color: '#999', fontSize: 12 }}>至</span>
                         <select value={t.to} onChange={e => updateTemplate(i, 'to', e.target.value)} style={ddStyle}>
                           {ALL_TIMES.map(time => <option key={time} value={time}>{time}</option>)}
                         </select>
                       </div>
                     ) : (
-                      <div style={{ fontSize: 13, color: '#999', marginBottom: 12, padding: '6px 0' }}>全部時段關閉</div>
+                      <div style={{ fontSize: 13, color: '#999', marginBottom: 12 }}>全日關閉</div>
                     )}
-                    <button onClick={() => applyTemplate(t)} disabled={selDates.size === 0} style={{
+                    <button onClick={() => applyTemplateLocal(t)} disabled={selDates.size === 0} style={{
                       width: '100%', padding: 9, borderRadius: 6, border: 'none',
                       background: selDates.size === 0 ? '#ddd' : '#5c4a3a', color: '#fff',
                       cursor: selDates.size === 0 ? 'not-allowed' : 'pointer',
-                      fontSize: 13, fontFamily: font, fontWeight: 500, transition: 'background 0.2s',
-                    }}>套用到 {selDates.size} 個日期</button>
+                      fontSize: 13, fontFamily: font, fontWeight: 500,
+                    }}>預覽效果 ({selDates.size} 日)</button>
                   </div>
                 ))}
               </div>
             </div>
 
-            {/* ─── 3. 休息時段 ─── */}
+            {/* ── 3. 休息時段（只保留自訂）── */}
             <div style={card}>
-              <div style={sectionTitle}>🍽️ 休息時段</div>
-              <div style={sectionDesc}>
-                喺已開放嘅營業時間內設定休息時段（例如午休），指定範圍會被關閉
+              <div style={sTitle}>🍽️ 自訂休息時段（可選）</div>
+              <div style={sDesc}>
+                喺已套用模板嘅日期內設定休息時段，指定範圍會被關閉
                 {selDates.size === 0 && <span style={{ color: '#c00' }}> — 請先選擇日期</span>}
               </div>
-
               <div style={{ fontSize: 12, color: '#666', background: '#faf6f0', padding: '10px 14px', borderRadius: 8, marginBottom: 16, lineHeight: 1.8 }}>
-                💡 <b>建議流程：</b>先用上方模板設定營業時間 → 再用呢度關閉休息時段<br />
-                例如：套用「全日班 10:00–19:00」→ 設定「午休 13:00–14:00」→ 結果為 10:00–13:00 + 14:00–19:00
+                💡 先套用營業模板 → 再用呢度關閉休息時段。例：套用「全日班」→ 設定休息「13:00–14:00」
               </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))', gap: 12, marginBottom: 20 }}>
-                {breakTemplates.map((t, i) => (
-                  <div key={i} style={{ padding: 16, borderRadius: 10, border: '1px solid #fce4ec', background: '#fff', opacity: selDates.size === 0 ? 0.5 : 1, transition: 'opacity 0.2s' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-                      <span style={{ fontSize: 22 }}>{t.icon}</span>
-                      <span style={{ fontSize: 14, fontWeight: 600, color: '#5c4a3a' }}>{t.label}</span>
-                    </div>
-                    <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 12 }}>
-                      <select value={t.from} onChange={e => updateBreakTemplate(i, 'from', e.target.value)} style={ddStyle}>
-                        {ALL_TIMES.map(time => <option key={time} value={time}>{time}</option>)}
-                      </select>
-                      <span style={{ color: '#999', fontSize: 12, flexShrink: 0 }}>至</span>
-                      <select value={t.to} onChange={e => updateBreakTemplate(i, 'to', e.target.value)} style={ddStyle}>
-                        {ALL_TIMES.map(time => <option key={time} value={time}>{time}</option>)}
-                      </select>
-                    </div>
-                    <button onClick={() => applyBreak(t.from, t.to)} disabled={selDates.size === 0} style={{
-                      width: '100%', padding: 9, borderRadius: 6, border: 'none',
-                      background: selDates.size === 0 ? '#ddd' : '#e53935', color: '#fff',
-                      cursor: selDates.size === 0 ? 'not-allowed' : 'pointer',
-                      fontSize: 13, fontFamily: font, fontWeight: 500, transition: 'background 0.2s',
-                    }}>設為休息</button>
-                  </div>
-                ))}
-              </div>
-
-              <div style={{ padding: '16px', background: '#fff8f8', borderRadius: 10, border: '1px solid #fce4ec' }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: '#5c4a3a', marginBottom: 10 }}>自訂休息時段</div>
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                  <select value={breakFrom} onChange={e => setBreakFrom(e.target.value)} style={{ padding: '8px 12px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13, fontFamily: font }}>
-                    {ALL_TIMES.map(t => <option key={t} value={t}>{t}</option>)}
-                  </select>
-                  <span style={{ color: '#999', fontSize: 12 }}>至</span>
-                  <select value={breakTo} onChange={e => setBreakTo(e.target.value)} style={{ padding: '8px 12px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13, fontFamily: font }}>
-                    {ALL_TIMES.map(t => <option key={t} value={t}>{t}</option>)}
-                  </select>
-                  <button onClick={() => applyBreak(breakFrom, breakTo)} disabled={selDates.size === 0} style={{
-                    padding: '8px 20px', borderRadius: 6, border: 'none',
-                    background: selDates.size === 0 ? '#ddd' : '#e53935', color: '#fff',
-                    cursor: selDates.size === 0 ? 'not-allowed' : 'pointer',
-                    fontSize: 13, fontFamily: font, fontWeight: 500,
-                  }}>設為休息</button>
-                </div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <select value={breakFrom} onChange={e => setBreakFrom(e.target.value)} style={{ padding: '8px 12px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13, fontFamily: font }}>
+                  {ALL_TIMES.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+                <span style={{ color: '#999', fontSize: 12 }}>至</span>
+                <select value={breakTo} onChange={e => setBreakTo(e.target.value)} style={{ padding: '8px 12px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13, fontFamily: font }}>
+                  {ALL_TIMES.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+                <button onClick={applyBreakLocal} disabled={selDates.size === 0} style={{
+                  padding: '8px 20px', borderRadius: 6, border: 'none',
+                  background: selDates.size === 0 ? '#ddd' : '#e53935', color: '#fff',
+                  cursor: selDates.size === 0 ? 'not-allowed' : 'pointer',
+                  fontSize: 13, fontFamily: font, fontWeight: 500,
+                }}>預覽休息效果</button>
               </div>
             </div>
 
-            {/* ─── 4. 自訂時段範圍 ─── */}
+            {/* ── 4. 自訂範圍 ── */}
             <div style={card}>
-              <div style={sectionTitle}>🎯 自訂時段範圍</div>
-              <div style={sectionDesc}>
-                選擇時間範圍，批量開放或關閉
-                {selDates.size === 0 && <span style={{ color: '#c00' }}> — 請先選擇日期</span>}
-              </div>
+              <div style={sTitle}>🎯 自訂時段範圍（可選）</div>
+              <div style={sDesc}>批量開放或關閉指定範圍{selDates.size === 0 && <span style={{ color: '#c00' }}> — 請先選擇日期</span>}</div>
               <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
                 <span style={{ fontSize: 13, color: '#666' }}>從</span>
                 <select value={rangeFrom} onChange={e => setRangeFrom(e.target.value)} style={{ padding: '10px 14px', border: '1px solid #ddd', borderRadius: 6, fontSize: 14, fontFamily: font }}>
@@ -672,103 +630,167 @@ export default function Admin() {
                 <select value={rangeTo} onChange={e => setRangeTo(e.target.value)} style={{ padding: '10px 14px', border: '1px solid #ddd', borderRadius: 6, fontSize: 14, fontFamily: font }}>
                   {ALL_TIMES.map(t => <option key={t} value={t}>{t}</option>)}
                 </select>
-                <button onClick={() => batchSetRange(true)} disabled={selDates.size === 0} style={{ padding: '10px 20px', borderRadius: 6, border: 'none', background: selDates.size === 0 ? '#ccc' : '#4CAF50', color: '#fff', cursor: selDates.size === 0 ? 'not-allowed' : 'pointer', fontSize: 13, fontFamily: font, fontWeight: 500 }}>✅ 開放</button>
-                <button onClick={() => batchSetRange(false)} disabled={selDates.size === 0} style={{ padding: '10px 20px', borderRadius: 6, border: 'none', background: selDates.size === 0 ? '#ccc' : '#f44336', color: '#fff', cursor: selDates.size === 0 ? 'not-allowed' : 'pointer', fontSize: 13, fontFamily: font, fontWeight: 500 }}>❌ 關閉</button>
+                <button onClick={() => applyRangeLocal(true)} disabled={selDates.size === 0} style={{ padding: '10px 20px', borderRadius: 6, border: 'none', background: selDates.size === 0 ? '#ccc' : '#4CAF50', color: '#fff', cursor: selDates.size === 0 ? 'not-allowed' : 'pointer', fontSize: 13, fontFamily: font }}>預覽開放</button>
+                <button onClick={() => applyRangeLocal(false)} disabled={selDates.size === 0} style={{ padding: '10px 20px', borderRadius: 6, border: 'none', background: selDates.size === 0 ? '#ccc' : '#f44336', color: '#fff', cursor: selDates.size === 0 ? 'not-allowed' : 'pointer', fontSize: 13, fontFamily: font }}>預覽關閉</button>
               </div>
             </div>
 
-            {/* ─── 5. 單日微調（核心改動！）─── */}
+            {/* ── 5. 待同步預覽（核心！）── */}
+            {pendingCount > 0 && (
+              <div style={{ ...card, border: '2px solid #FFB74D', background: '#FFFDE7' }}>
+                <div style={{ ...sTitle, color: '#E65100' }}>⏳ Step 3：確認並同步（{pendingCount} 個日期）</div>
+                <div style={sDesc}>以下係預覽效果，可以逐個時段微調。確認無誤後按底部按鈕同步到前台。</div>
+
+                {Object.entries(pending).sort(([a], [b]) => a.localeCompare(b)).map(([date, times]) => {
+                  const dow = new Date(date + 'T00:00:00').getDay();
+                  const isExpanded = expandedDate === date;
+                  return (
+                    <div key={date} style={{ marginBottom: 8, borderRadius: 8, border: '1px solid #e0d8cc', background: '#fff', overflow: 'hidden' }}>
+                      <div
+                        onClick={() => setExpandedDate(isExpanded ? null : date)}
+                        style={{ padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', cursor: 'pointer', background: isExpanded ? '#f9f6f3' : '#fff' }}
+                      >
+                        <div>
+                          <span style={{ fontSize: 14, fontWeight: 600, color: '#5c4a3a' }}>{date}</span>
+                          <span style={{ fontSize: 12, color: '#888', marginLeft: 8 }}>週{DAYS[dow]}</span>
+                          <span style={{ fontSize: 12, marginLeft: 12, color: times.size > 0 ? '#4CAF50' : '#f44336', fontWeight: 600 }}>
+                            {times.size > 0 ? `${times.size} 個時段開放` : '🚫 全日關閉'}
+                          </span>
+                        </div>
+                        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                          <button onClick={(e) => { e.stopPropagation(); removePendingDate(date); }} style={{
+                            padding: '4px 10px', background: '#ffebee', border: '1px solid #ffcdd2', borderRadius: 4, color: '#c62828', cursor: 'pointer', fontSize: 11, fontFamily: font
+                          }}>移除</button>
+                          <span style={{ color: '#999', fontSize: 12 }}>{isExpanded ? '▲' : '▼'}</span>
+                        </div>
+                      </div>
+                      {isExpanded && (
+                        <div style={{ padding: 16, borderTop: '1px solid #f0ebe3' }}>
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(80px, 1fr))', gap: 6 }}>
+                            {FRONT_TIMES.map(t => (
+                              <button key={t} onClick={() => togglePendingTime(date, t)} style={{
+                                padding: '10px 4px', borderRadius: 6,
+                                border: `2px solid ${times.has(t) ? '#5c4a3a' : '#e0d8cc'}`,
+                                background: times.has(t) ? '#5c4a3a' : '#faf6f0',
+                                color: times.has(t) ? '#fff' : '#c0b8aa',
+                                fontSize: 13, fontWeight: 500, cursor: 'pointer', fontFamily: font,
+                              }}>{t}</button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+
+                <div style={{ display: 'flex', gap: 12, marginTop: 20 }}>
+                  <button onClick={syncPending} style={{
+                    flex: 1, padding: 16, background: '#4CAF50', color: '#fff', border: 'none', borderRadius: 10,
+                    fontSize: 16, fontWeight: 700, cursor: 'pointer', fontFamily: font,
+                    boxShadow: '0 4px 12px rgba(76,175,80,0.3)',
+                  }}>
+                    ✅ 確認同步到前台（{pendingCount} 個日期）
+                  </button>
+                  <button onClick={() => setPending({})} style={{
+                    padding: '16px 24px', background: '#f5f0eb', color: '#999', border: 'none', borderRadius: 10,
+                    fontSize: 14, cursor: 'pointer', fontFamily: font,
+                  }}>清除</button>
+                </div>
+              </div>
+            )}
+
+            {/* ── 6. 單日微調 ── */}
             <div style={card}>
-              <div style={sectionTitle}>🔧 單日微調</div>
-              <div style={sectionDesc}>揀一個日期，微調嗰日嘅時段開關（啡色 = 開放，淺色 = 關閉）</div>
+              <div style={sTitle}>🔧 單日微調（已同步日期）</div>
+              <div style={sDesc}>揀一個已同步嘅日期，逐個時段微調。修改後需按「儲存」。</div>
 
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                <button onClick={prevMicroMonth} style={navBtnStyle}>◀</button>
+                <button onClick={prevMicro} style={navBtn}>◀</button>
                 <span style={{ fontSize: 17, fontWeight: 600, color: '#5c4a3a' }}>{microYear}年 {microMonth + 1}月</span>
-                <button onClick={nextMicroMonth} style={navBtnStyle}>▶</button>
+                <button onClick={nextMicro} style={navBtn}>▶</button>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 4, marginBottom: 20 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 4, marginBottom: 20 }}>
                 {DAYS.map((d, i) => (
                   <div key={`mh${i}`} style={{ padding: '8px 0', textAlign: 'center', fontSize: 13, fontWeight: 600, color: '#5c4a3a' }}>{d}</div>
                 ))}
                 {microCalDays.map((day, i) => {
                   if (!day) return <div key={`me${i}`} />;
-                  const ds = toDateStr(microYear, microMonth, day);
+                  const ds = toDS(microYear, microMonth, day);
                   const sel = ds === microDate;
-                  const today = isTodayFn(microYear, microMonth, day);
+                  const isToday = ds === todayStr;
                   return (
                     <button key={`md${i}`} onClick={() => setMicroDate(ds)} style={{
                       padding: '10px 4px', borderRadius: 8, cursor: 'pointer',
-                      border: today && !sel ? '2px solid #FF9800' : sel ? '2px solid #5c4a3a' : '2px solid transparent',
-                      background: sel ? '#5c4a3a' : 'transparent',
-                      color: sel ? '#fff' : today ? '#FF9800' : '#888',
-                      fontSize: 14, fontWeight: today || sel ? 700 : 400, fontFamily: font, transition: 'all 0.15s',
+                      border: isToday && !sel ? '2px solid #FF9800' : sel ? '2px solid #5c4a3a' : '2px solid transparent',
+                      background: sel ? '#5c4a3a' : 'transparent', color: sel ? '#fff' : isToday ? '#FF9800' : '#888',
+                      fontSize: 14, fontWeight: isToday || sel ? 700 : 400, fontFamily: font,
                     }}>{day}</button>
                   );
                 })}
               </div>
 
-              {/* 日期狀態提示 */}
-              <div style={{ padding: '14px 16px', background: microDateInfo ? '#e8f5e9' : '#fff3e0', borderRadius: 8, marginBottom: 20, border: `1px solid ${microDateInfo ? '#a5d6a7' : '#ffcc80'}` }}>
-                <div style={{ fontSize: 14, color: '#5c4a3a', marginBottom: 6 }}>
-                  📌 已選：<b>{microDate}</b>（週{DAYS[microDow]}）
+              {/* 日期狀態 */}
+              <div style={{ padding: '14px 16px', borderRadius: 8, marginBottom: 20, background: microStatus === 'available' ? '#e8f5e9' : '#FFF3E0', border: `1px solid ${microStatus === 'available' ? '#a5d6a7' : '#ffcc80'}` }}>
+                <div style={{ fontSize: 14, color: '#5c4a3a', marginBottom: 4 }}>
+                  📌 {microDate}（週{DAYS[microDow]}）
                 </div>
-                {microDateInfo ? (
-                  <div style={{ fontSize: 13, color: '#2e7d32' }}>
-                    ✅ 此日期已開放（狀態：{microDateInfo.status}），前台可見
-                  </div>
-                ) : (
-                  <div style={{ fontSize: 13, color: '#e65100' }}>
-                    ⚠️ 此日期尚未開放，前台<b>不會顯示</b>此日期
-                  </div>
+                <div style={{ fontSize: 13, color: microStatus === 'available' ? '#2e7d32' : '#e65100' }}>
+                  {microStatus === 'available' ? '✅ 此日期已開放，前台可見' : '⚠️ 此日期未開放，前台不會顯示'}
+                </div>
+                {pending[microDate] && (
+                  <div style={{ fontSize: 12, color: '#c00', marginTop: 6 }}>⚠️ 此日期有待同步嘅批量變更</div>
                 )}
-                <button onClick={toggleMicroDateAvailability} style={{
-                  marginTop: 10, padding: '8px 20px', borderRadius: 6, border: 'none',
-                  background: microDateInfo ? '#ffebee' : '#4CAF50',
-                  color: microDateInfo ? '#c62828' : '#fff',
-                  cursor: 'pointer', fontSize: 13, fontFamily: font, fontWeight: 500,
-                }}>
-                  {microDateInfo ? '❌ 從前台移除此日期' : '✅ 開放此日期到前台'}
-                </button>
               </div>
 
               {/* 時段開關 */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, paddingBottom: 16, borderBottom: '1px solid #f0ebe3' }}>
-                <span style={{ fontSize: 14, color: '#999' }}>
-                  {microActiveCount} / {FRONT_TIMES.length} 個時段開放
-                </span>
+                <span style={{ fontSize: 14, color: '#999' }}>{microTimes.size} / {FRONT_TIMES.length} 開放</span>
                 <div style={{ display: 'flex', gap: 8 }}>
-                  <button onClick={microAllOpen} style={{ padding: '6px 16px', borderRadius: 6, border: 'none', background: '#e8f5e9', color: '#2e7d32', cursor: 'pointer', fontSize: 13, fontFamily: font }}>全部開</button>
-                  <button onClick={microAllClose} style={{ padding: '6px 16px', borderRadius: 6, border: 'none', background: '#ffebee', color: '#c62828', cursor: 'pointer', fontSize: 13, fontFamily: font }}>全部關</button>
+                  <button onClick={() => { setMicroTimes(new Set(FRONT_TIMES)); setMicroDirty(true); }} style={{ padding: '6px 16px', borderRadius: 6, border: 'none', background: '#e8f5e9', color: '#2e7d32', cursor: 'pointer', fontSize: 13, fontFamily: font }}>全開</button>
+                  <button onClick={() => { setMicroTimes(new Set()); setMicroDirty(true); }} style={{ padding: '6px 16px', borderRadius: 6, border: 'none', background: '#ffebee', color: '#c62828', cursor: 'pointer', fontSize: 13, fontFamily: font }}>全關</button>
                   <button onClick={fetchMicroData} style={{ padding: '6px 16px', borderRadius: 6, border: 'none', background: '#f5f0eb', color: '#5c4a3a', cursor: 'pointer', fontSize: 13, fontFamily: font }}>🔄</button>
                 </div>
               </div>
 
-              {microLoading ? (
-                <p style={{ textAlign: 'center', color: '#999', padding: 30 }}>載入中...</p>
-              ) : (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))', gap: 8 }}>
-                  {FRONT_TIMES.map(time => {
-                    const isOpen = !microDisabled.has(time);
+              {microLoading ? <p style={{ textAlign: 'center', color: '#999', padding: 30 }}>載入中...</p> : (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(90px, 1fr))', gap: 8 }}>
+                  {FRONT_TIMES.map(t => {
+                    const isOn = microTimes.has(t);
                     return (
-                      <button key={time} onClick={() => toggleMicroSlot(time)} style={{
+                      <button key={t} onClick={() => toggleMicroTime(t)} style={{
                         padding: '14px 8px', borderRadius: 8,
-                        border: `2px solid ${isOpen ? '#5c4a3a' : '#e0d8cc'}`,
-                        background: isOpen ? '#5c4a3a' : '#faf6f0',
-                        color: isOpen ? '#fff' : '#c0b8aa',
-                        fontSize: 15, fontWeight: 500, cursor: 'pointer',
-                        transition: 'all 0.2s', fontFamily: font,
-                      }}>{time}</button>
+                        border: `2px solid ${isOn ? '#5c4a3a' : '#e0d8cc'}`,
+                        background: isOn ? '#5c4a3a' : '#faf6f0',
+                        color: isOn ? '#fff' : '#c0b8aa',
+                        fontSize: 15, fontWeight: 500, cursor: 'pointer', fontFamily: font,
+                      }}>{t}</button>
                     );
                   })}
+                </div>
+              )}
+
+              {/* 儲存按鈕 */}
+              {microDirty && (
+                <div style={{ marginTop: 20, display: 'flex', gap: 12 }}>
+                  <button onClick={saveMicro} style={{
+                    flex: 1, padding: 14, background: '#4CAF50', color: '#fff', border: 'none', borderRadius: 8,
+                    fontSize: 15, fontWeight: 600, cursor: 'pointer', fontFamily: font,
+                    boxShadow: '0 4px 12px rgba(76,175,80,0.3)',
+                  }}>
+                    ✅ 儲存 {microDate} 到前台
+                  </button>
+                  <button onClick={fetchMicroData} style={{
+                    padding: '14px 20px', background: '#f5f0eb', color: '#999', border: 'none', borderRadius: 8,
+                    fontSize: 14, cursor: 'pointer', fontFamily: font,
+                  }}>取消</button>
                 </div>
               )}
             </div>
           </>
         )}
 
-        {/* ══════ BLOCKED ══════ */}
+        {/* ══════════════════════ BLOCKED TAB ══════════════════════ */}
         {tab === 'blocked' && (
           <div style={card}>
             <h2 style={{ margin: '0 0 20px', color: '#5c4a3a', fontSize: 18 }}>封鎖日期</h2>
