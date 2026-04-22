@@ -77,11 +77,13 @@ export default function App(){
 
   useEffect(()=>{loadAll();},[loadAll]);
 
+  /* ========== 改咗呢段：自動刷新時段 ========== */
   useEffect(()=>{
     if(!selDate){setDisabledTimes(new Set());setDateBookings([]);return;}
     let c=false;
-    (async()=>{
-      setSlotsLoading(true);
+
+    const fetchSlots=async(showLoading)=>{
+      if(showLoading)setSlotsLoading(true);
       try{
         const [dis,bks]=await Promise.all([
           sbGet(`disabled_timeslots?slot_date=eq.${selDate}`),
@@ -94,10 +96,22 @@ export default function App(){
       }catch(e){
         if(!c){setDisabledTimes(new Set());setDateBookings([]);}
       }
-      if(!c)setSlotsLoading(false);
-    })();
-    return()=>{c=true;};
+      if(!c&&showLoading)setSlotsLoading(false);
+    };
+
+    // 第一次載入（顯示 loading）
+    fetchSlots(true);
+
+    // 每 30 秒靜默刷新（Admin 刪除後客人自動見到）
+    const interval=setInterval(()=>fetchSlots(false),30000);
+
+    // 客人切回瀏覽器 tab 時即時刷新
+    const onFocus=()=>fetchSlots(false);
+    window.addEventListener('focus',onFocus);
+
+    return()=>{c=true;clearInterval(interval);window.removeEventListener('focus',onFocus);};
   },[selDate]);
+  /* ========== 改完 ========== */
 
   const randomTechId=useMemo(()=>{
     const rt=techList.find(t=>t.label.includes('隨機'));
@@ -244,7 +258,7 @@ export default function App(){
             </div>);})}
         </div>
 
-        {/* STEP 3: TECHNICIAN (moved before date) */}
+        {/* STEP 3: TECHNICIAN */}
         <div ref={r3} style={crd(step>=2)}>
           <SH n="3" z="指定技師" e="TECHNICIAN" fp={fp} fc={fc}/>
           <div style={{fontSize:'0.56rem',color:TL,marginBottom:14,fontWeight:300,lineHeight:1.7}}>
