@@ -57,19 +57,30 @@ export default function App(){
 
   useEffect(()=>{if(!document.getElementById('p3f')){const l=document.createElement('link');l.id='p3f';l.rel='stylesheet';l.href='https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,600;1,400&family=Noto+Serif+TC:wght@200;300;400;500;600&family=Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300;1,400&display=swap';document.head.appendChild(l);}},[]);
 
+  /* ═══════════════════════════════════════════════════════
+     🔧 修正 1：載入可用日期
+     - 改用 status=eq.available（只顯示明確開放嘅日期）
+     - 加入 blocked_dates 過濾
+     ═══════════════════════════════════════════════════════ */
   const loadAll=useCallback(async()=>{
     setLoading(true);setLoadErr(null);
     try{
       const today=new Date().toISOString().split('T')[0];
-      const [svcs,vars,adds,techs,dts]=await Promise.all([
+      const [svcs,vars,adds,techs,dts,blocked]=await Promise.all([
         sbGet('services?is_active=eq.true&order=sort_order'),
         sbGet('service_variants?order=service_id,sort_order'),
         sbGet('addons?is_active=eq.true&order=sort_order'),
         sbGet('technicians?is_active=eq.true&order=sort_order'),
-        sbGet(`date_availability?available_date=gte.${today}&status=neq.closed&order=available_date`),
+        sbGet(`date_availability?available_date=gte.${today}&status=eq.available&order=available_date`),
+        sbGet(`blocked_dates?date=gte.${today}`),
       ]);
       setSvcs(svcs);setVars(vars);setAddons(adds);setTechs(techs);
-      setDates(dts.map(d=>({...d,...parseD(d.available_date)})));
+
+      // 過濾掉封鎖日期
+      const blockedSet=new Set((blocked||[]).map(b=>b.date));
+      const availDates=(dts||[]).filter(d=>!blockedSet.has(d.available_date));
+
+      setDates(availDates.map(d=>({...d,...parseD(d.available_date)})));
       if(techs.length>0)setTid(techs[techs.length-1].id);
     }catch(e){setLoadErr(e.message);}
     setLoading(false);
@@ -77,6 +88,12 @@ export default function App(){
 
   useEffect(()=>{loadAll();},[loadAll]);
 
+  /* ═══════════════════════════════════════════════════════
+     🔧 修正 2：載入時段
+     - slot_time 加 .slice(0,5) 統一格式
+       DB 返回 '10:00:00'，前台用 '10:00'
+       唔 slice 就永遠 match 唔到 → 呢個係同步失敗嘅根本原因
+     ═══════════════════════════════════════════════════════ */
   useEffect(()=>{
     if(!selDate){setDisabledTimes(new Set());setDateBookings([]);return;}
     let c=false;
@@ -88,8 +105,9 @@ export default function App(){
           sbGet(`bookings?select=booking_time,technician_id&booking_date=eq.${selDate}&status=neq.cancelled`)
         ]);
         if(!c){
-          setDisabledTimes(new Set((dis||[]).map(s=>s.slot_time)));
-          setDateBookings(bks||[]);
+          // ✅ 關鍵修正：.slice(0,5) 將 '10:00:00' 轉為 '10:00'
+          setDisabledTimes(new Set((dis||[]).map(s=>(s.slot_time||'').slice(0,5))));
+          setDateBookings((bks||[]).map(b=>({...b,booking_time:(b.booking_time||'').slice(0,5)})));
         }
       }catch(e){
         if(!c){setDisabledTimes(new Set());setDateBookings([]);}
@@ -227,8 +245,6 @@ export default function App(){
               </div>
               <div style={{fontSize:'0.66rem',color:TM,margin:'8px 0 4px',lineHeight:1.7,fontWeight:300}}>{s.description_zh}</div>
               <div style={{fontFamily:fc,fontSize:'0.62rem',color:TL,lineHeight:1.6,fontStyle:'italic'}}>{s.description_en}</div>
-
-              {/* ✅ 修改 1：時間顯示 — 加咗 fallback，冇 duration_zh 就用 duration 數字 */}
               {(s.duration_zh || s.duration) ? (
                 <div style={{display:'flex',alignItems:'center',gap:5,marginTop:10}}>
                   <Clock size={11} color={TL} strokeWidth={1.5}/>
@@ -237,7 +253,6 @@ export default function App(){
                   </span>
                 </div>
               ) : null}
-
               {hv&&sel&&(<div style={{display:'flex',flexWrap:'wrap',gap:8,marginTop:14}}>
                 {sv_.map((v,idx)=>{const vs=(vi[s.id]||0)===idx;return(
                   <button key={v.id} onClick={e=>{e.stopPropagation();setVi(p=>({...p,[s.id]:idx}));}}
@@ -275,7 +290,7 @@ export default function App(){
         {/* STEP 4: DATE */}
         <div ref={r4} style={crd(step>=2)}>
           <SH n="4" z="選擇日期" e="SELECT DATE" fp={fp} fc={fc}/>
-          {dateList.length===0?(<div style={{textAlign:'center',padding:20,fontSize:'0.68rem',color:TL}}>暫無可預約日期</div>):(
+          {dateList.length===0?(<div style={{textAlign:'center',padding:20,fontSize:'0.68rem',color:TL}}>暫無可預約日期，請稍後再試</div>):(
             <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:7}}>
               {dateList.map(d=>{const sel=selDate===d.available_date;const full=d.status==='full';const c=getDC(d.status);return(
                 <motion.div key={d.available_date} whileTap={full?{}:{scale:0.94}} onClick={()=>{if(!full)pickDate(d.available_date);}}
@@ -375,24 +390,10 @@ export default function App(){
         <div style={{textAlign:'center',fontSize:'0.48rem',color:TLL,lineHeight:1.8,marginTop:8}}>提交後我們將透過 WhatsApp 與您確認預約</div>
       </div>
 
-      {/* ✅ 修改 2：Footer 加入 Admin 登入連結 */}
       <div style={{background:'#1a1814',padding:'28px 22px',textAlign:'center'}}>
         <div style={{fontFamily:fp,fontSize:'0.9rem',fontWeight:500,color:P,fontStyle:'italic'}}>J.LAB</div>
         <div style={{fontFamily:fc,fontSize:'0.5rem',letterSpacing:'0.2em',color:'#665e52',marginTop:8,fontStyle:'italic'}}>LASH & BEAUTY STUDIO</div>
-        <a href="/admin" style={{
-          display:'inline-block',
-          marginTop:18,
-          fontSize:'0.42rem',
-          color:'#565248',
-          textDecoration:'none',
-          letterSpacing:'0.12em',
-          fontFamily:fc,
-          fontStyle:'italic',
-          borderBottom:'1px solid #3a3632',
-          paddingBottom:2,
-          opacity:0.6,
-          transition:'opacity 0.2s'
-        }}
+        <a href="/admin" style={{display:'inline-block',marginTop:18,fontSize:'0.42rem',color:'#565248',textDecoration:'none',letterSpacing:'0.12em',fontFamily:fc,fontStyle:'italic',borderBottom:'1px solid #3a3632',paddingBottom:2,opacity:0.6,transition:'opacity 0.2s'}}
         onMouseEnter={e=>e.target.style.opacity='1'}
         onMouseLeave={e=>e.target.style.opacity='0.6'}
         >ADMIN</a>
