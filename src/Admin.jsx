@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 
 /* ═══════════════════ API ═══════════════════ */
 const SB = 'https://vqyfbwnkdpncwvdonbcz.supabase.co';
@@ -13,14 +13,13 @@ const sbPatch = async (p, d) => { const r = await fetch(`${SB}/rest/v1/${p}`, { 
 /* ═══════════════════ CONSTANTS ═══════════════════ */
 const PASS = 'jlab2024';
 const DAYS = ['日', '一', '二', '三', '四', '五', '六'];
-const FRONT_TIMES = [
-  '10:00','10:30','11:00','11:30','12:00','12:30',
-  '13:00','13:30','14:00','14:30','15:00','15:30',
-  '16:00','16:30','17:00','17:30','18:00','18:30',
-  '19:00','19:30','20:00'
-];
+
+// 用於下拉選單（模板時間、休息時間、範圍選擇）
 const ALL_TIMES = [];
-for (let h = 0; h < 24; h++) for (let m = 0; m < 60; m += 30) ALL_TIMES.push(`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`);
+for (let h = 0; h < 24; h++) for (let m = 0; m < 60; m += 30) ALL_TIMES.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
+
+const ALL_TIMES_15 = [];
+for (let h = 0; h < 24; h++) for (let m = 0; m < 60; m += 15) ALL_TIMES_15.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`);
 
 const TEMPLATES = [
   { label: '全日班', from: '10:00', to: '19:00', icon: '☀️' },
@@ -35,6 +34,10 @@ const card = { background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 
 const sTitle = { fontSize: 15, fontWeight: 600, color: '#5c4a3a', marginBottom: 6 };
 const sDesc = { fontSize: 13, color: '#999', marginBottom: 16 };
 const font = "'Noto Serif TC', serif";
+
+/* ═══════════════════ HELPERS ═══════════════════ */
+const toTimeStr = (mins) => `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`;
+const toMins = (t) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
 
 /* ═══════════════════ COMPONENT ═══════════════════ */
 export default function Admin() {
@@ -69,8 +72,13 @@ export default function Admin() {
   const [breakFrom, setBreakFrom] = useState('13:00');
   const [breakTo, setBreakTo] = useState('14:00');
 
+  /* ── Grid Settings（核心改動）── */
+  const [gridStart, setGridStart] = useState('09:00');
+  const [gridEnd, setGridEnd] = useState('21:00');
+  const [gridInterval, setGridInterval] = useState(30);
+
   /* ── DB state for active date ── */
-  const [dbTimes, setDbTimes] = useState(new Set());
+  const [dbDisabled, setDbDisabled] = useState(new Set());
   const [dbStatus, setDbStatus] = useState(null);
   const [gridLoading, setGridLoading] = useState(false);
 
@@ -85,7 +93,41 @@ export default function Admin() {
   const navBtn = { padding: '8px 16px', background: '#f5f0eb', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 16, color: '#5c4a3a', fontFamily: font };
   const ddStyle = { padding: '6px 10px', border: '1px solid #ddd', borderRadius: 4, fontSize: 13, fontFamily: font, flex: 1, minWidth: 0 };
 
+  /* ═══════════════════ DYNAMIC GRID TIMES ═══════════════════ */
+  const gridTimes = useMemo(() => {
+    const times = [];
+    let mins = toMins(gridStart);
+    const end = toMins(gridEnd);
+    while (mins <= end) {
+      times.push(toTimeStr(mins));
+      mins += gridInterval;
+    }
+    return times;
+  }, [gridStart, gridEnd, gridInterval]);
+
+  // 下拉選單嘅時間選項（按 interval 分粒度）
+  const rangeOptions = useMemo(() => {
+    return gridInterval === 15 ? ALL_TIMES_15 : ALL_TIMES;
+  }, [gridInterval]);
+
+  // 自動適應模板範圍
+  const autoFitRange = () => {
+    const starts = templates.filter(t => t.from).map(t => toMins(t.from));
+    const ends = templates.filter(t => t.to).map(t => toMins(t.to));
+    if (!starts.length || !ends.length) return;
+    const earliest = Math.max(0, Math.min(...starts) - 30);
+    const latest = Math.min(23 * 60 + 30, Math.max(...ends) + 30);
+    setGridStart(toTimeStr(earliest));
+    setGridEnd(toTimeStr(latest));
+    showToast(`📐 已自動適應：${toTimeStr(earliest)} – ${toTimeStr(latest)}`);
+  };
+
   /* ── Derived ── */
+  const dbTimes = useMemo(() => {
+    if (dbStatus !== 'available') return new Set();
+    return new Set(gridTimes.filter(t => !dbDisabled.has(t)));
+  }, [dbStatus, dbDisabled, gridTimes]);
+
   const displayTimes = pending[activeDate] || dbTimes;
   const isInPending = !!pending[activeDate];
   const pendingCount = Object.keys(pending).length;
@@ -102,12 +144,7 @@ export default function Admin() {
       ]);
       const info = dateData?.[0];
       setDbStatus(info?.status || null);
-      if (!info || info.status !== 'available') {
-        setDbTimes(new Set());
-      } else {
-        const disSet = new Set((disData || []).map(r => r.slot_time?.slice(0, 5)));
-        setDbTimes(new Set(FRONT_TIMES.filter(t => !disSet.has(t))));
-      }
+      setDbDisabled(new Set((disData || []).map(r => r.slot_time?.slice(0, 5))));
     } catch (e) { console.error(e); }
     setGridLoading(false);
   }, []);
@@ -182,7 +219,7 @@ export default function Admin() {
     if (!activeDate) return;
     setPending(prev => {
       const next = { ...prev };
-      next[activeDate] = on ? new Set(FRONT_TIMES) : new Set();
+      next[activeDate] = on ? new Set(gridTimes) : new Set();
       return next;
     });
   };
@@ -195,11 +232,11 @@ export default function Admin() {
     if (!tmpl.from) {
       dates.forEach(d => { next[d] = new Set(); });
     } else {
-      const times = FRONT_TIMES.filter(t => t >= tmpl.from && t <= tmpl.to);
+      const times = gridTimes.filter(t => t >= tmpl.from && t <= tmpl.to);
       dates.forEach(d => { next[d] = new Set(times); });
     }
     setPending(next);
-    showToast(`✏️ 已套用「${tmpl.label}」到 ${dates.length} 個日期（查看右邊時段格）`);
+    showToast(`✏️ 已套用「${tmpl.label}」到 ${dates.length} 個日期`);
   };
 
   /* ═══════════════════ BREAK ═══════════════════ */
@@ -208,7 +245,7 @@ export default function Admin() {
     if (!dates.length) return alert('請先套用營業模板，再設定休息時段！');
     if (breakFrom >= breakTo) return alert('開始時間必須早於結束時間！');
     const next = { ...pending };
-    const bTimes = FRONT_TIMES.filter(t => t >= breakFrom && t < breakTo);
+    const bTimes = gridTimes.filter(t => t >= breakFrom && t < breakTo);
     dates.forEach(d => {
       next[d] = new Set(next[d]);
       bTimes.forEach(t => next[d].delete(t));
@@ -242,7 +279,7 @@ export default function Admin() {
       const disRows = [];
       entries.forEach(([d, times]) => {
         if (times.size > 0) {
-          FRONT_TIMES.forEach(t => {
+          gridTimes.forEach(t => {
             if (!times.has(t)) disRows.push({ slot_date: d, slot_time: t });
           });
         }
@@ -356,31 +393,21 @@ export default function Admin() {
         ))}
       </div>
 
-      {/* ══════════ 唯一嘅同步按鈕 — Sticky Bar ══════════ */}
+      {/* ══════════ Sticky Sync Bar ══════════ */}
       {pendingCount > 0 && tab === 'timeslots' && (
         <div style={{ position: 'sticky', top: 0, zIndex: 100, background: 'linear-gradient(135deg, #FFF3E0, #FFE0B2)', borderBottom: '2px solid #FFB74D' }}>
           <div style={{ padding: '14px 30px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <span style={{ color: '#E65100', fontSize: 14, fontWeight: 600 }}>
-                ⏳ {pendingCount} 個日期待同步
-              </span>
-              <button onClick={() => setShowPendingList(!showPendingList)} style={{
-                padding: '4px 12px', background: 'transparent', border: '1px solid #FFB74D',
-                borderRadius: 4, color: '#E65100', cursor: 'pointer', fontSize: 12, fontFamily: font
-              }}>{showPendingList ? '收起 ▲' : '查看列表 ▼'}</button>
+              <span style={{ color: '#E65100', fontSize: 14, fontWeight: 600 }}>⏳ {pendingCount} 個日期待同步</span>
+              <button onClick={() => setShowPendingList(!showPendingList)} style={{ padding: '4px 12px', background: 'transparent', border: '1px solid #FFB74D', borderRadius: 4, color: '#E65100', cursor: 'pointer', fontSize: 12, fontFamily: font }}>
+                {showPendingList ? '收起 ▲' : '查看列表 ▼'}
+              </button>
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={() => { setPending({}); showToast('已清除所有待同步'); setShowPendingList(false); }} style={{
-                padding: '8px 16px', background: '#fff', border: '1px solid #ccc', borderRadius: 6, cursor: 'pointer', fontSize: 13, color: '#666', fontFamily: font
-              }}>取消全部</button>
-              <button onClick={syncPending} style={{
-                padding: '8px 24px', background: '#4CAF50', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 14, fontWeight: 600, fontFamily: font,
-                boxShadow: '0 2px 8px rgba(76,175,80,0.3)',
-              }}>✅ 確認同步到前台</button>
+              <button onClick={() => { setPending({}); showToast('已清除所有待同步'); setShowPendingList(false); }} style={{ padding: '8px 16px', background: '#fff', border: '1px solid #ccc', borderRadius: 6, cursor: 'pointer', fontSize: 13, color: '#666', fontFamily: font }}>取消全部</button>
+              <button onClick={syncPending} style={{ padding: '8px 24px', background: '#4CAF50', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 14, fontWeight: 600, fontFamily: font, boxShadow: '0 2px 8px rgba(76,175,80,0.3)' }}>✅ 確認同步到前台</button>
             </div>
           </div>
-
-          {/* 展開待同步列表 */}
           {showPendingList && (
             <div style={{ padding: '0 30px 14px', maxHeight: 240, overflowY: 'auto' }}>
               <div style={{ background: '#fff', borderRadius: 8, overflow: 'hidden' }}>
@@ -393,9 +420,7 @@ export default function Admin() {
                         {times.size > 0 ? `${times.size} 個時段開放` : '全日關閉'}
                       </span>
                     </div>
-                    <button onClick={() => removePendingDate(date)} style={{
-                      padding: '3px 10px', background: '#ffebee', border: '1px solid #ffcdd2', borderRadius: 4, color: '#c62828', cursor: 'pointer', fontSize: 11, fontFamily: font
-                    }}>移除</button>
+                    <button onClick={() => removePendingDate(date)} style={{ padding: '3px 10px', background: '#ffebee', border: '1px solid #ffcdd2', borderRadius: 4, color: '#c62828', cursor: 'pointer', fontSize: 11, fontFamily: font }}>移除</button>
                   </div>
                 ))}
               </div>
@@ -539,13 +564,11 @@ export default function Admin() {
                 )}
               </div>
 
-              {/* 右：時段格 */}
+              {/* ════════ 右：時段格（核心改動）════════ */}
               <div style={card}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                  <div>
-                    <div style={{ fontSize: 15, fontWeight: 600, color: '#5c4a3a' }}>
-                      🕐 {activeDate}（週{DAYS[activeDow]}）
-                    </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                  <div style={{ fontSize: 15, fontWeight: 600, color: '#5c4a3a' }}>
+                    🕐 {activeDate}（週{DAYS[activeDow]}）
                   </div>
                   <div style={{ display: 'flex', gap: 6 }}>
                     <button onClick={() => setAllTimes(true)} style={{ padding: '5px 12px', borderRadius: 6, border: 'none', background: '#e8f5e9', color: '#2e7d32', cursor: 'pointer', fontSize: 12, fontFamily: font }}>全開</button>
@@ -554,39 +577,85 @@ export default function Admin() {
                   </div>
                 </div>
 
+                {/* ── 顯示範圍設定 ── */}
+                <div style={{
+                  padding: '10px 14px', borderRadius: 8, marginBottom: 12,
+                  background: '#f9f6f3', border: '1px solid #e8e0d8',
+                  display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', fontSize: 13,
+                }}>
+                  <span style={{ color: '#5c4a3a', fontWeight: 500 }}>範圍</span>
+                  <select value={gridStart} onChange={e => setGridStart(e.target.value)} style={{ padding: '4px 8px', border: '1px solid #ddd', borderRadius: 4, fontSize: 13, fontFamily: font }}>
+                    {rangeOptions.map(t => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                  <span style={{ color: '#999' }}>至</span>
+                  <select value={gridEnd} onChange={e => setGridEnd(e.target.value)} style={{ padding: '4px 8px', border: '1px solid #ddd', borderRadius: 4, fontSize: 13, fontFamily: font }}>
+                    {rangeOptions.map(t => <option key={t} value={t}>{t}</option>)}
+                  </select>
+
+                  <span style={{ color: '#5c4a3a', fontWeight: 500, marginLeft: 4 }}>間隔</span>
+                  {[15, 30, 60].map(m => (
+                    <button key={m} onClick={() => setGridInterval(m)} style={{
+                      padding: '4px 10px', borderRadius: 4, border: 'none', cursor: 'pointer', fontSize: 12, fontFamily: font,
+                      background: gridInterval === m ? '#5c4a3a' : '#e8e0d8',
+                      color: gridInterval === m ? '#fff' : '#5c4a3a',
+                      fontWeight: gridInterval === m ? 600 : 400,
+                    }}>{m}分</button>
+                  ))}
+
+                  <button onClick={autoFitRange} style={{
+                    padding: '4px 10px', borderRadius: 4, border: '1px solid #a5d6a7',
+                    background: '#e8f5e9', color: '#2e7d32', cursor: 'pointer', fontSize: 12, fontFamily: font,
+                    marginLeft: 'auto',
+                  }}>📐 自動</button>
+                </div>
+
                 {/* 狀態 Banner */}
                 <div style={{
-                  padding: '8px 12px', borderRadius: 6, marginBottom: 14, fontSize: 12,
+                  padding: '8px 12px', borderRadius: 6, marginBottom: 12, fontSize: 12,
                   background: isInPending ? '#FFF3E0' : dbStatus === 'available' ? '#e8f5e9' : '#f5f5f5',
                   color: isInPending ? '#E65100' : dbStatus === 'available' ? '#2e7d32' : '#999',
                   border: `1px solid ${isInPending ? '#FFB74D' : dbStatus === 'available' ? '#a5d6a7' : '#e0e0e0'}`,
                 }}>
                   {isInPending
-                    ? `⏳ 有未同步嘅變更 — ${displayTimes.size} 個時段開放`
+                    ? `⏳ 有未同步嘅變更 — ${displayTimes.size} / ${gridTimes.length} 個時段開放`
                     : dbStatus === 'available'
-                    ? `✅ 已同步 — ${displayTimes.size} 個時段開放`
+                    ? `✅ 已同步 — ${displayTimes.size} / ${gridTimes.length} 個時段開放`
                     : '🔒 未開放（前台不顯示）'
                   }
                 </div>
 
-                {/* 時段格 */}
+                {/* 時段格（動態列數）*/}
                 {gridLoading ? <p style={{ textAlign: 'center', color: '#999', padding: 30 }}>載入中...</p> : (
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 6 }}>
-                    {FRONT_TIMES.map(t => {
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: `repeat(auto-fill, minmax(${gridInterval === 15 ? '58px' : '68px'}, 1fr))`,
+                    gap: 5,
+                    maxHeight: 480,
+                    overflowY: 'auto',
+                    padding: '2px 0',
+                  }}>
+                    {gridTimes.map(t => {
                       const isOn = displayTimes.has(t);
                       return (
                         <button key={t} onClick={() => toggleTime(t)} style={{
-                          padding: '12px 4px', borderRadius: 6,
+                          padding: gridInterval === 15 ? '8px 2px' : '10px 4px',
+                          borderRadius: 6,
                           border: `2px solid ${isOn ? '#5c4a3a' : '#e0d8cc'}`,
                           background: isOn ? '#5c4a3a' : '#faf6f0',
                           color: isOn ? '#fff' : '#c0b8aa',
-                          fontSize: 14, fontWeight: 500, cursor: 'pointer', fontFamily: font,
+                          fontSize: gridInterval === 15 ? 12 : 13,
+                          fontWeight: 500, cursor: 'pointer', fontFamily: font,
                           transition: 'all 0.15s',
                         }}>{t}</button>
                       );
                     })}
                   </div>
                 )}
+
+                {/* 時段統計 */}
+                <div style={{ marginTop: 10, fontSize: 11, color: '#999', textAlign: 'right' }}>
+                  {gridTimes.length} 個時段（{gridStart}–{gridEnd}，每 {gridInterval} 分鐘）
+                </div>
               </div>
             </div>
 
