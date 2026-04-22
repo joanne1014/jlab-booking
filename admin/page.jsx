@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { createClient } from '@supabase/supabase-js';
+import Link from 'next/link';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -193,6 +194,31 @@ export default function AdminPage() {
         }}>
           登出
         </button>
+      </div>
+
+      {/* ✅ 新增：導航 Tabs */}
+      <div style={{
+        background: '#fff',
+        borderTop: '1px solid #f0ebe3',
+        padding: '0 30px',
+        display: 'flex',
+        gap: 0,
+        boxShadow: '0 2px 10px rgba(0,0,0,0.03)',
+      }}>
+        {[
+          { href: '/admin', label: '📋 預約管理', active: true },
+          { href: '/admin/services', label: '🛍️ 服務管理', active: false },
+          { href: '/admin/timeslots', label: '🕐 時段管理', active: false },
+        ].map(tab => (
+          <Link key={tab.href} href={tab.href} style={{
+            padding: '14px 24px',
+            textDecoration: 'none',
+            fontSize: '14px',
+            color: tab.active ? '#5c4a3a' : '#999',
+            borderBottom: tab.active ? '2px solid #5c4a3a' : '2px solid transparent',
+            fontWeight: tab.active ? 600 : 400,
+          }}>{tab.label}</Link>
+        ))}
       </div>
 
       <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '30px 20px' }}>
