@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 
 const SB = 'https://vqyfbwnkdpncwvdonbcz.supabase.co';
 const SK = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZxeWZid25rZHBuY3d2ZG9uYmN6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY2MDk1MTksImV4cCI6MjA5MjE4NTUxOX0.hMHq_HcpnjiF-4zwSznyMpMx5Ooao5hDhaMi4aXME3M';
@@ -8,9 +8,13 @@ const sbGet = async (p) => { const r = await fetch(`${SB}/rest/v1/${p}`, { heade
 const sbPost = async (t, d) => { const r = await fetch(`${SB}/rest/v1/${t}`, { method: 'POST', headers: { ...H, Prefer: 'return=representation' }, body: JSON.stringify(d) }); if (!r.ok) throw new Error(await r.text()); return r.json(); };
 const sbPatch = async (p, d) => { const r = await fetch(`${SB}/rest/v1/${p}`, { method: 'PATCH', headers: { ...H, Prefer: 'return=representation' }, body: JSON.stringify(d) }); if (!r.ok) throw new Error(await r.text()); return r.json(); };
 const sbDel = async (p) => { const r = await fetch(`${SB}/rest/v1/${p}`, { method: 'DELETE', headers: H }); if (!r.ok) throw new Error(await r.text()); };
+const sbUpsert = async (t, d) => { const r = await fetch(`${SB}/rest/v1/${t}`, { method: 'POST', headers: { ...H, Prefer: 'return=representation,resolution=merge-duplicates' }, body: JSON.stringify(d) }); if (!r.ok) throw new Error(await r.text()); return r.json(); };
 
 const PASS = 'jlab2024';
 const DAYS = ['日', '一', '二', '三', '四', '五', '六'];
+
+/* 前台顯示嘅時段（必須同 App.jsx 一致） */
+const FRONT_TIMES = ['10:00','10:30','11:00','11:30','12:00','12:30','13:00','13:30','14:00','14:30','15:00','15:30','16:00','16:30','17:00','17:30','18:00','18:30','19:00','19:30','20:00'];
 
 const ALL_TIMES = [];
 for (let h = 0; h < 24; h++) {
@@ -47,9 +51,6 @@ export default function Admin() {
   const [filterStatus, setFilterStatus] = useState('all');
   const [stats, setStats] = useState({ today: 0, week: 0, month: 0, total: 0 });
 
-  const [slots, setSlots] = useState([]);
-  const [slLoading, setSlLoading] = useState(false);
-
   /* ── 批量月曆 ── */
   const [calYear, setCalYear] = useState(new Date().getFullYear());
   const [calMonth, setCalMonth] = useState(new Date().getMonth());
@@ -69,10 +70,13 @@ export default function Admin() {
   const [batchLoading, setBatchLoading] = useState(false);
   const [toast, setToast] = useState('');
 
-  /* ── 單日微調月曆 ── */
+  /* ── 單日微調 ── */
   const [microYear, setMicroYear] = useState(new Date().getFullYear());
   const [microMonth, setMicroMonth] = useState(new Date().getMonth());
   const [microDate, setMicroDate] = useState(new Date().toISOString().split('T')[0]);
+  const [microDisabled, setMicroDisabled] = useState(new Set());
+  const [microDateInfo, setMicroDateInfo] = useState(null);
+  const [microLoading, setMicroLoading] = useState(false);
 
   /* ── 封鎖日期 ── */
   const [blocked, setBlocked] = useState([]);
@@ -132,8 +136,6 @@ export default function Admin() {
     setSelDates(dates);
   };
 
-  const getSelectedDows = () => [...new Set([...selDates].map(d => new Date(d + 'T00:00:00').getDay()))].sort();
-
   const isColAllSelected = (dow) => {
     const totalDays = new Date(calYear, calMonth + 1, 0).getDate();
     let count = 0;
@@ -147,30 +149,22 @@ export default function Admin() {
   };
 
   const calendarDays = getCalendarDays(calYear, calMonth);
-  const selectedDows = getSelectedDows();
 
   /* ══════ 單日微調月曆 ══════ */
   const prevMicroMonth = () => { if (microMonth === 0) { setMicroYear(y => y - 1); setMicroMonth(11); } else setMicroMonth(m => m - 1); };
   const nextMicroMonth = () => { if (microMonth === 11) { setMicroYear(y => y + 1); setMicroMonth(0); } else setMicroMonth(m => m + 1); };
-
   const microCalDays = getCalendarDays(microYear, microMonth);
   const microDow = new Date(microDate + 'T00:00:00').getDay();
-  const daySlots = slots.filter(s => s.day_of_week === microDow);
-  const activeCount = daySlots.filter(s => s.is_active).length;
-
-  const batchSummary = selectedDows.map(d => {
-    const ds = slots.filter(s => s.day_of_week === d);
-    return { day: d, total: ds.length, active: ds.filter(s => s.is_active).length };
-  });
+  const microActiveCount = FRONT_TIMES.length - microDisabled.size;
 
   /* ══════ 登入 ══════ */
   const handleLogin = (e) => {
     e.preventDefault();
-    if (pw === PASS) { setAuth(true); fetchBookings(); fetchSlots(); fetchBlocked(); }
+    if (pw === PASS) { setAuth(true); fetchBookings(); fetchBlocked(); }
     else alert('密碼錯誤！');
   };
 
-  /* ══════ 預約 ══════ */
+  /* ══════ 預約管理 ══════ */
   const fetchBookings = async () => {
     setBkLoading(true);
     try {
@@ -202,84 +196,178 @@ export default function Admin() {
 
   const deleteBooking = async (id) => {
     if (!window.confirm('確定要刪除呢筆預約？')) return;
-    try { await sbDel(`bookings?id=eq.${id}`); fetchBookings(); showToast('✅ 預約已刪除，時段已自動釋放'); } catch (e) { console.error(e); }
+    try { await sbDel(`bookings?id=eq.${id}`); fetchBookings(); showToast('✅ 預約已刪除'); } catch (e) { console.error(e); }
   };
 
   useEffect(() => { if (auth) fetchBookings(); }, [filterDate, filterStatus]);
 
-  /* ══════ 時段 ══════ */
-  const fetchSlots = async () => {
-    setSlLoading(true);
-    try { const data = await sbGet('time_slots?order=day_of_week,time'); setSlots(data || []); } catch (e) { console.error(e); }
-    setSlLoading(false);
+  /* ══════════════════════════════════════════
+     核心改動：時段管理 → 直接寫 date_availability + disabled_timeslots
+     前台讀呢兩個表，所以改呢度就同步晒！
+     ══════════════════════════════════════════ */
+
+  /* ── 讀取單日微調數據 ── */
+  const fetchMicroData = useCallback(async () => {
+    if (!microDate) return;
+    setMicroLoading(true);
+    try {
+      const [disData, dateData] = await Promise.all([
+        sbGet(`disabled_timeslots?slot_date=eq.${microDate}`),
+        sbGet(`date_availability?available_date=eq.${microDate}`)
+      ]);
+      setMicroDisabled(new Set((disData || []).map(s => s.slot_time)));
+      setMicroDateInfo(dateData?.[0] || null);
+    } catch (e) { console.error(e); }
+    setMicroLoading(false);
+  }, [microDate]);
+
+  useEffect(() => { if (auth) fetchMicroData(); }, [microDate, auth, fetchMicroData]);
+
+  /* ── 套用模板（核心！寫入 date_availability + disabled_timeslots）── */
+  const applyTemplate = async (tmpl) => {
+    const dates = [...selDates];
+    if (dates.length === 0) { alert('請先選擇日期！'); return; }
+
+    const timeDesc = tmpl.from ? `${tmpl.from} — ${tmpl.to}` : '全部關閉';
+    if (!window.confirm(`套用「${tmpl.icon} ${tmpl.label}」\n\n時段：${timeDesc}\n影響：${dates.length} 個日期\n\n⚠️ 所選日期嘅時段設定會被覆蓋`)) return;
+
+    setBatchLoading(true);
+    try {
+      if (!tmpl.from) {
+        /* 休息日：設為 closed，刪除所有 disabled（因為整日關閉） */
+        await sbUpsert('date_availability', dates.map(d => ({ available_date: d, status: 'closed' })));
+        await sbDel(`disabled_timeslots?slot_date=in.(${dates.join(',')})`);
+      } else {
+        /* 工作日：設為 available，計算邊啲時段要 disable */
+        await sbUpsert('date_availability', dates.map(d => ({ available_date: d, status: 'available' })));
+
+        // 先清除舊嘅 disabled 記錄
+        await sbDel(`disabled_timeslots?slot_date=in.(${dates.join(',')})`);
+
+        // 計算要禁用嘅時段（唔喺開放範圍內嘅）
+        const disabledTimes = FRONT_TIMES.filter(t => t < tmpl.from || t > tmpl.to);
+
+        if (disabledTimes.length > 0) {
+          const rows = dates.flatMap(d => disabledTimes.map(t => ({ slot_date: d, slot_time: t })));
+          await sbPost('disabled_timeslots', rows);
+        }
+      }
+
+      await fetchMicroData();
+      showToast(`✅ 已套用「${tmpl.label}」到 ${dates.length} 個日期`);
+    } catch (e) { console.error(e); alert('操作失敗：' + e.message); }
+    setBatchLoading(false);
   };
 
-  const toggleSlot = async (id, current) => {
-    try { await sbPatch(`time_slots?id=eq.${id}`, { is_active: !current }); setSlots(prev => prev.map(s => s.id === id ? { ...s, is_active: !current } : s)); } catch (e) { console.error(e); }
-  };
-
-  const toggleDayAll = async (day, activate) => {
-    try { await sbPatch(`time_slots?day_of_week=eq.${day}`, { is_active: activate }); setSlots(prev => prev.map(s => s.day_of_week === day ? { ...s, is_active: activate } : s)); } catch (e) { console.error(e); }
-  };
-
-  /* ══════ 模板 ══════ */
+  /* ── 模板 ── */
   const updateTemplate = (idx, field, value) => {
     setTemplates(prev => prev.map((t, i) => i === idx ? { ...t, [field]: value } : t));
   };
 
-  const applyTemplate = async (tmpl) => {
-    const dows = getSelectedDows();
-    if (dows.length === 0) { alert('請先選擇日期！'); return; }
-    const dayNames = dows.map(d => `週${DAYS[d]}`).join('、');
-    const timeDesc = tmpl.from ? `${tmpl.from} — ${tmpl.to}` : '全部關閉';
-    if (!window.confirm(`套用「${tmpl.icon} ${tmpl.label}」\n\n時段：${timeDesc}\n影響：${dayNames}（每週）\n\n⚠️ 現有時段會被覆蓋`)) return;
+  /* ── 休息時段（將指定範圍加入 disabled）── */
+  const applyBreak = async (from, to) => {
+    const dates = [...selDates];
+    if (dates.length === 0) { alert('請先選擇日期！'); return; }
+    if (from >= to) { alert('開始時間必須早於結束時間！'); return; }
+    if (!window.confirm(`設定休息時段 ${from}–${to}\n影響：${dates.length} 個日期\n\n呢個範圍內嘅時段將被關閉`)) return;
+
     setBatchLoading(true);
     try {
-      const dayList = dows.join(',');
-      await sbPatch(`time_slots?day_of_week=in.(${dayList})`, { is_active: false });
-      if (tmpl.from && tmpl.to) {
-        await sbPatch(`time_slots?day_of_week=in.(${dayList})&time=gte.${tmpl.from}&time=lte.${tmpl.to}`, { is_active: true });
+      const breakTimes = FRONT_TIMES.filter(t => t >= from && t < to);
+      if (breakTimes.length > 0) {
+        const rows = dates.flatMap(d => breakTimes.map(t => ({ slot_date: d, slot_time: t })));
+        await sbUpsert('disabled_timeslots', rows);
       }
-      await fetchSlots();
-      showToast(`✅ 已套用「${tmpl.label}」到 ${dayNames}`);
+      await fetchMicroData();
+      showToast(`✅ 已設定休息時段 ${from}–${to}（${dates.length} 日）`);
     } catch (e) { console.error(e); alert('操作失敗：' + e.message); }
     setBatchLoading(false);
   };
 
-  /* ══════ 休息時段 ══════ */
   const updateBreakTemplate = (idx, field, value) => {
     setBreakTemplates(prev => prev.map((t, i) => i === idx ? { ...t, [field]: value } : t));
   };
 
-  const applyBreak = async (from, to) => {
-    const dows = getSelectedDows();
-    if (dows.length === 0) { alert('請先選擇日期！'); return; }
-    if (from >= to) { alert('開始時間必須早於結束時間！'); return; }
-    const dayNames = dows.map(d => `週${DAYS[d]}`).join('、');
-    if (!window.confirm(`設定休息時段 ${from}–${to}\n影響：${dayNames}\n\n呢個範圍內嘅時段將被關閉`)) return;
+  /* ── 自訂範圍 開放/關閉 ── */
+  const batchSetRange = async (activate) => {
+    const dates = [...selDates];
+    if (dates.length === 0) { alert('請先選擇日期！'); return; }
+    if (rangeFrom >= rangeTo) { alert('開始時間必須早於結束時間！'); return; }
+
     setBatchLoading(true);
     try {
-      const dayList = dows.join(',');
-      await sbPatch(`time_slots?day_of_week=in.(${dayList})&time=gte.${from}&time=lt.${to}`, { is_active: false });
-      await fetchSlots();
-      showToast(`✅ 已設定休息時段 ${from}–${to}`);
+      const rangeTimes = FRONT_TIMES.filter(t => t >= rangeFrom && t <= rangeTo);
+
+      if (activate) {
+        /* 開放 = 從 disabled 中刪除 */
+        if (rangeTimes.length > 0) {
+          await sbDel(`disabled_timeslots?slot_date=in.(${dates.join(',')})&slot_time=in.(${rangeTimes.join(',')})`);
+        }
+        // 確保日期存在於 date_availability
+        await sbUpsert('date_availability', dates.map(d => ({ available_date: d, status: 'available' })));
+      } else {
+        /* 關閉 = 加入 disabled */
+        if (rangeTimes.length > 0) {
+          const rows = dates.flatMap(d => rangeTimes.map(t => ({ slot_date: d, slot_time: t })));
+          await sbUpsert('disabled_timeslots', rows);
+        }
+      }
+
+      await fetchMicroData();
+      showToast(`✅ 已${activate ? '開放' : '關閉'} ${rangeFrom}–${rangeTo}（${dates.length} 日）`);
     } catch (e) { console.error(e); alert('操作失敗：' + e.message); }
     setBatchLoading(false);
   };
 
-  /* ══════ 自訂範圍 ══════ */
-  const batchSetRange = async (activate) => {
-    const dows = getSelectedDows();
-    if (dows.length === 0) { alert('請先選擇日期！'); return; }
-    if (rangeFrom >= rangeTo) { alert('開始時間必須早於結束時間！'); return; }
-    setBatchLoading(true);
+  /* ── 單日微調：切換單個時段 ── */
+  const toggleMicroSlot = async (time) => {
+    const isDisabled = microDisabled.has(time);
     try {
-      const dayList = dows.join(',');
-      await sbPatch(`time_slots?day_of_week=in.(${dayList})&time=gte.${rangeFrom}&time=lte.${rangeTo}`, { is_active: activate });
-      await fetchSlots();
-      showToast(`✅ 已${activate ? '開放' : '關閉'} ${rangeFrom}–${rangeTo}`);
-    } catch (e) { console.error(e); alert('操作失敗：' + e.message); }
-    setBatchLoading(false);
+      if (isDisabled) {
+        await sbDel(`disabled_timeslots?slot_date=eq.${microDate}&slot_time=eq.${time}`);
+        setMicroDisabled(prev => { const n = new Set(prev); n.delete(time); return n; });
+      } else {
+        await sbUpsert('disabled_timeslots', [{ slot_date: microDate, slot_time: time }]);
+        setMicroDisabled(prev => new Set([...prev, time]));
+      }
+    } catch (e) { console.error(e); showToast('❌ 操作失敗'); }
+  };
+
+  /* ── 單日微調：全部開放 ── */
+  const microAllOpen = async () => {
+    try {
+      await sbDel(`disabled_timeslots?slot_date=eq.${microDate}`);
+      setMicroDisabled(new Set());
+      await sbUpsert('date_availability', [{ available_date: microDate, status: 'available' }]);
+      setMicroDateInfo({ available_date: microDate, status: 'available' });
+      showToast('✅ 已開放全部時段');
+    } catch (e) { console.error(e); }
+  };
+
+  /* ── 單日微調：全部關閉 ── */
+  const microAllClose = async () => {
+    try {
+      await sbDel(`disabled_timeslots?slot_date=eq.${microDate}`);
+      const rows = FRONT_TIMES.map(t => ({ slot_date: microDate, slot_time: t }));
+      await sbPost('disabled_timeslots', rows);
+      setMicroDisabled(new Set(FRONT_TIMES));
+      showToast('✅ 已關閉全部時段');
+    } catch (e) { console.error(e); }
+  };
+
+  /* ── 單日微調：開放/關閉日期 ── */
+  const toggleMicroDateAvailability = async () => {
+    try {
+      if (microDateInfo) {
+        await sbDel(`date_availability?available_date=eq.${microDate}`);
+        setMicroDateInfo(null);
+        showToast('✅ 已從前台移除此日期');
+      } else {
+        await sbUpsert('date_availability', [{ available_date: microDate, status: 'available' }]);
+        setMicroDateInfo({ available_date: microDate, status: 'available' });
+        showToast('✅ 已開放此日期到前台');
+      }
+    } catch (e) { console.error(e); }
   };
 
   /* ══════ 封鎖日期 ══════ */
@@ -291,7 +379,7 @@ export default function Admin() {
   const statusColor = (s) => s === 'confirmed' ? '#4CAF50' : s === 'cancelled' ? '#f44336' : s === 'completed' ? '#2196F3' : '#FF9800';
   const statusText = (s) => s === 'confirmed' ? '已確認' : s === 'cancelled' ? '已取消' : s === 'completed' ? '已完成' : '待確認';
 
-  /* ══════════════════════════════ */
+  /* ══════════════════════════════ RENDER ══════════════════════════════ */
   if (!auth) {
     return (
       <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(135deg, #f5f0eb 0%, #e8e0d8 100%)', fontFamily: font }}>
@@ -392,7 +480,7 @@ export default function Admin() {
           </>
         )}
 
-        {/* ══════ TIME SLOTS ══════ */}
+        {/* ══════ TIME SLOTS（核心改動區域）══════ */}
         {tab === 'timeslots' && (
           <>
             {batchLoading && (
@@ -403,6 +491,15 @@ export default function Admin() {
                 </div>
               </div>
             )}
+
+            {/* ── 重要提示 ── */}
+            <div style={{ ...card, background: '#e8f5e9', border: '1px solid #a5d6a7' }}>
+              <div style={{ fontSize: 14, color: '#2e7d32', lineHeight: 1.8 }}>
+                💡 <b>使用流程：</b><br/>
+                ① 喺下方月曆選擇日期 → ② 套用營業模板（開放時段）→ ③ 可選：設定休息時段<br/>
+                ④ 用「單日微調」逐日微調個別時段 → 前台即時同步！
+              </div>
+            </div>
 
             {/* ─── 1. 批量月曆 ─── */}
             <div style={card}>
@@ -421,8 +518,7 @@ export default function Admin() {
                   return (
                     <button key={`h${i}`} onClick={() => toggleWeekdayCol(i)} style={{
                       padding: '10px 0', borderRadius: 8, border: 'none', cursor: 'pointer',
-                      background: allSel ? '#5c4a3a' : '#f0ebe3',
-                      color: allSel ? '#fff' : '#5c4a3a',
+                      background: allSel ? '#5c4a3a' : '#f0ebe3', color: allSel ? '#fff' : '#5c4a3a',
                       fontSize: 13, fontWeight: 600, fontFamily: font, transition: 'all 0.2s',
                     }}>{d}</button>
                   );
@@ -436,10 +532,8 @@ export default function Admin() {
                     <button key={`d${i}`} onClick={() => toggleDate(day)} style={{
                       padding: '12px 4px', borderRadius: 8, cursor: 'pointer',
                       border: today ? '2px solid #FF9800' : sel ? '2px solid #5c4a3a' : '2px solid transparent',
-                      background: sel ? '#5c4a3a' : 'transparent',
-                      color: sel ? '#fff' : today ? '#FF9800' : '#888',
-                      fontSize: 14, fontWeight: today || sel ? 700 : 400,
-                      fontFamily: font, transition: 'all 0.15s',
+                      background: sel ? '#5c4a3a' : 'transparent', color: sel ? '#fff' : today ? '#FF9800' : '#888',
+                      fontSize: 14, fontWeight: today || sel ? 700 : 400, fontFamily: font, transition: 'all 0.15s',
                     }}>{day}</button>
                   );
                 })}
@@ -454,20 +548,17 @@ export default function Admin() {
 
               {selDates.size > 0 && (
                 <div style={{ marginTop: 14, padding: '12px 16px', background: '#f0ebe3', borderRadius: 8 }}>
-                  <div style={{ fontSize: 13, color: '#5c4a3a' }}>
-                    已選 <b>{selDates.size}</b> 日
-                  </div>
-                  <div style={{ fontSize: 12, color: '#888', marginTop: 4 }}>
-                    涉及星期：<b>{selectedDows.map(d => `週${DAYS[d]}`).join('、')}</b>
-                  </div>
-                  <div style={{ fontSize: 11, color: '#c00', marginTop: 4 }}>
-                    ⚠️ 批量操作會套用到每週呢啲星期嘅時段設定
+                  <div style={{ fontSize: 13, color: '#5c4a3a' }}>已選 <b>{selDates.size}</b> 日</div>
+                  <div style={{ fontSize: 12, color: '#888', marginTop: 6, lineHeight: 1.8 }}>
+                    {[...selDates].sort().map(d => (
+                      <span key={d} style={{ display: 'inline-block', padding: '2px 8px', margin: 2, background: '#e8e0d8', borderRadius: 4, fontSize: 11 }}>{d}</span>
+                    ))}
                   </div>
                 </div>
               )}
             </div>
 
-            {/* ─── 2. 快速模板 + 概覽（合併） ─── */}
+            {/* ─── 2. 快速模板 ─── */}
             <div style={card}>
               <div style={sectionTitle}>⚡ 快速模板</div>
               <div style={sectionDesc}>
@@ -477,10 +568,7 @@ export default function Admin() {
 
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))', gap: 12 }}>
                 {templates.map((t, i) => (
-                  <div key={i} style={{
-                    padding: 16, borderRadius: 10, border: '1px solid #e0d8cc', background: '#fff',
-                    opacity: selDates.size === 0 ? 0.5 : 1, transition: 'opacity 0.2s',
-                  }}>
+                  <div key={i} style={{ padding: 16, borderRadius: 10, border: '1px solid #e0d8cc', background: '#fff', opacity: selDates.size === 0 ? 0.5 : 1, transition: 'opacity 0.2s' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
                       <span style={{ fontSize: 22 }}>{t.icon}</span>
                       <span style={{ fontSize: 14, fontWeight: 600, color: '#5c4a3a' }}>{t.label}</span>
@@ -503,42 +591,10 @@ export default function Admin() {
                       background: selDates.size === 0 ? '#ddd' : '#5c4a3a', color: '#fff',
                       cursor: selDates.size === 0 ? 'not-allowed' : 'pointer',
                       fontSize: 13, fontFamily: font, fontWeight: 500, transition: 'background 0.2s',
-                    }}>套用</button>
+                    }}>套用到 {selDates.size} 個日期</button>
                   </div>
                 ))}
               </div>
-
-              {/* ── 概覽（合併到模板卡片內） ── */}
-              {batchSummary.length > 0 && (
-                <>
-                  <div style={{ borderTop: '1px solid #f0ebe3', marginTop: 24, paddingTop: 20 }}>
-                    <div style={sectionTitle}>📊 已選日期時段概覽</div>
-                    <div style={sectionDesc}>目前每個星期嘅開放時段數量</div>
-                  </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: 10 }}>
-                    {batchSummary.map(s => {
-                      const datesForDay = [...selDates]
-                        .filter(d => new Date(d + 'T00:00:00').getDay() === s.day)
-                        .sort();
-                      return (
-                        <div key={s.day} style={{ padding: 14, borderRadius: 8, background: '#faf6f0', textAlign: 'center', border: '1px solid #e0d8cc' }}>
-                          <div style={{ fontSize: 14, fontWeight: 600, color: '#5c4a3a' }}>週{DAYS[s.day]}</div>
-                          <div style={{ fontSize: 22, fontWeight: 'bold', color: s.active === 0 ? '#f44336' : '#4CAF50', margin: '6px 0' }}>{s.active}</div>
-                          <div style={{ fontSize: 11, color: '#999' }}>/ {s.total} 個時段</div>
-                          <div style={{ fontSize: 11, color: '#888', marginTop: 8, lineHeight: 1.6 }}>
-                            {datesForDay.map(d => (
-                              <div key={d} style={{
-                                display: 'inline-block', padding: '2px 6px', margin: 2,
-                                background: '#e8e0d8', borderRadius: 4, fontSize: 10,
-                              }}>{d.slice(5)}</div>
-                            ))}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </>
-              )}
             </div>
 
             {/* ─── 3. 休息時段 ─── */}
@@ -554,13 +610,9 @@ export default function Admin() {
                 例如：套用「全日班 10:00–19:00」→ 設定「午休 13:00–14:00」→ 結果為 10:00–13:00 + 14:00–19:00
               </div>
 
-              {/* 休息模板 */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))', gap: 12, marginBottom: 20 }}>
                 {breakTemplates.map((t, i) => (
-                  <div key={i} style={{
-                    padding: 16, borderRadius: 10, border: '1px solid #fce4ec', background: '#fff',
-                    opacity: selDates.size === 0 ? 0.5 : 1, transition: 'opacity 0.2s',
-                  }}>
+                  <div key={i} style={{ padding: 16, borderRadius: 10, border: '1px solid #fce4ec', background: '#fff', opacity: selDates.size === 0 ? 0.5 : 1, transition: 'opacity 0.2s' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
                       <span style={{ fontSize: 22 }}>{t.icon}</span>
                       <span style={{ fontSize: 14, fontWeight: 600, color: '#5c4a3a' }}>{t.label}</span>
@@ -584,7 +636,6 @@ export default function Admin() {
                 ))}
               </div>
 
-              {/* 自訂休息時段 */}
               <div style={{ padding: '16px', background: '#fff8f8', borderRadius: 10, border: '1px solid #fce4ec' }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: '#5c4a3a', marginBottom: 10 }}>自訂休息時段</div>
                 <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -626,12 +677,11 @@ export default function Admin() {
               </div>
             </div>
 
-            {/* ─── 5. 單日微調（有月曆） ─── */}
+            {/* ─── 5. 單日微調（核心改動！）─── */}
             <div style={card}>
               <div style={sectionTitle}>🔧 單日微調</div>
               <div style={sectionDesc}>揀一個日期，微調嗰日嘅時段開關（啡色 = 開放，淺色 = 關閉）</div>
 
-              {/* 微調月曆 */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                 <button onClick={prevMicroMonth} style={navBtnStyle}>◀</button>
                 <span style={{ fontSize: 17, fontWeight: 600, color: '#5c4a3a' }}>{microYear}年 {microMonth + 1}月</span>
@@ -653,43 +703,65 @@ export default function Admin() {
                       border: today && !sel ? '2px solid #FF9800' : sel ? '2px solid #5c4a3a' : '2px solid transparent',
                       background: sel ? '#5c4a3a' : 'transparent',
                       color: sel ? '#fff' : today ? '#FF9800' : '#888',
-                      fontSize: 14, fontWeight: today || sel ? 700 : 400,
-                      fontFamily: font, transition: 'all 0.15s',
+                      fontSize: 14, fontWeight: today || sel ? 700 : 400, fontFamily: font, transition: 'all 0.15s',
                     }}>{day}</button>
                   );
                 })}
               </div>
 
-              {/* 已選日期提示 */}
-              <div style={{ padding: '12px 16px', background: '#f0ebe3', borderRadius: 8, marginBottom: 20 }}>
-                <div style={{ fontSize: 14, color: '#5c4a3a' }}>
+              {/* 日期狀態提示 */}
+              <div style={{ padding: '14px 16px', background: microDateInfo ? '#e8f5e9' : '#fff3e0', borderRadius: 8, marginBottom: 20, border: `1px solid ${microDateInfo ? '#a5d6a7' : '#ffcc80'}` }}>
+                <div style={{ fontSize: 14, color: '#5c4a3a', marginBottom: 6 }}>
                   📌 已選：<b>{microDate}</b>（週{DAYS[microDow]}）
                 </div>
-                <div style={{ fontSize: 12, color: '#c00', marginTop: 4 }}>
-                  ⚠️ 修改會影響所有週{DAYS[microDow]}嘅時段設定
-                </div>
+                {microDateInfo ? (
+                  <div style={{ fontSize: 13, color: '#2e7d32' }}>
+                    ✅ 此日期已開放（狀態：{microDateInfo.status}），前台可見
+                  </div>
+                ) : (
+                  <div style={{ fontSize: 13, color: '#e65100' }}>
+                    ⚠️ 此日期尚未開放，前台<b>不會顯示</b>此日期
+                  </div>
+                )}
+                <button onClick={toggleMicroDateAvailability} style={{
+                  marginTop: 10, padding: '8px 20px', borderRadius: 6, border: 'none',
+                  background: microDateInfo ? '#ffebee' : '#4CAF50',
+                  color: microDateInfo ? '#c62828' : '#fff',
+                  cursor: 'pointer', fontSize: 13, fontFamily: font, fontWeight: 500,
+                }}>
+                  {microDateInfo ? '❌ 從前台移除此日期' : '✅ 開放此日期到前台'}
+                </button>
               </div>
 
               {/* 時段開關 */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, paddingBottom: 16, borderBottom: '1px solid #f0ebe3' }}>
-                <span style={{ fontSize: 14, color: '#999' }}>{activeCount} / {daySlots.length} 個時段開放</span>
+                <span style={{ fontSize: 14, color: '#999' }}>
+                  {microActiveCount} / {FRONT_TIMES.length} 個時段開放
+                </span>
                 <div style={{ display: 'flex', gap: 8 }}>
-                  <button onClick={() => toggleDayAll(microDow, true)} style={{ padding: '6px 16px', borderRadius: 6, border: 'none', background: '#e8f5e9', color: '#2e7d32', cursor: 'pointer', fontSize: 13, fontFamily: font }}>全部開</button>
-                  <button onClick={() => toggleDayAll(microDow, false)} style={{ padding: '6px 16px', borderRadius: 6, border: 'none', background: '#ffebee', color: '#c62828', cursor: 'pointer', fontSize: 13, fontFamily: font }}>全部關</button>
+                  <button onClick={microAllOpen} style={{ padding: '6px 16px', borderRadius: 6, border: 'none', background: '#e8f5e9', color: '#2e7d32', cursor: 'pointer', fontSize: 13, fontFamily: font }}>全部開</button>
+                  <button onClick={microAllClose} style={{ padding: '6px 16px', borderRadius: 6, border: 'none', background: '#ffebee', color: '#c62828', cursor: 'pointer', fontSize: 13, fontFamily: font }}>全部關</button>
+                  <button onClick={fetchMicroData} style={{ padding: '6px 16px', borderRadius: 6, border: 'none', background: '#f5f0eb', color: '#5c4a3a', cursor: 'pointer', fontSize: 13, fontFamily: font }}>🔄</button>
                 </div>
               </div>
 
-              {slLoading ? <p style={{ textAlign: 'center', color: '#999', padding: 30 }}>載入中...</p> : daySlots.length === 0 ? <p style={{ textAlign: 'center', color: '#999', padding: 30 }}>呢日冇時段資料</p> : (
+              {microLoading ? (
+                <p style={{ textAlign: 'center', color: '#999', padding: 30 }}>載入中...</p>
+              ) : (
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))', gap: 8 }}>
-                  {daySlots.map(s => (
-                    <button key={s.id} onClick={() => toggleSlot(s.id, s.is_active)} style={{
-                      padding: '14px 8px', borderRadius: 8,
-                      border: `2px solid ${s.is_active ? '#5c4a3a' : '#e0d8cc'}`,
-                      background: s.is_active ? '#5c4a3a' : '#faf6f0',
-                      color: s.is_active ? '#fff' : '#c0b8aa',
-                      fontSize: 15, fontWeight: 500, cursor: 'pointer', transition: 'all 0.2s', fontFamily: font,
-                    }}>{s.time}</button>
-                  ))}
+                  {FRONT_TIMES.map(time => {
+                    const isOpen = !microDisabled.has(time);
+                    return (
+                      <button key={time} onClick={() => toggleMicroSlot(time)} style={{
+                        padding: '14px 8px', borderRadius: 8,
+                        border: `2px solid ${isOpen ? '#5c4a3a' : '#e0d8cc'}`,
+                        background: isOpen ? '#5c4a3a' : '#faf6f0',
+                        color: isOpen ? '#fff' : '#c0b8aa',
+                        fontSize: 15, fontWeight: 500, cursor: 'pointer',
+                        transition: 'all 0.2s', fontFamily: font,
+                      }}>{time}</button>
+                    );
+                  })}
                 </div>
               )}
             </div>
