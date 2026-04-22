@@ -4,28 +4,26 @@ const SB = 'https://vqyfbwnkdpncwvdonbcz.supabase.co';
 const SK = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZxeWZid25rZHBuY3d2ZG9uYmN6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY2MDk1MTksImV4cCI6MjA5MjE4NTUxOX0.hMHq_HcpnjiF-4zwSznyMpMx5Ooao5hDhaMi4aXME3M';
 const H = { apikey: SK, Authorization: `Bearer ${SK}`, 'Content-Type': 'application/json' };
 
-const sbGet = async (p) => {
-  const r = await fetch(`${SB}/rest/v1/${p}`, { headers: H });
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
-};
-const sbPost = async (t, d) => {
-  const r = await fetch(`${SB}/rest/v1/${t}`, { method: 'POST', headers: { ...H, Prefer: 'return=representation' }, body: JSON.stringify(d) });
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
-};
-const sbPatch = async (p, d) => {
-  const r = await fetch(`${SB}/rest/v1/${p}`, { method: 'PATCH', headers: { ...H, Prefer: 'return=representation' }, body: JSON.stringify(d) });
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
-};
-const sbDel = async (p) => {
-  const r = await fetch(`${SB}/rest/v1/${p}`, { method: 'DELETE', headers: H });
-  if (!r.ok) throw new Error(await r.text());
-};
+const sbGet = async (p) => { const r = await fetch(`${SB}/rest/v1/${p}`, { headers: H }); if (!r.ok) throw new Error(await r.text()); return r.json(); };
+const sbPost = async (t, d) => { const r = await fetch(`${SB}/rest/v1/${t}`, { method: 'POST', headers: { ...H, Prefer: 'return=representation' }, body: JSON.stringify(d) }); if (!r.ok) throw new Error(await r.text()); return r.json(); };
+const sbPatch = async (p, d) => { const r = await fetch(`${SB}/rest/v1/${p}`, { method: 'PATCH', headers: { ...H, Prefer: 'return=representation' }, body: JSON.stringify(d) }); if (!r.ok) throw new Error(await r.text()); return r.json(); };
+const sbDel = async (p) => { const r = await fetch(`${SB}/rest/v1/${p}`, { method: 'DELETE', headers: H }); if (!r.ok) throw new Error(await r.text()); };
 
 const PASS = 'jlab2024';
 const DAYS = ['日', '一', '二', '三', '四', '五', '六'];
+const ALL_TIMES = ['10:00','10:30','11:00','11:30','12:00','12:30','13:00','13:30','14:00','14:30','15:00','15:30','16:00','16:30','17:00','17:30','18:00','18:30','19:00','19:30','20:00'];
+
+const TEMPLATES = [
+  { label: '全日班', desc: '10:00 — 19:00', from: '10:00', to: '19:00', icon: '☀️' },
+  { label: '上午班', desc: '10:00 — 13:30', from: '10:00', to: '13:30', icon: '🌅' },
+  { label: '下午班', desc: '14:00 — 19:00', from: '14:00', to: '19:00', icon: '🌇' },
+  { label: '晚間班', desc: '17:00 — 20:00', from: '17:00', to: '20:00', icon: '🌙' },
+  { label: '休息日', desc: '全部關閉', from: null, to: null, icon: '💤' },
+];
+
+const card = { background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 2px 10px rgba(0,0,0,0.05)', marginBottom: 20 };
+const sectionTitle = { fontSize: 15, fontWeight: 600, color: '#5c4a3a', marginBottom: 6 };
+const sectionDesc = { fontSize: 13, color: '#999', marginBottom: 16 };
 
 export default function Admin() {
   const [auth, setAuth] = useState(false);
@@ -42,22 +40,26 @@ export default function Admin() {
   const [selDay, setSelDay] = useState(1);
   const [slLoading, setSlLoading] = useState(false);
 
+  // NEW: Batch
+  const [selDays, setSelDays] = useState([]);
+  const [rangeFrom, setRangeFrom] = useState('10:00');
+  const [rangeTo, setRangeTo] = useState('19:00');
+  const [copyFrom, setCopyFrom] = useState(1);
+  const [batchLoading, setBatchLoading] = useState(false);
+  const [toast, setToast] = useState('');
+
   const [blocked, setBlocked] = useState([]);
   const [newBD, setNewBD] = useState('');
   const [newBR, setNewBR] = useState('');
 
   const font = "'Noto Serif TC', serif";
 
+  const showToast = (msg) => { setToast(msg); setTimeout(() => setToast(''), 3000); };
+
   const handleLogin = (e) => {
     e.preventDefault();
-    if (pw === PASS) {
-      setAuth(true);
-      fetchBookings();
-      fetchSlots();
-      fetchBlocked();
-    } else {
-      alert('密碼錯誤！');
-    }
+    if (pw === PASS) { setAuth(true); fetchBookings(); fetchSlots(); fetchBlocked(); }
+    else alert('密碼錯誤！');
   };
 
   // ── Bookings ──
@@ -87,31 +89,24 @@ export default function Admin() {
   };
 
   const updateStatus = async (id, status) => {
-    try {
-      await sbPatch(`bookings?id=eq.${id}`, { status });
-      fetchBookings();
-    } catch (e) { console.error(e); }
+    try { await sbPatch(`bookings?id=eq.${id}`, { status }); fetchBookings(); } catch (e) { console.error(e); }
   };
 
   const deleteBooking = async (id) => {
-    if (!window.confirm('確定要刪除呢筆預約？')) return;
+    if (!window.confirm('確定要刪除呢筆預約？\n\n刪除後，該時段將自動開放俾其他客人預約。')) return;
     try {
       await sbDel(`bookings?id=eq.${id}`);
       fetchBookings();
+      showToast('✅ 預約已刪除，時段已自動釋放');
     } catch (e) { console.error(e); }
   };
 
-  useEffect(() => {
-    if (auth) fetchBookings();
-  }, [filterDate, filterStatus]);
+  useEffect(() => { if (auth) fetchBookings(); }, [filterDate, filterStatus]);
 
   // ── Time Slots ──
   const fetchSlots = async () => {
     setSlLoading(true);
-    try {
-      const data = await sbGet('time_slots?order=day_of_week,time');
-      setSlots(data || []);
-    } catch (e) { console.error(e); }
+    try { const data = await sbGet('time_slots?order=day_of_week,time'); setSlots(data || []); } catch (e) { console.error(e); }
     setSlLoading(false);
   };
 
@@ -129,50 +124,91 @@ export default function Admin() {
     } catch (e) { console.error(e); }
   };
 
-  // ── Blocked Dates ──
-  const fetchBlocked = async () => {
-    try {
-      const data = await sbGet('blocked_dates?order=date');
-      setBlocked(data || []);
-    } catch (e) { console.error(e); }
+  // ── NEW: Batch Operations ──
+  const toggleBatchDay = (day) => {
+    setSelDays(prev => prev.includes(day) ? prev.filter(d => d !== day) : [...prev, day].sort());
   };
 
+  const applyTemplate = async (tmpl) => {
+    if (selDays.length === 0) { alert('請先選擇要套用嘅日期！'); return; }
+    const dayNames = selDays.map(d => `週${DAYS[d]}`).join('、');
+    if (!window.confirm(`確定要將「${tmpl.icon} ${tmpl.label}」套用到 ${dayNames}？\n\n⚠️ 已選日期嘅現有時段會被覆蓋`)) return;
+    setBatchLoading(true);
+    try {
+      const dayList = selDays.join(',');
+      await sbPatch(`time_slots?day_of_week=in.(${dayList})`, { is_active: false });
+      if (tmpl.from && tmpl.to) {
+        await sbPatch(`time_slots?day_of_week=in.(${dayList})&time=gte.${tmpl.from}&time=lte.${tmpl.to}`, { is_active: true });
+      }
+      await fetchSlots();
+      showToast(`✅ 已套用「${tmpl.label}」到 ${dayNames}`);
+    } catch (e) { console.error(e); alert('操作失敗：' + e.message); }
+    setBatchLoading(false);
+  };
+
+  const batchSetRange = async (activate) => {
+    if (selDays.length === 0) { alert('請先選擇日期！'); return; }
+    if (rangeFrom >= rangeTo) { alert('開始時間必須早於結束時間！'); return; }
+    setBatchLoading(true);
+    try {
+      const dayList = selDays.join(',');
+      await sbPatch(`time_slots?day_of_week=in.(${dayList})&time=gte.${rangeFrom}&time=lte.${rangeTo}`, { is_active: activate });
+      await fetchSlots();
+      showToast(`✅ 已${activate ? '開放' : '關閉'} ${rangeFrom}–${rangeTo}`);
+    } catch (e) { console.error(e); alert('操作失敗：' + e.message); }
+    setBatchLoading(false);
+  };
+
+  const copySchedule = async () => {
+    const targets = selDays.filter(d => d !== copyFrom);
+    if (targets.length === 0) { alert('請選擇至少一個目標日期（不能與來源相同）！'); return; }
+    const targetNames = targets.map(d => `週${DAYS[d]}`).join('、');
+    if (!window.confirm(`複製「週${DAYS[copyFrom]}」→ ${targetNames}？\n\n⚠️ 目標日期嘅設定會被覆蓋`)) return;
+    setBatchLoading(true);
+    try {
+      const sourceSlots = slots.filter(s => s.day_of_week === copyFrom);
+      const activeTimes = sourceSlots.filter(s => s.is_active).map(s => s.time);
+      const dayList = targets.join(',');
+      await sbPatch(`time_slots?day_of_week=in.(${dayList})`, { is_active: false });
+      for (const time of activeTimes) {
+        await sbPatch(`time_slots?day_of_week=in.(${dayList})&time=eq.${time}`, { is_active: true });
+      }
+      await fetchSlots();
+      showToast(`✅ 已將週${DAYS[copyFrom]}排程複製到 ${targetNames}`);
+    } catch (e) { console.error(e); alert('操作失敗：' + e.message); }
+    setBatchLoading(false);
+  };
+
+  // ── Blocked Dates ──
+  const fetchBlocked = async () => {
+    try { const data = await sbGet('blocked_dates?order=date'); setBlocked(data || []); } catch (e) { console.error(e); }
+  };
   const addBlocked = async () => {
     if (!newBD) return;
     try {
       const data = await sbPost('blocked_dates', { date: newBD, reason: newBR });
       setBlocked(prev => [...prev, ...data].sort((a, b) => a.date.localeCompare(b.date)));
-      setNewBD('');
-      setNewBR('');
+      setNewBD(''); setNewBR('');
     } catch (e) { console.error(e); }
   };
-
   const removeBlocked = async (id) => {
-    try {
-      await sbDel(`blocked_dates?id=eq.${id}`);
-      setBlocked(prev => prev.filter(b => b.id !== id));
-    } catch (e) { console.error(e); }
+    try { await sbDel(`blocked_dates?id=eq.${id}`); setBlocked(prev => prev.filter(b => b.id !== id)); } catch (e) { console.error(e); }
   };
 
   // ── Helpers ──
-  const statusColor = (s) => {
-    if (s === 'confirmed') return '#4CAF50';
-    if (s === 'cancelled') return '#f44336';
-    if (s === 'completed') return '#2196F3';
-    return '#FF9800';
-  };
-  const statusText = (s) => {
-    if (s === 'confirmed') return '已確認';
-    if (s === 'cancelled') return '已取消';
-    if (s === 'completed') return '已完成';
-    return '待確認';
-  };
+  const statusColor = (s) => s === 'confirmed' ? '#4CAF50' : s === 'cancelled' ? '#f44336' : s === 'completed' ? '#2196F3' : '#FF9800';
+  const statusText = (s) => s === 'confirmed' ? '已確認' : s === 'cancelled' ? '已取消' : s === 'completed' ? '已完成' : '待確認';
 
   const daySlots = slots.filter(s => s.day_of_week === selDay);
   const activeCount = daySlots.filter(s => s.is_active).length;
 
-  // ══════════════════════════════
-  // LOGIN SCREEN
+  // ── Summary for batch preview ──
+  const batchSummary = selDays.map(d => {
+    const ds = slots.filter(s => s.day_of_week === d);
+    const ac = ds.filter(s => s.is_active).length;
+    return { day: d, total: ds.length, active: ac };
+  });
+
   // ══════════════════════════════
   if (!auth) {
     return (
@@ -189,10 +225,15 @@ export default function Admin() {
   }
 
   // ══════════════════════════════
-  // DASHBOARD
-  // ══════════════════════════════
   return (
     <div style={{ minHeight: '100vh', background: '#f5f0eb', fontFamily: font }}>
+      {/* Toast */}
+      {toast && (
+        <div style={{ position: 'fixed', top: 20, left: '50%', transform: 'translateX(-50%)', background: '#5c4a3a', color: '#fff', padding: '12px 28px', borderRadius: 8, fontSize: 14, zIndex: 9999, boxShadow: '0 4px 20px rgba(0,0,0,0.2)', animation: 'fadeIn 0.3s' }}>
+          {toast}
+        </div>
+      )}
+
       {/* Header */}
       <div style={{ background: '#fff', padding: '20px 30px', boxShadow: '0 2px 10px rgba(0,0,0,0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
@@ -213,8 +254,7 @@ export default function Admin() {
             padding: '14px 24px', background: 'none', border: 'none',
             borderBottom: tab === t.key ? '2px solid #5c4a3a' : '2px solid transparent',
             fontSize: 14, color: tab === t.key ? '#5c4a3a' : '#999',
-            fontWeight: tab === t.key ? 600 : 400, cursor: 'pointer', fontFamily: font,
-            whiteSpace: 'nowrap',
+            fontWeight: tab === t.key ? 600 : 400, cursor: 'pointer', fontFamily: font, whiteSpace: 'nowrap',
           }}>{t.label}</button>
         ))}
       </div>
@@ -224,7 +264,6 @@ export default function Admin() {
         {/* ══════ TAB: BOOKINGS ══════ */}
         {tab === 'bookings' && (
           <>
-            {/* Stats */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 16, marginBottom: 30 }}>
               {[
                 { label: '今日預約', value: stats.today, color: '#FF9800' },
@@ -239,26 +278,20 @@ export default function Admin() {
               ))}
             </div>
 
-            {/* Filters */}
             <div style={{ background: '#fff', padding: 20, borderRadius: 12, marginBottom: 20, display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', boxShadow: '0 2px 10px rgba(0,0,0,0.05)' }}>
               <span style={{ color: '#5c4a3a', fontWeight: 'bold', fontSize: 14 }}>篩選：</span>
-              <input type="date" value={filterDate} onChange={e => setFilterDate(e.target.value)}
-                style={{ padding: '8px 12px', border: '1px solid #ddd', borderRadius: 6, fontSize: 14 }} />
-              <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}
-                style={{ padding: '8px 12px', border: '1px solid #ddd', borderRadius: 6, fontSize: 14 }}>
+              <input type="date" value={filterDate} onChange={e => setFilterDate(e.target.value)} style={{ padding: '8px 12px', border: '1px solid #ddd', borderRadius: 6, fontSize: 14 }} />
+              <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} style={{ padding: '8px 12px', border: '1px solid #ddd', borderRadius: 6, fontSize: 14 }}>
                 <option value="all">全部狀態</option>
                 <option value="pending">待確認</option>
                 <option value="confirmed">已確認</option>
                 <option value="completed">已完成</option>
                 <option value="cancelled">已取消</option>
               </select>
-              <button onClick={() => { setFilterDate(''); setFilterStatus('all'); }}
-                style={{ padding: '8px 16px', background: '#f5f0eb', border: 'none', borderRadius: 6, cursor: 'pointer', color: '#5c4a3a', fontSize: 13 }}>清除篩選</button>
-              <button onClick={fetchBookings}
-                style={{ padding: '8px 16px', background: '#5c4a3a', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', marginLeft: 'auto', fontSize: 13 }}>🔄 重新整理</button>
+              <button onClick={() => { setFilterDate(''); setFilterStatus('all'); }} style={{ padding: '8px 16px', background: '#f5f0eb', border: 'none', borderRadius: 6, cursor: 'pointer', color: '#5c4a3a', fontSize: 13 }}>清除篩選</button>
+              <button onClick={fetchBookings} style={{ padding: '8px 16px', background: '#5c4a3a', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', marginLeft: 'auto', fontSize: 13 }}>🔄 重新整理</button>
             </div>
 
-            {/* Table */}
             <div style={{ background: '#fff', borderRadius: 12, overflow: 'hidden', boxShadow: '0 2px 10px rgba(0,0,0,0.05)' }}>
               <div style={{ padding: 20, borderBottom: '1px solid #eee' }}>
                 <h2 style={{ margin: 0, color: '#5c4a3a', fontSize: 18 }}>預約列表 ({bookings.length} 筆)</h2>
@@ -285,31 +318,23 @@ export default function Admin() {
                           <td style={{ padding: '14px 12px' }}>
                             {b.service_name}
                             {b.variant_label && <div style={{ fontSize: 12, color: '#999' }}>{b.variant_label}</div>}
-                            {b.addon_names && b.addon_names.length > 0 && (
-                              <div style={{ fontSize: 12, color: '#999' }}>+ {b.addon_names.join('、')}</div>
-                            )}
+                            {b.addon_names && b.addon_names.length > 0 && <div style={{ fontSize: 12, color: '#999' }}>+ {b.addon_names.join('、')}</div>}
                           </td>
                           <td style={{ padding: '14px 12px' }}>{b.customer_name}</td>
                           <td style={{ padding: '14px 12px' }}>{b.customer_phone}</td>
                           <td style={{ padding: '14px 12px' }}>{b.technician_label || '-'}</td>
                           <td style={{ padding: '14px 12px', fontWeight: 'bold' }}>${b.total_price}</td>
                           <td style={{ padding: '14px 12px' }}>
-                            <span style={{ padding: '4px 10px', borderRadius: 20, fontSize: 12, color: '#fff', background: statusColor(b.status) }}>
-                              {statusText(b.status)}
-                            </span>
+                            <span style={{ padding: '4px 10px', borderRadius: 20, fontSize: 12, color: '#fff', background: statusColor(b.status) }}>{statusText(b.status)}</span>
                           </td>
                           <td style={{ padding: '14px 12px', whiteSpace: 'nowrap' }}>
-                            <select value={b.status || 'pending'} onChange={e => updateStatus(b.id, e.target.value)}
-                              style={{ padding: '4px 8px', border: '1px solid #ddd', borderRadius: 4, fontSize: 12, marginRight: 6 }}>
+                            <select value={b.status || 'pending'} onChange={e => updateStatus(b.id, e.target.value)} style={{ padding: '4px 8px', border: '1px solid #ddd', borderRadius: 4, fontSize: 12, marginRight: 6 }}>
                               <option value="pending">待確認</option>
                               <option value="confirmed">已確認</option>
                               <option value="completed">已完成</option>
                               <option value="cancelled">已取消</option>
                             </select>
-                            <button onClick={() => deleteBooking(b.id)}
-                              style={{ padding: '4px 8px', background: '#fee', border: '1px solid #fcc', borderRadius: 4, color: '#c00', cursor: 'pointer', fontSize: 12 }}>
-                              刪除
-                            </button>
+                            <button onClick={() => deleteBooking(b.id)} style={{ padding: '4px 8px', background: '#fee', border: '1px solid #fcc', borderRadius: 4, color: '#c00', cursor: 'pointer', fontSize: 12 }}>刪除</button>
                           </td>
                         </tr>
                       ))}
@@ -321,75 +346,195 @@ export default function Admin() {
           </>
         )}
 
-        {/* ══════ TAB: TIME SLOTS ══════ */}
+        {/* ══════ TAB: TIME SLOTS (全新批量版) ══════ */}
         {tab === 'timeslots' && (
-          <div style={{ background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 2px 10px rgba(0,0,0,0.05)' }}>
-            <h2 style={{ margin: '0 0 20px', color: '#5c4a3a', fontSize: 18 }}>時段管理</h2>
-            <p style={{ fontSize: 13, color: '#999', marginBottom: 20 }}>揀星期幾，然後撳時段開/關。啡色 = 開放，淺色 = 關閉。</p>
-
-            {/* Day selector */}
-            <div style={{ display: 'flex', gap: 8, marginBottom: 20, overflowX: 'auto', paddingBottom: 4 }}>
-              {DAYS.map((d, i) => (
-                <button key={i} onClick={() => setSelDay(i)} style={{
-                  padding: '10px 18px', borderRadius: 8, border: 'none',
-                  background: selDay === i ? '#5c4a3a' : '#f5f0eb',
-                  color: selDay === i ? '#fff' : '#5c4a3a',
-                  fontWeight: 500, cursor: 'pointer', fontFamily: font, fontSize: 14,
-                  whiteSpace: 'nowrap',
-                }}>週{d}</button>
-              ))}
-            </div>
-
-            {/* Bulk actions */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, paddingBottom: 16, borderBottom: '1px solid #f0ebe3' }}>
-              <span style={{ fontSize: 14, color: '#999' }}>{activeCount} / {daySlots.length} 個時段開放</span>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button onClick={() => toggleDayAll(selDay, true)}
-                  style={{ padding: '6px 16px', borderRadius: 6, border: 'none', background: '#e8f5e9', color: '#2e7d32', cursor: 'pointer', fontSize: 13, fontFamily: font }}>全部開</button>
-                <button onClick={() => toggleDayAll(selDay, false)}
-                  style={{ padding: '6px 16px', borderRadius: 6, border: 'none', background: '#ffebee', color: '#c62828', cursor: 'pointer', fontSize: 13, fontFamily: font }}>全部關</button>
-              </div>
-            </div>
-
-            {/* Slots grid */}
-            {slLoading ? (
-              <p style={{ textAlign: 'center', color: '#999', padding: 30 }}>載入中...</p>
-            ) : daySlots.length === 0 ? (
-              <p style={{ textAlign: 'center', color: '#999', padding: 30 }}>呢日冇時段資料</p>
-            ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))', gap: 8 }}>
-                {daySlots.map(s => (
-                  <button key={s.id} onClick={() => toggleSlot(s.id, s.is_active)} style={{
-                    padding: '14px 8px', borderRadius: 8,
-                    border: `2px solid ${s.is_active ? '#5c4a3a' : '#e0d8cc'}`,
-                    background: s.is_active ? '#5c4a3a' : '#faf6f0',
-                    color: s.is_active ? '#fff' : '#c0b8aa',
-                    fontSize: 15, fontWeight: 500, cursor: 'pointer',
-                    transition: 'all 0.2s', fontFamily: font,
-                  }}>{s.time}</button>
-                ))}
+          <>
+            {/* Loading overlay */}
+            {batchLoading && (
+              <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.3)', zIndex: 999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <div style={{ background: '#fff', padding: '30px 40px', borderRadius: 12, textAlign: 'center' }}>
+                  <div style={{ fontSize: 24, marginBottom: 10 }}>⏳</div>
+                  <div style={{ fontSize: 14, color: '#5c4a3a' }}>批量操作中...</div>
+                </div>
               </div>
             )}
-          </div>
+
+            {/* ─── Section 1: 選擇日期 ─── */}
+            <div style={card}>
+              <div style={sectionTitle}>📅 選擇日期（可多選）</div>
+              <div style={sectionDesc}>先選擇要設定嘅日期，再用下方工具批量操作</div>
+
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
+                {DAYS.map((d, i) => {
+                  const sel = selDays.includes(i);
+                  const ds = slots.filter(s => s.day_of_week === i);
+                  const ac = ds.filter(s => s.is_active).length;
+                  return (
+                    <button key={i} onClick={() => toggleBatchDay(i)} style={{
+                      padding: '12px 16px', borderRadius: 8, border: `2px solid ${sel ? '#5c4a3a' : '#e0d8cc'}`,
+                      background: sel ? '#5c4a3a' : '#fff', color: sel ? '#fff' : '#5c4a3a',
+                      cursor: 'pointer', fontFamily: font, fontSize: 14, fontWeight: 500, minWidth: 70, textAlign: 'center',
+                      transition: 'all 0.2s',
+                    }}>
+                      <div>週{d}</div>
+                      <div style={{ fontSize: 11, opacity: 0.7, marginTop: 2 }}>{ac}/{ds.length}</div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button onClick={() => setSelDays([1, 2, 3, 4, 5])} style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid #d0c8bc', background: '#faf6f0', color: '#5c4a3a', cursor: 'pointer', fontSize: 12, fontFamily: font }}>平日 (一至五)</button>
+                <button onClick={() => setSelDays([0, 6])} style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid #d0c8bc', background: '#faf6f0', color: '#5c4a3a', cursor: 'pointer', fontSize: 12, fontFamily: font }}>週末 (六日)</button>
+                <button onClick={() => setSelDays([0, 1, 2, 3, 4, 5, 6])} style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid #d0c8bc', background: '#faf6f0', color: '#5c4a3a', cursor: 'pointer', fontSize: 12, fontFamily: font }}>全選</button>
+                <button onClick={() => setSelDays([])} style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid #d0c8bc', background: '#faf6f0', color: '#999', cursor: 'pointer', fontSize: 12, fontFamily: font }}>清除</button>
+              </div>
+
+              {selDays.length > 0 && (
+                <div style={{ marginTop: 14, padding: '10px 14px', background: '#f0ebe3', borderRadius: 6, fontSize: 13, color: '#5c4a3a' }}>
+                  已選：<b>{selDays.map(d => `週${DAYS[d]}`).join('、')}</b>（{selDays.length} 日）
+                </div>
+              )}
+            </div>
+
+            {/* ─── Section 2: 快速模板 ─── */}
+            <div style={card}>
+              <div style={sectionTitle}>⚡ 快速模板</div>
+              <div style={sectionDesc}>一鍵套用常用排程到已選日期{selDays.length === 0 && <span style={{ color: '#c00' }}> — 請先選擇日期</span>}</div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 10 }}>
+                {TEMPLATES.map((t, i) => (
+                  <button key={i} onClick={() => applyTemplate(t)} disabled={selDays.length === 0} style={{
+                    padding: '16px 14px', borderRadius: 10, border: '1px solid #e0d8cc',
+                    background: selDays.length === 0 ? '#f5f5f5' : '#fff', cursor: selDays.length === 0 ? 'not-allowed' : 'pointer',
+                    textAlign: 'left', fontFamily: font, transition: 'all 0.2s',
+                    opacity: selDays.length === 0 ? 0.5 : 1,
+                  }}>
+                    <div style={{ fontSize: 20, marginBottom: 6 }}>{t.icon}</div>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: '#5c4a3a' }}>{t.label}</div>
+                    <div style={{ fontSize: 12, color: '#999', marginTop: 2 }}>{t.desc}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* ─── Section 3: 自訂範圍 ─── */}
+            <div style={card}>
+              <div style={sectionTitle}>🎯 自訂時段範圍</div>
+              <div style={sectionDesc}>選擇時間範圍，批量開放或關閉{selDays.length === 0 && <span style={{ color: '#c00' }}> — 請先選擇日期</span>}</div>
+
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 13, color: '#666' }}>從</span>
+                <select value={rangeFrom} onChange={e => setRangeFrom(e.target.value)} style={{ padding: '10px 14px', border: '1px solid #ddd', borderRadius: 6, fontSize: 14, fontFamily: font }}>
+                  {ALL_TIMES.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+                <span style={{ fontSize: 13, color: '#666' }}>到</span>
+                <select value={rangeTo} onChange={e => setRangeTo(e.target.value)} style={{ padding: '10px 14px', border: '1px solid #ddd', borderRadius: 6, fontSize: 14, fontFamily: font }}>
+                  {ALL_TIMES.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+                <button onClick={() => batchSetRange(true)} disabled={selDays.length === 0} style={{
+                  padding: '10px 20px', borderRadius: 6, border: 'none', background: selDays.length === 0 ? '#ccc' : '#4CAF50',
+                  color: '#fff', cursor: selDays.length === 0 ? 'not-allowed' : 'pointer', fontSize: 13, fontFamily: font, fontWeight: 500,
+                }}>✅ 開放</button>
+                <button onClick={() => batchSetRange(false)} disabled={selDays.length === 0} style={{
+                  padding: '10px 20px', borderRadius: 6, border: 'none', background: selDays.length === 0 ? '#ccc' : '#f44336',
+                  color: '#fff', cursor: selDays.length === 0 ? 'not-allowed' : 'pointer', fontSize: 13, fontFamily: font, fontWeight: 500,
+                }}>❌ 關閉</button>
+              </div>
+            </div>
+
+            {/* ─── Section 4: 複製排程 ─── */}
+            <div style={card}>
+              <div style={sectionTitle}>📋 複製排程</div>
+              <div style={sectionDesc}>將某一日嘅排程複製到已選日期{selDays.length === 0 && <span style={{ color: '#c00' }}> — 請先選擇目標日期</span>}</div>
+
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 13, color: '#666' }}>將</span>
+                <select value={copyFrom} onChange={e => setCopyFrom(Number(e.target.value))} style={{ padding: '10px 14px', border: '1px solid #ddd', borderRadius: 6, fontSize: 14, fontFamily: font }}>
+                  {DAYS.map((d, i) => <option key={i} value={i}>週{d}</option>)}
+                </select>
+                <span style={{ fontSize: 13, color: '#666' }}>嘅排程複製到已選日期</span>
+                <button onClick={copySchedule} disabled={selDays.length === 0} style={{
+                  padding: '10px 20px', borderRadius: 6, border: 'none', background: selDays.length === 0 ? '#ccc' : '#5c4a3a',
+                  color: '#fff', cursor: selDays.length === 0 ? 'not-allowed' : 'pointer', fontSize: 13, fontFamily: font, fontWeight: 500,
+                }}>執行複製</button>
+              </div>
+            </div>
+
+            {/* ─── Section 5: 已選日期摘要 ─── */}
+            {batchSummary.length > 0 && (
+              <div style={card}>
+                <div style={sectionTitle}>📊 已選日期時段概覽</div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: 10, marginTop: 12 }}>
+                  {batchSummary.map(s => (
+                    <div key={s.day} style={{ padding: '14px', borderRadius: 8, background: '#faf6f0', textAlign: 'center', border: '1px solid #e0d8cc' }}>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: '#5c4a3a' }}>週{DAYS[s.day]}</div>
+                      <div style={{ fontSize: 22, fontWeight: 'bold', color: s.active === 0 ? '#f44336' : '#4CAF50', margin: '6px 0' }}>{s.active}</div>
+                      <div style={{ fontSize: 11, color: '#999' }}>/ {s.total} 個時段</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* ─── Section 6: 單日微調 ─── */}
+            <div style={card}>
+              <div style={sectionTitle}>🔧 單日微調</div>
+              <div style={sectionDesc}>撳個別時段開/關，啡色 = 開放，淺色 = 關閉</div>
+
+              <div style={{ display: 'flex', gap: 8, marginBottom: 20, overflowX: 'auto', paddingBottom: 4 }}>
+                {DAYS.map((d, i) => (
+                  <button key={i} onClick={() => setSelDay(i)} style={{
+                    padding: '10px 18px', borderRadius: 8, border: 'none',
+                    background: selDay === i ? '#5c4a3a' : '#f5f0eb',
+                    color: selDay === i ? '#fff' : '#5c4a3a',
+                    fontWeight: 500, cursor: 'pointer', fontFamily: font, fontSize: 14, whiteSpace: 'nowrap',
+                  }}>週{d}</button>
+                ))}
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, paddingBottom: 16, borderBottom: '1px solid #f0ebe3' }}>
+                <span style={{ fontSize: 14, color: '#999' }}>{activeCount} / {daySlots.length} 個時段開放</span>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={() => toggleDayAll(selDay, true)} style={{ padding: '6px 16px', borderRadius: 6, border: 'none', background: '#e8f5e9', color: '#2e7d32', cursor: 'pointer', fontSize: 13, fontFamily: font }}>全部開</button>
+                  <button onClick={() => toggleDayAll(selDay, false)} style={{ padding: '6px 16px', borderRadius: 6, border: 'none', background: '#ffebee', color: '#c62828', cursor: 'pointer', fontSize: 13, fontFamily: font }}>全部關</button>
+                </div>
+              </div>
+
+              {slLoading ? (
+                <p style={{ textAlign: 'center', color: '#999', padding: 30 }}>載入中...</p>
+              ) : daySlots.length === 0 ? (
+                <p style={{ textAlign: 'center', color: '#999', padding: 30 }}>呢日冇時段資料</p>
+              ) : (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))', gap: 8 }}>
+                  {daySlots.map(s => (
+                    <button key={s.id} onClick={() => toggleSlot(s.id, s.is_active)} style={{
+                      padding: '14px 8px', borderRadius: 8,
+                      border: `2px solid ${s.is_active ? '#5c4a3a' : '#e0d8cc'}`,
+                      background: s.is_active ? '#5c4a3a' : '#faf6f0',
+                      color: s.is_active ? '#fff' : '#c0b8aa',
+                      fontSize: 15, fontWeight: 500, cursor: 'pointer',
+                      transition: 'all 0.2s', fontFamily: font,
+                    }}>{s.time}</button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </>
         )}
 
         {/* ══════ TAB: BLOCKED DATES ══════ */}
         {tab === 'blocked' && (
-          <div style={{ background: '#fff', borderRadius: 12, padding: 24, boxShadow: '0 2px 10px rgba(0,0,0,0.05)' }}>
+          <div style={card}>
             <h2 style={{ margin: '0 0 20px', color: '#5c4a3a', fontSize: 18 }}>封鎖日期</h2>
             <p style={{ fontSize: 13, color: '#999', marginBottom: 20 }}>封鎖特定日期，該日將無法被預約。</p>
 
-            {/* Add form */}
             <div style={{ display: 'flex', gap: 10, marginBottom: 24, paddingBottom: 24, borderBottom: '1px solid #f0ebe3', flexWrap: 'wrap' }}>
-              <input type="date" value={newBD} onChange={e => setNewBD(e.target.value)}
-                style={{ padding: '10px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, flex: '1 1 150px' }} />
-              <input type="text" placeholder="原因（可選）" value={newBR} onChange={e => setNewBR(e.target.value)}
-                style={{ padding: '10px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, flex: '2 1 200px', fontFamily: font }} />
-              <button onClick={addBlocked}
-                style={{ padding: '10px 20px', background: '#c62828', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, cursor: 'pointer', fontFamily: font }}>封鎖</button>
+              <input type="date" value={newBD} onChange={e => setNewBD(e.target.value)} style={{ padding: '10px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, flex: '1 1 150px' }} />
+              <input type="text" placeholder="原因（可選）" value={newBR} onChange={e => setNewBR(e.target.value)} style={{ padding: '10px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, flex: '2 1 200px', fontFamily: font }} />
+              <button onClick={addBlocked} style={{ padding: '10px 20px', background: '#c62828', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, cursor: 'pointer', fontFamily: font }}>封鎖</button>
             </div>
 
-            {/* List */}
             {blocked.length === 0 ? (
               <p style={{ textAlign: 'center', color: '#999', padding: 30 }}>未有封鎖日期</p>
             ) : (
@@ -400,8 +545,7 @@ export default function Admin() {
                       <span style={{ fontWeight: 500, fontSize: 14 }}>{b.date}</span>
                       {b.reason && <span style={{ color: '#999', fontSize: 13, marginLeft: 12 }}>— {b.reason}</span>}
                     </div>
-                    <button onClick={() => removeBlocked(b.id)}
-                      style={{ padding: '6px 14px', background: '#ffebee', border: '1px solid #ffcdd2', borderRadius: 6, color: '#c62828', cursor: 'pointer', fontSize: 12, fontFamily: font }}>刪除</button>
+                    <button onClick={() => removeBlocked(b.id)} style={{ padding: '6px 14px', background: '#ffebee', border: '1px solid #ffcdd2', borderRadius: 6, color: '#c62828', cursor: 'pointer', fontSize: 12, fontFamily: font }}>刪除</button>
                   </div>
                 ))}
               </div>
