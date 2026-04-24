@@ -34,7 +34,6 @@ export default function Admin() {
   const [tab, setTab] = useState('bookings');
   const [toast, setToast] = useState('');
 
-  /* ══ NEW: 員工 ══ */
   const [staffList, setStaffList] = useState([]);
   const [activeStaff, setActiveStaff] = useState(null);
   const [newStaffName, setNewStaffName] = useState('');
@@ -71,7 +70,6 @@ export default function Admin() {
   const showToast = (m) => { setToast(m); setTimeout(() => setToast(''), 3000); };
   const toDS = (y, m, d) => `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
   const navBtn = { padding: '8px 16px', background: '#f5f0eb', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 16, color: '#5c4a3a', fontFamily: font };
-  const ddStyle = { padding: '6px 10px', border: '1px solid #ddd', borderRadius: 4, fontSize: 13, fontFamily: font, flex: 1, minWidth: 0 };
   const smallBtn = (bg, co, bd) => ({ padding: '6px 14px', borderRadius: 6, border: bd ? `1px solid ${bd}` : 'none', background: bg, color: co, cursor: 'pointer', fontSize: 12, fontFamily: font });
 
   const gridTimes = useMemo(() => {
@@ -90,7 +88,7 @@ export default function Admin() {
     return [...(pending[activeDate] || dbTimes)].filter(t => !gridSet.has(t)).sort();
   }, [gridTimes, dbTimes, pending, activeDate]);
 
-  /* ══════════════════ NEW: 員工 CRUD ══════════════════ */
+  /* ══════════════════ 員工 CRUD ══════════════════ */
   const fetchStaff = async () => {
     try {
       const data = await sbGet('staff?is_active=eq.true&order=sort_order,created_at');
@@ -152,7 +150,7 @@ export default function Admin() {
     setSelDates(new Set());
   };
 
-  /* ══════════════════ LOAD DB（加 staff_id）══════════════════ */
+  /* ══════════════════ LOAD DB ══════════════════ */
   const loadActiveFromDB = useCallback(async (date) => {
     if (!date || !activeStaff) return;
     setGridLoading(true);
@@ -192,7 +190,7 @@ export default function Admin() {
   const applyBreakLocal = () => { const dates = [...selDates].filter(d => pending[d] && pending[d].size > 0); if (!dates.length) return; if (breakFrom >= breakTo) return; const next = { ...pending }; const bTimes = gridTimes.filter(t => t >= breakFrom && t < breakTo); dates.forEach(d => { next[d] = new Set(next[d]); bTimes.forEach(t => next[d].delete(t)); }); setPending(next); showToast(`🍽️ 已關閉 ${breakFrom}–${breakTo}（${dates.length} 個日期）`); };
   const autoFitRange = () => { const starts = templates.filter(t => t.from).map(t => toMins(t.from)); const ends = templates.filter(t => t.to).map(t => toMins(t.to)); if (!starts.length) return; setGridStart(toTimeStr(Math.max(0, Math.min(...starts) - gridInterval))); setGridEnd(toTimeStr(Math.min(23 * 60 + 30, Math.max(...ends) + gridInterval))); showToast('📐 已自動適應範圍'); };
 
-  /* ══════════════════ SYNC（加 staff_id）══════════════════ */
+  /* ══════════════════ SYNC ══════════════════ */
   const syncPending = async () => {
     if (!activeStaff) return;
     const entries = Object.entries(pending);
@@ -366,7 +364,7 @@ export default function Admin() {
             </div>
           </div>
 
-          {/* ══════════ NEW: 員工選擇 ══════════ */}
+          {/* 員工選擇 */}
           <div style={card}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
               <div style={sTitle}>👤 員工時間表</div>
@@ -409,7 +407,6 @@ export default function Admin() {
             {staffList.length === 0 && <div style={{ textAlign: 'center', padding: 30, color: '#999' }}>未有員工，請先新增一個。</div>}
           </div>
 
-          {/* 以下只有揀咗員工先顯示 */}
           {activeStaff && (<>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 20 }}>
               {/* 月曆 */}
@@ -472,35 +469,70 @@ export default function Admin() {
               </div>
             </div>
 
-            {/* 營業模板 */}
+            {/* ══════════ 營業模板 + 休息（緊湊版）══════════ */}
             <div style={card}>
-              <div style={sTitle}>⚡ 套用營業模板到「{activeStaff.name}」</div>
-              <div style={sDesc}>套用後即時顯示喺時段格{selDates.size === 0 && <span style={{ color: '#c00' }}> — 請先選擇日期</span>}</div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12 }}>
-                {templates.map((t, i) => (
-                  <div key={i} style={{ padding: 16, borderRadius: 10, border: '1px solid #e0d8cc', background: '#fff', opacity: selDates.size === 0 ? 0.5 : 1 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}><span style={{ fontSize: 22 }}>{t.icon}</span><span style={{ fontSize: 14, fontWeight: 600, color: '#5c4a3a' }}>{t.label}</span></div>
-                    {t.from !== null ? (
-                      <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 12 }}>
-                        <select value={t.from} onChange={e => setTemplates(prev => prev.map((tt, idx) => idx === i ? { ...tt, from: e.target.value } : tt))} style={ddStyle}>{ALL_TIMES.map(time => <option key={time} value={time}>{time}</option>)}</select>
-                        <span style={{ color: '#999', fontSize: 12 }}>至</span>
-                        <select value={t.to} onChange={e => setTemplates(prev => prev.map((tt, idx) => idx === i ? { ...tt, to: e.target.value } : tt))} style={ddStyle}>{ALL_TIMES.map(time => <option key={time} value={time}>{time}</option>)}</select>
-                      </div>
-                    ) : <div style={{ fontSize: 13, color: '#999', marginBottom: 12 }}>全日關閉</div>}
-                    <button onClick={() => applyTemplateLocal(t)} disabled={selDates.size === 0} style={{ width: '100%', padding: 9, borderRadius: 6, border: 'none', background: selDates.size === 0 ? '#ddd' : '#5c4a3a', color: '#fff', cursor: selDates.size === 0 ? 'not-allowed' : 'pointer', fontSize: 13, fontFamily: font, fontWeight: 500 }}>套用（{selDates.size} 日）</button>
-                  </div>))}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, flexWrap: 'wrap', gap: 6 }}>
+                <div style={sTitle}>⚡ 套用營業模板到「{activeStaff.name}」</div>
+                {selDates.size > 0
+                  ? <span style={{ fontSize: 12, color: '#4CAF50', fontWeight: 600 }}>已選 {selDates.size} 日</span>
+                  : <span style={{ fontSize: 12, color: '#c00' }}>請先選擇日期</span>}
               </div>
-            </div>
 
-            {/* 休息 */}
-            <div style={card}>
-              <div style={sTitle}>🍽️ 自訂休息時段（可選）</div>
-              <div style={sDesc}>喺已套用模板嘅日期內關閉休息時段</div>
-              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                <select value={breakFrom} onChange={e => setBreakFrom(e.target.value)} style={{ padding: '8px 12px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13, fontFamily: font }}>{ALL_TIMES.map(t => <option key={t} value={t}>{t}</option>)}</select>
-                <span style={{ color: '#999', fontSize: 12 }}>至</span>
-                <select value={breakTo} onChange={e => setBreakTo(e.target.value)} style={{ padding: '8px 12px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13, fontFamily: font }}>{ALL_TIMES.map(t => <option key={t} value={t}>{t}</option>)}</select>
-                <button onClick={applyBreakLocal} disabled={selDates.size === 0} style={{ padding: '8px 20px', borderRadius: 6, border: 'none', background: selDates.size === 0 ? '#ddd' : '#e53935', color: '#fff', cursor: selDates.size === 0 ? 'not-allowed' : 'pointer', fontSize: 13, fontFamily: font, fontWeight: 500 }}>套用休息</button>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {templates.map((t, i) => (
+                  <div key={i} style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    padding: '8px 12px', borderRadius: 8,
+                    background: '#faf6f0', border: '1px solid #e8e0d8',
+                    opacity: selDates.size === 0 ? 0.5 : 1,
+                    flexWrap: 'wrap'
+                  }}>
+                    <span style={{ fontSize: 18, lineHeight: 1 }}>{t.icon}</span>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: '#5c4a3a', minWidth: 52 }}>{t.label}</span>
+                    {t.from !== null ? (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: '1 1 auto', minWidth: 0 }}>
+                        <select value={t.from} onChange={e => setTemplates(prev => prev.map((tt, idx) => idx === i ? { ...tt, from: e.target.value } : tt))} style={{ padding: '4px 6px', border: '1px solid #ddd', borderRadius: 4, fontSize: 12, fontFamily: font, flex: '1 1 0', minWidth: 0 }}>{ALL_TIMES.map(time => <option key={time} value={time}>{time}</option>)}</select>
+                        <span style={{ color: '#999', fontSize: 11 }}>–</span>
+                        <select value={t.to} onChange={e => setTemplates(prev => prev.map((tt, idx) => idx === i ? { ...tt, to: e.target.value } : tt))} style={{ padding: '4px 6px', border: '1px solid #ddd', borderRadius: 4, fontSize: 12, fontFamily: font, flex: '1 1 0', minWidth: 0 }}>{ALL_TIMES.map(time => <option key={time} value={time}>{time}</option>)}</select>
+                      </div>
+                    ) : (
+                      <span style={{ flex: '1 1 auto', fontSize: 12, color: '#999' }}>全日關閉</span>
+                    )}
+                    <button onClick={() => applyTemplateLocal(t)} disabled={selDates.size === 0} style={{
+                      padding: '5px 14px', borderRadius: 6, border: 'none', fontSize: 12, fontFamily: font, fontWeight: 600, whiteSpace: 'nowrap',
+                      background: selDates.size === 0 ? '#ddd' : '#5c4a3a', color: '#fff',
+                      cursor: selDates.size === 0 ? 'not-allowed' : 'pointer'
+                    }}>套用</button>
+                  </div>
+                ))}
+
+                {/* 休息時段 */}
+                <div style={{ borderTop: '1px dashed #d0c8bc', marginTop: 6, paddingTop: 10 }}>
+                  <div style={{
+                    display: 'flex', alignItems: 'center', gap: 8,
+                    padding: '8px 12px', borderRadius: 8,
+                    background: '#fff5f5', border: '1px solid #ffcdd2',
+                    opacity: selDates.size === 0 ? 0.5 : 1,
+                    flexWrap: 'wrap'
+                  }}>
+                    <span style={{ fontSize: 18, lineHeight: 1 }}>🍽️</span>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: '#c62828', minWidth: 52 }}>休息</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: '1 1 auto', minWidth: 0 }}>
+                      <select value={breakFrom} onChange={e => setBreakFrom(e.target.value)} style={{ padding: '4px 6px', border: '1px solid #ddd', borderRadius: 4, fontSize: 12, fontFamily: font, flex: '1 1 0', minWidth: 0 }}>{ALL_TIMES.map(t => <option key={t} value={t}>{t}</option>)}</select>
+                      <span style={{ color: '#999', fontSize: 11 }}>–</span>
+                      <select value={breakTo} onChange={e => setBreakTo(e.target.value)} style={{ padding: '4px 6px', border: '1px solid #ddd', borderRadius: 4, fontSize: 12, fontFamily: font, flex: '1 1 0', minWidth: 0 }}>{ALL_TIMES.map(t => <option key={t} value={t}>{t}</option>)}</select>
+                    </div>
+                    <button onClick={applyBreakLocal} disabled={selDates.size === 0} style={{
+                      padding: '5px 14px', borderRadius: 6, border: 'none', fontSize: 12, fontFamily: font, fontWeight: 600, whiteSpace: 'nowrap',
+                      background: selDates.size === 0 ? '#ddd' : '#e53935', color: '#fff',
+                      cursor: selDates.size === 0 ? 'not-allowed' : 'pointer'
+                    }}>扣除</button>
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ marginTop: 10, fontSize: 11, color: '#999' }}>
+                💡 「套用」會設定時段，「扣除」會喺已有時段入面移除休息時間
               </div>
             </div>
           </>)}
