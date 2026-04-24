@@ -263,6 +263,12 @@ export default function Admin() {
   const handleReschedDateChange = (date) => { setReschedDate(date); setReschedTime(''); loadReschedSlots(date); };
   const saveResched = async () => {
     if (!selectedBooking || !reschedDate || !reschedTime) return showToast('❌ 請選擇日期同時間');
+
+    // ═══ 新增：強制禁止衝突 ═══
+    if (isTimeConflict) {
+      return showToast('❌ 此時段已有其他預約，請選擇其他時間');
+    }
+
     setReschedLoading(true);
     try {
       const updates = { booking_date: reschedDate, booking_time: reschedTime };
