@@ -18,11 +18,6 @@ const DR_BG='#e6d4cc',DR_BD='#c4aea4',DR_TX='#785a50';
 const WDN=['日','一','二','三','四','五','六'];
 const MEN=['','JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
 
-/* ═══════════════════════════════════════════════════════
-   🔥 移除咗舊嘅 ALL_TIMES
-   前台唔再寫死時段，全部由 admin 後台 enabled_timeslots 決定
-   ═══════════════════════════════════════════════════════ */
-
 const parseD=s=>{const[y,m,d]=s.split('-').map(Number);const dt=new Date(y,m-1,d);return{day:d,mo:m,me:MEN[m],wd:dt.getDay()};};
 const getDC=s=>{if(s==='limited')return{bg:DA_BG,bd:DA_BD,tx:DA_TX};if(s==='full')return{bg:DR_BG,bd:DR_BD,tx:DR_TX};return{bg:DV_BG,bd:DV_BD,tx:DV_TX};};
 const crd=(vis=true)=>({background:CD,borderRadius:3,padding:'28px 22px',marginBottom:18,border:`1px solid ${CB}`,boxShadow:'0 2px 16px rgba(0,0,0,0.03)',opacity:vis?1:0.4,pointerEvents:vis?'auto':'none',transition:'opacity 0.3s'});
@@ -37,10 +32,6 @@ export default function App(){
   const [techList,setTechs]=useState([]);
   const [dateList,setDates]=useState([]);
 
-  /* ═══════════════════════════════════════════════════════
-     🔥 新：用 enabledTimes 取代舊嘅 disabledTimes
-     enabledTimes = admin 後台開放嘅時段（從 enabled_timeslots 讀取）
-     ═══════════════════════════════════════════════════════ */
   const [enabledTimes,setEnabledTimes]=useState([]);
   const [dateBookings,setDateBookings]=useState([]);
 
@@ -92,12 +83,6 @@ export default function App(){
 
   useEffect(()=>{loadAll();},[loadAll]);
 
-  /* ═══════════════════════════════════════════════════════
-     🔥 新：載入時段 — 讀 enabled_timeslots 而唔係 disabled_timeslots
-     
-     舊邏輯：讀 disabled → 從 ALL_TIMES 扣除 → 剩低嘅係可用
-     新邏輯：讀 enabled → 呢啲就係可用時段（admin 開咗咩就顯示咩）
-     ═══════════════════════════════════════════════════════ */
   useEffect(()=>{
     if(!selDate){setEnabledTimes([]);setDateBookings([]);return;}
     let c=false;
@@ -109,7 +94,6 @@ export default function App(){
           sbGet(`bookings?select=booking_time,technician_id&booking_date=eq.${selDate}&status=neq.cancelled`)
         ]);
         if(!c){
-          // ✅ 直接用 admin 開放嘅時段，.slice(0,5) 統一格式
           setEnabledTimes((enabled||[]).map(s=>(s.slot_time||'').slice(0,5)));
           setDateBookings((bks||[]).map(b=>({...b,booking_time:(b.booking_time||'').slice(0,5)})));
         }
@@ -135,21 +119,12 @@ export default function App(){
     return Math.max(real.length,1);
   },[techList]);
 
-  /* ═══════════════════════════════════════════════════════
-     🔥 新：slots 計算邏輯
-     
-     舊：ALL_TIMES.map → 檢查 disabledTimes → 檢查 bookings
-     新：enabledTimes.map → 檢查 bookings（已經只有 admin 開放嘅時段）
-     
-     額外：過濾今日已過嘅時段
-     ═══════════════════════════════════════════════════════ */
   const slots=useMemo(()=>{
     const now=new Date();
     const todayStr=now.toISOString().split('T')[0];
     const currentMins=now.getHours()*60+now.getMinutes();
 
     return enabledTimes.map(t=>{
-      // 今日已過嘅時段
       if(selDate===todayStr){
         const [h,m]=t.split(':').map(Number);
         if(h*60+m<=currentMins)return{slot_time:t,is_available:false,booked:false,passed:true};
@@ -187,10 +162,6 @@ export default function App(){
   const ad=dateList.find(d=>d.available_date===selDate);
   const canGo=sid!==null&&selDate!==null&&tm&&nm.trim()&&ph.trim()&&tid!==null;
 
-  /* ═══════════════════════════════════════════════════════
-     🔥 時段分組：上午 / 下午 / 晚間
-     用 slots（來自 enabledTimes）而唔係 ALL_TIMES
-     ═══════════════════════════════════════════════════════ */
   const amSlots=slots.filter(s=>{const h=parseInt(s.slot_time);return h<13;});
   const pmSlots=slots.filter(s=>{const h=parseInt(s.slot_time);return h>=13&&h<17;});
   const evSlots=slots.filter(s=>{const h=parseInt(s.slot_time);return h>=17;});
@@ -200,11 +171,78 @@ export default function App(){
   const pickDate=ds=>{setSelDate(ds);setTm(null);if(step<3)setStep(3);scrollTo(5);};
   const pickTime=t=>{setTm(t);if(step<4)setStep(4);scrollTo(6);};
 
+  /* ═══════════════════════════════════════════════════════
+     🔥 新增：提交前重複預約 + 封鎖日期檢查
+     ═══════════════════════════════════════════════════════ */
   const submitBooking=async()=>{
     if(!canGo||submitting)return;
     setSubmitting(true);setSubmitErr(null);
     try{
-      await sbPost('bookings',{service_id:sv.id,service_name:sv.name,variant_label:hasV?(svcVars[vi[sid]||0]?.label||''):'',variant_price:sp,addon_ids:selAddons.map(a=>String(a.id)),addon_names:selAddons.map(a=>a.name_zh),addon_total:ap,booking_date:selDate,booking_time:tm,technician_id:tc.id,technician_label:tc.label,technician_surcharge:tp,customer_name:nm.trim(),customer_phone:ph.trim(),remarks:rk.trim(),total_price:total});
+      /* ── 🔥 檢查 1：封鎖日期 double check ── */
+      try{
+        const blockedCheck=await sbGet(`blocked_dates?date=eq.${selDate}`);
+        if(blockedCheck&&blockedCheck.length>0){
+          setSubmitErr('⚠️ 呢個日期已被封鎖，無法預約。請選擇其他日期。');
+          setSubmitting(false);
+          return;
+        }
+      }catch(e){/* 查詢失敗唔阻止提交 */}
+
+      /* ── 🔥 檢查 2：重複預約（同一日期 + 同一時段）── */
+      try{
+        const existingBks=await sbGet(
+          `bookings?booking_date=eq.${selDate}&booking_time=eq.${tm}&status=neq.cancelled`
+        );
+        if(existingBks&&existingBks.length>0){
+          /* 如果選咗特定技師（唔係隨機），check 該技師有冇衝突 */
+          if(tid!==randomTechId){
+            const hasTechConflict=existingBks.some(b=>b.technician_id===tid);
+            if(hasTechConflict){
+              setSubmitErr('⚠️ 呢個時段已被此技師預約，請選擇其他時段或技師。');
+              setSubmitting(false);
+              return;
+            }
+          }
+          /* 檢查全部技師係咪都滿咗 */
+          if(existingBks.length>=maxPerSlot){
+            setSubmitErr('⚠️ 呢個時段已全部約滿，請選擇其他時段。');
+            setSubmitting(false);
+            return;
+          }
+        }
+      }catch(e){/* 查詢失敗唔阻止提交 */}
+
+      /* ── 🔥 檢查 3：enabled_timeslots 確認時段仲開放 ── */
+      try{
+        const slotCheck=await sbGet(
+          `enabled_timeslots?slot_date=eq.${selDate}&slot_time=like.${tm}*`
+        );
+        if(!slotCheck||slotCheck.length===0){
+          setSubmitErr('⚠️ 呢個時段已被關閉，請選擇其他時段。');
+          setSubmitting(false);
+          return;
+        }
+      }catch(e){/* 查詢失敗唔阻止提交 */}
+
+      /* ── 通過所有檢查，正式提交 ── */
+      await sbPost('bookings',{
+        service_id:sv.id,
+        service_name:sv.name,
+        variant_label:hasV?(svcVars[vi[sid]||0]?.label||''):'',
+        variant_price:sp,
+        addon_ids:selAddons.map(a=>String(a.id)),
+        addon_names:selAddons.map(a=>a.name_zh),
+        addon_total:ap,
+        booking_date:selDate,
+        booking_time:tm,
+        technician_id:tc.id,
+        technician_label:tc.label,
+        technician_surcharge:tp,
+        customer_name:nm.trim(),
+        customer_phone:ph.trim(),
+        remarks:rk.trim(),
+        total_price:total
+      });
       setDone(true);
     }catch(e){setSubmitErr(e.message);}
     setSubmitting(false);
@@ -351,7 +389,6 @@ export default function App(){
             </div>
           )}
           {slotsLoading?(<div style={{textAlign:'center',padding:'24px 0'}}><motion.div animate={{rotate:360}} transition={{repeat:Infinity,duration:1,ease:'linear'}} style={{display:'inline-block'}}><Loader size={20} color={P} strokeWidth={1.5}/></motion.div></div>):(<>
-            {/* 🔥 新：如果 admin 無開放任何時段 */}
             {enabledTimes.length===0&&selDate&&!slotsLoading&&(
               <div style={{textAlign:'center',padding:'24px 0',fontSize:'0.68rem',color:TL}}>
                 此日期暫無可預約時段
