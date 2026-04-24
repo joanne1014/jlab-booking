@@ -51,6 +51,12 @@ export default function Admin() {
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [isMobile, setIsMobile] = useState(false);
 
+  /* ═══ 日程表 states ═══ */
+  const [viewMode, setViewMode] = useState('list');
+  const [scheduleDate, setScheduleDate] = useState(new Date().toISOString().split('T')[0]);
+  const [selectedBooking, setSelectedBooking] = useState(null);
+  const [showCancelled, setShowCancelled] = useState(false);
+
   const [calYear, setCalYear] = useState(new Date().getFullYear());
   const [calMonth, setCalMonth] = useState(new Date().getMonth());
   const [selDates, setSelDates] = useState(new Set());
@@ -88,7 +94,6 @@ export default function Admin() {
   const extraDbTimes = useMemo(() => { const gridSet = new Set(gridTimes); return [...(pending[activeDate] || dbTimes)].filter(t => !gridSet.has(t)).sort(); }, [gridTimes, dbTimes, pending, activeDate]);
 
   /* ═══════ Booking filtering & stats ═══════ */
-  /* ✅ 改動1：技師篩選跟員工列表 */
   const techList = useMemo(() => { return staffList.map(s => s.name).sort(); }, [staffList]);
 
   const filteredBookings = useMemo(() => {
@@ -117,12 +122,73 @@ export default function Admin() {
     };
   }, [allBookings, todayStr]);
 
+  /* ═══════ 日程表 computed ═══════ */
+  const scheduleSlots = useMemo(() => {
+    const slots = [];
+    for (let h = 10; h <= 20; h++) for (let m = 0; m < 60; m += 30) { if (h === 20 && m > 0) break; slots.push(`${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`); }
+    return slots;
+  }, []);
+
+  const dayBookings = useMemo(() => {
+    let bks = allBookings.filter(b => b.booking_date === scheduleDate);
+    if (!showCancelled) bks = bks.filter(b => b.status !== 'cancelled');
+    return bks;
+  }, [allBookings, scheduleDate, showCancelled]);
+
+  const scheduleStaff = useMemo(() => {
+    const names = staffList.map(s => s.name);
+    dayBookings.forEach(b => { const t = b.technician_label; if (t && !names.includes(t)) names.push(t); });
+    if (dayBookings.some(b => !b.technician_label)) names.push('未指定');
+    return names;
+  }, [staffList, dayBookings]);
+
+  const bookingGrid = useMemo(() => {
+    const grid = {};
+    dayBookings.forEach(b => {
+      const tech = b.technician_label || '未指定';
+      const time = b.booking_time?.slice(0, 5);
+      const key = `${time}|${tech}`;
+      if (!grid[key]) grid[key] = [];
+      grid[key].push(b);
+    });
+    return grid;
+  }, [dayBookings]);
+
+  const weekDates = useMemo(() => {
+    const d = new Date(scheduleDate + 'T00:00:00');
+    const dow = d.getDay();
+    const mon = new Date(d); mon.setDate(d.getDate() - ((dow + 6) % 7));
+    return Array.from({ length: 7 }, (_, i) => { const dt = new Date(mon); dt.setDate(mon.getDate() + i); return dt.toISOString().split('T')[0]; });
+  }, [scheduleDate]);
+
+  const weekCounts = useMemo(() => {
+    const c = {};
+    weekDates.forEach(d => { c[d] = allBookings.filter(b => b.booking_date === d && b.status !== 'cancelled').length; });
+    return c;
+  }, [weekDates, allBookings]);
+
+  const dayStats = useMemo(() => {
+    const active = dayBookings.filter(b => b.status !== 'cancelled');
+    return { total: active.length, revenue: active.reduce((s, b) => s + (b.total_price || 0), 0), pending: dayBookings.filter(b => b.status === 'pending').length, confirmed: dayBookings.filter(b => b.status === 'confirmed').length, completed: dayBookings.filter(b => b.status === 'completed').length };
+  }, [dayBookings]);
+
+  const prevSchedDay = () => { const d = new Date(scheduleDate + 'T00:00:00'); d.setDate(d.getDate() - 1); setScheduleDate(d.toISOString().split('T')[0]); };
+  const nextSchedDay = () => { const d = new Date(scheduleDate + 'T00:00:00'); d.setDate(d.getDate() + 1); setScheduleDate(d.toISOString().split('T')[0]); };
+
+  const modalUpdate = async (s) => {
+    if (!selectedBooking) return;
+    try { await sbPatch(`bookings?id=eq.${selectedBooking.id}`, { status: s }); setAllBookings(prev => prev.map(b => b.id === selectedBooking.id ? { ...b, status: s } : b)); setSelectedBooking(prev => prev ? { ...prev, status: s } : null); showToast(`✅ 狀態已更新為「${statusText(s)}」`); } catch (e) { showToast('❌ 更新失敗'); }
+  };
+  const modalDelete = async () => {
+    if (!selectedBooking || !window.confirm('確定要刪除？')) return;
+    try { await sbDel(`bookings?id=eq.${selectedBooking.id}`); setAllBookings(prev => prev.filter(b => b.id !== selectedBooking.id)); setSelectedBooking(null); showToast('✅ 已刪除'); } catch (e) { console.error(e); }
+  };
+
   const rowBg = (s) => s === 'pending' ? '#FFFDE7' : s === 'confirmed' ? '#E8F5E9' : s === 'completed' ? '#E3F2FD' : s === 'cancelled' ? '#FFEBEE' : '#fff';
   const statusColor = (s) => s === 'confirmed' ? '#4CAF50' : s === 'cancelled' ? '#f44336' : s === 'completed' ? '#2196F3' : '#FF9800';
   const statusText = (s) => s === 'confirmed' ? '已確認' : s === 'cancelled' ? '已取消' : s === 'completed' ? '已完成' : '待確認';
   const waLink = (phone) => { if (!phone) return null; const c = phone.replace(/[^0-9]/g, ''); return `https://wa.me/${c.length <= 8 ? '852' + c : c}`; };
 
-  /* ✅ 改動2：加咗 nextMonth case */
   const setQuickDate = (type) => {
     const today = todayStr;
     if (type === 'today') { setFilterDateFrom(today); setFilterDateTo(today); }
@@ -195,10 +261,70 @@ export default function Admin() {
     <button onClick={onClick} title={title} style={{ padding: '5px 9px', background: bg, border: `1px solid ${bd}`, borderRadius: 6, cursor: 'pointer', fontSize: 14, lineHeight: 1, fontFamily: font }}>{emoji}</button>
   );
 
+  const schedDow = new Date(scheduleDate + 'T00:00:00').getDay();
+
   return (
     <div style={{ minHeight: '100vh', background: '#f5f0eb', fontFamily: font }}>
       {toast && <div style={{ position: 'fixed', top: 20, left: '50%', transform: 'translateX(-50%)', background: '#5c4a3a', color: '#fff', padding: '12px 28px', borderRadius: 8, fontSize: 14, zIndex: 9999, boxShadow: '0 4px 20px rgba(0,0,0,0.2)' }}>{toast}</div>}
       {batchLoading && <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.3)', zIndex: 999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><div style={{ background: '#fff', padding: '30px 40px', borderRadius: 12, textAlign: 'center' }}><div style={{ fontSize: 24, marginBottom: 10 }}>⏳</div><div style={{ fontSize: 14, color: '#5c4a3a' }}>處理中...</div></div></div>}
+
+      {/* ═══ 預約詳情 Modal ═══ */}
+      {selectedBooking && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }} onClick={() => setSelectedBooking(null)}>
+          <div style={{ background: '#fff', borderRadius: 16, padding: 28, maxWidth: 440, width: '100%', maxHeight: '85vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <h3 style={{ margin: 0, color: '#5c4a3a', fontSize: 18 }}>預約詳情</h3>
+              <button onClick={() => setSelectedBooking(null)} style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: '#999', padding: '4px 8px' }}>✕</button>
+            </div>
+            <div style={{ marginBottom: 16 }}>
+              <span style={{ padding: '5px 14px', borderRadius: 20, fontSize: 12, color: '#fff', background: statusColor(selectedBooking.status), fontWeight: 600 }}>{statusText(selectedBooking.status)}</span>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, fontSize: 14, color: '#5c4a3a' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ fontSize: 18 }}>👤</span>
+                <div><div style={{ fontWeight: 700, fontSize: 16 }}>{selectedBooking.customer_name}</div></div>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ fontSize: 18 }}>📱</span>
+                <div>
+                  {selectedBooking.customer_phone}
+                  {selectedBooking.customer_phone && <a href={waLink(selectedBooking.customer_phone)} target="_blank" rel="noreferrer" style={{ marginLeft: 10, textDecoration: 'none', padding: '3px 10px', background: '#25D366', color: '#fff', borderRadius: 6, fontSize: 12 }}>💬 WhatsApp</a>}
+                </div>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ fontSize: 18 }}>📅</span>
+                <div>{selectedBooking.booking_date}（週{DAYS[new Date(selectedBooking.booking_date + 'T00:00:00').getDay()]}）　{selectedBooking.booking_time}</div>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ fontSize: 18 }}>🎨</span>
+                <div>
+                  {selectedBooking.service_name}
+                  {selectedBooking.variant_label && <span style={{ color: '#999' }}> · {selectedBooking.variant_label}</span>}
+                  {selectedBooking.addon_names?.length > 0 && <div style={{ fontSize: 12, color: '#999', marginTop: 2 }}>+ {selectedBooking.addon_names.join('、')}</div>}
+                </div>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ fontSize: 18 }}>👤</span>
+                <div>技師：{selectedBooking.technician_label || '未指定'}</div>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ fontSize: 18 }}>💰</span>
+                <div style={{ fontSize: 22, fontWeight: 700 }}>${selectedBooking.total_price}</div>
+              </div>
+              {(selectedBooking.notes || selectedBooking.remarks || selectedBooking.customer_notes) && (
+                <div style={{ padding: '10px 14px', background: '#FFF8E1', borderRadius: 8, fontSize: 13, color: '#F57F17' }}>📝 {selectedBooking.notes || selectedBooking.remarks || selectedBooking.customer_notes}</div>
+              )}
+            </div>
+            <div style={{ display: 'flex', gap: 8, marginTop: 24, paddingTop: 20, borderTop: '1px solid #f0ebe3', flexWrap: 'wrap' }}>
+              {selectedBooking.status === 'pending' && <button onClick={() => modalUpdate('confirmed')} style={{ padding: '10px 20px', borderRadius: 8, border: 'none', background: '#4CAF50', color: '#fff', cursor: 'pointer', fontSize: 14, fontFamily: font, fontWeight: 600 }}>✅ 確認預約</button>}
+              {(selectedBooking.status === 'pending' || selectedBooking.status === 'confirmed') && <button onClick={() => modalUpdate('completed')} style={{ padding: '10px 20px', borderRadius: 8, border: 'none', background: '#2196F3', color: '#fff', cursor: 'pointer', fontSize: 14, fontFamily: font, fontWeight: 600 }}>✔️ 完成</button>}
+              {selectedBooking.status !== 'cancelled' && selectedBooking.status !== 'completed' && <button onClick={() => modalUpdate('cancelled')} style={{ padding: '10px 20px', borderRadius: 8, border: '1px solid #ef9a9a', background: '#ffebee', color: '#c62828', cursor: 'pointer', fontSize: 14, fontFamily: font }}>❌ 取消</button>}
+              <div style={{ flex: 1 }} />
+              <button onClick={modalDelete} style={{ padding: '10px 16px', borderRadius: 8, border: '1px solid #ddd', background: '#fafafa', color: '#999', cursor: 'pointer', fontSize: 14, fontFamily: font }}>🗑️ 刪除</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div style={{ background: '#fff', padding: '20px 30px', boxShadow: '0 2px 10px rgba(0,0,0,0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div><h1 style={{ fontSize: 20, color: '#5c4a3a', margin: 0 }}>J.LAB 管理後台</h1><p style={{ color: '#999', fontSize: 12, margin: '4px 0 0', letterSpacing: 1 }}>ADMIN DASHBOARD</p></div>
@@ -242,6 +368,7 @@ export default function Admin() {
 
         {/* ══════════ BOOKINGS TAB ══════════ */}
         {tab === 'bookings' && (<>
+          {/* Stats cards */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12, marginBottom: 24 }}>
             {[
               { label: '今日預約', value: stats.today, sub: `$${stats.todayRev}`, color: '#FF9800' },
@@ -257,121 +384,260 @@ export default function Admin() {
               </div>))}
           </div>
 
-          <div style={{ background: '#fff', padding: '16px 20px', borderRadius: 12, marginBottom: 16, boxShadow: '0 2px 10px rgba(0,0,0,0.05)' }}>
-            <div style={{ marginBottom: 12 }}>
-              <input type="text" placeholder="🔍 搜尋客人名稱或電話..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} style={{ width: '100%', padding: '10px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, boxSizing: 'border-box', fontFamily: font }} />
-            </div>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
-              <span style={{ color: '#5c4a3a', fontWeight: 600, fontSize: 13 }}>日期：</span>
-              <input type="date" value={filterDateFrom} onChange={e => setFilterDateFrom(e.target.value)} style={{ padding: '6px 10px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13 }} />
-              <span style={{ color: '#999', fontSize: 12 }}>至</span>
-              <input type="date" value={filterDateTo} onChange={e => setFilterDateTo(e.target.value)} style={{ padding: '6px 10px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13 }} />
-              {/* ✅ 改動3：加咗「下月」按鈕 */}
-              <div style={{ display: 'flex', gap: 4 }}>
-                {[['今日', 'today'], ['明日', 'tomorrow'], ['本週', 'week'], ['本月', 'month'], ['下月', 'nextMonth']].map(([l, k]) => (
-                  <button key={k} onClick={() => setQuickDate(k)} style={{ padding: '5px 10px', borderRadius: 4, border: '1px solid #d0c8bc', background: '#faf6f0', color: '#5c4a3a', cursor: 'pointer', fontSize: 11, fontFamily: font }}>{l}</button>
-                ))}
-              </div>
-            </div>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-              <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} style={{ padding: '6px 10px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13, fontFamily: font }}>
-                <option value="all">全部狀態</option><option value="pending">待確認</option><option value="confirmed">已確認</option><option value="completed">已完成</option><option value="cancelled">已取消</option>
-              </select>
-              <select value={filterTech} onChange={e => setFilterTech(e.target.value)} style={{ padding: '6px 10px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13, fontFamily: font }}>
-                <option value="all">全部技師</option>{techList.map(t => <option key={t} value={t}>{t}</option>)}
-              </select>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: '#999', cursor: 'pointer' }}>
-                <input type="checkbox" checked={autoRefresh} onChange={e => setAutoRefresh(e.target.checked)} /> 自動刷新
-              </label>
-              <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
-                {hasFilters && <button onClick={clearFilters} style={{ padding: '6px 14px', background: '#f5f0eb', border: 'none', borderRadius: 6, cursor: 'pointer', color: '#999', fontSize: 12, fontFamily: font }}>✕ 清除篩選</button>}
-                <button onClick={fetchBookings} style={{ padding: '6px 14px', background: '#5c4a3a', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontFamily: font }}>🔄 刷新</button>
-              </div>
-            </div>
+          {/* View mode toggle */}
+          <div style={{ display: 'flex', gap: 0, marginBottom: 16 }}>
+            {[['list', '📋 列表模式'], ['schedule', '📅 日程表']].map(([k, l]) => (
+              <button key={k} onClick={() => setViewMode(k)} style={{ padding: '12px 24px', border: 'none', cursor: 'pointer', fontSize: 14, fontFamily: font, fontWeight: viewMode === k ? 700 : 400, background: viewMode === k ? '#5c4a3a' : '#fff', color: viewMode === k ? '#fff' : '#5c4a3a', borderRadius: k === 'list' ? '10px 0 0 10px' : '0 10px 10px 0', boxShadow: viewMode === k ? '0 2px 8px rgba(92,74,58,0.3)' : '0 2px 10px rgba(0,0,0,0.05)' }}>{l}</button>
+            ))}
           </div>
 
-          {hasFilters && (
-            <div style={{ padding: '10px 16px', marginBottom: 12, borderRadius: 8, background: '#FFF8E1', border: '1px solid #FFE082', fontSize: 13, color: '#F57F17' }}>
-              🔍 篩選結果：{filteredBookings.length} / {allBookings.length} 筆預約
-            </div>
-          )}
-
-          <div style={{ background: '#fff', borderRadius: 12, overflow: 'hidden', boxShadow: '0 2px 10px rgba(0,0,0,0.05)' }}>
-            <div style={{ padding: '16px 20px', borderBottom: '1px solid #eee', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <h2 style={{ margin: 0, color: '#5c4a3a', fontSize: 17 }}>預約列表 ({filteredBookings.length})</h2>
-              {autoRefresh && <span style={{ fontSize: 11, color: '#999' }}>🔄 每 30 秒自動刷新</span>}
-            </div>
-
-            {bkLoading ? <p style={{ padding: 40, textAlign: 'center', color: '#999' }}>載入中...</p> : filteredBookings.length === 0 ? <p style={{ padding: 40, textAlign: 'center', color: '#999' }}>{hasFilters ? '搵唔到符合條件嘅預約' : '暫無預約'}</p> : isMobile ? (
-              <div style={{ padding: '12px 16px' }}>
-                {filteredBookings.map(b => (
-                  <div key={b.id} style={{ background: rowBg(b.status), borderRadius: 10, padding: 14, marginBottom: 10, border: '1px solid #e8e0d8' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
-                      <div>
-                        <span style={{ fontWeight: 700, fontSize: 15, color: '#5c4a3a' }}>{b.customer_name}</span>
-                        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 4 }}>
-                          <span style={{ fontSize: 13, color: '#666' }}>{b.customer_phone}</span>
-                          {b.customer_phone && <a href={waLink(b.customer_phone)} target="_blank" rel="noreferrer" style={{ textDecoration: 'none', fontSize: 16 }}>💬</a>}
-                        </div>
-                      </div>
-                      <span style={{ padding: '3px 10px', borderRadius: 20, fontSize: 11, color: '#fff', background: statusColor(b.status), fontWeight: 600, whiteSpace: 'nowrap' }}>{statusText(b.status)}</span>
-                    </div>
-                    <div style={{ fontSize: 13, color: '#666', marginBottom: 6 }}>📅 {b.booking_date}（週{DAYS[new Date(b.booking_date + 'T00:00:00').getDay()]}）　🕐 {b.booking_time}</div>
-                    <div style={{ fontSize: 13, color: '#5c4a3a', marginBottom: 2 }}>🎨 {b.service_name}{b.variant_label && <span style={{ color: '#999' }}> · {b.variant_label}</span>}</div>
-                    {b.addon_names?.length > 0 && <div style={{ fontSize: 12, color: '#999', marginBottom: 4, paddingLeft: 20 }}>+ {b.addon_names.join('、')}</div>}
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '8px 0', fontSize: 13 }}>
-                      <span style={{ color: '#999' }}>👤 {b.technician_label || '未指定'}</span>
-                      <span style={{ fontSize: 17, fontWeight: 700, color: '#5c4a3a' }}>${b.total_price}</span>
-                    </div>
-                    {(b.notes || b.remarks || b.customer_notes) && (
-                      <div style={{ padding: '8px 10px', background: 'rgba(0,0,0,0.03)', borderRadius: 6, fontSize: 12, color: '#888', marginBottom: 8 }}>📝 {b.notes || b.remarks || b.customer_notes}</div>
-                    )}
-                    <div style={{ display: 'flex', gap: 6, paddingTop: 8, borderTop: '1px solid rgba(0,0,0,0.06)', flexWrap: 'wrap' }}>
-                      {b.status === 'pending' && actBtn('✅', '#E8F5E9', '#A5D6A7', () => updateStatus(b.id, 'confirmed'), '確認')}
-                      {(b.status === 'pending' || b.status === 'confirmed') && actBtn('✔️', '#E3F2FD', '#90CAF9', () => updateStatus(b.id, 'completed'), '完成')}
-                      {b.status !== 'cancelled' && b.status !== 'completed' && actBtn('❌', '#FFEBEE', '#EF9A9A', () => updateStatus(b.id, 'cancelled'), '取消')}
-                      <div style={{ flex: 1 }} />
-                      {actBtn('🗑️', '#fafafa', '#ddd', () => deleteBooking(b.id), '刪除')}
-                    </div>
-                  </div>
-                ))}
+          {/* ── LIST VIEW ── */}
+          {viewMode === 'list' && (<>
+            <div style={{ background: '#fff', padding: '16px 20px', borderRadius: 12, marginBottom: 16, boxShadow: '0 2px 10px rgba(0,0,0,0.05)' }}>
+              <div style={{ marginBottom: 12 }}>
+                <input type="text" placeholder="🔍 搜尋客人名稱或電話..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} style={{ width: '100%', padding: '10px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, boxSizing: 'border-box', fontFamily: font }} />
               </div>
-            ) : (
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
-                  <thead><tr style={{ background: '#f9f6f3' }}>{['日期', '時間', '服務', '客人', '電話', '技師', '金額', '狀態', '操作'].map(h => <th key={h} style={{ padding: '12px 10px', textAlign: 'left', color: '#5c4a3a', fontWeight: 600, whiteSpace: 'nowrap', fontSize: 13 }}>{h}</th>)}</tr></thead>
-                  <tbody>{filteredBookings.map(b => (
-                    <tr key={b.id} style={{ borderBottom: '1px solid #f0f0f0', background: rowBg(b.status), transition: 'background 0.2s' }}>
-                      <td style={{ padding: '12px 10px', whiteSpace: 'nowrap' }}>{b.booking_date}<div style={{ fontSize: 11, color: '#999' }}>週{DAYS[new Date(b.booking_date + 'T00:00:00').getDay()]}</div></td>
-                      <td style={{ padding: '12px 10px', fontWeight: 600 }}>{b.booking_time}</td>
-                      <td style={{ padding: '12px 10px' }}>
-                        {b.service_name}
-                        {b.variant_label && <div style={{ fontSize: 12, color: '#999' }}>{b.variant_label}</div>}
-                        {b.addon_names?.length > 0 && <div style={{ fontSize: 11, color: '#aaa' }}>+ {b.addon_names.join('、')}</div>}
-                        {(b.notes || b.remarks || b.customer_notes) && <div style={{ fontSize: 11, color: '#FF9800', marginTop: 2 }}>📝 {(b.notes || b.remarks || b.customer_notes).slice(0, 30)}{(b.notes || b.remarks || b.customer_notes).length > 30 ? '...' : ''}</div>}
-                      </td>
-                      <td style={{ padding: '12px 10px', fontWeight: 500 }}>{b.customer_name}</td>
-                      <td style={{ padding: '12px 10px', whiteSpace: 'nowrap' }}>
-                        {b.customer_phone}
-                        {b.customer_phone && <a href={waLink(b.customer_phone)} target="_blank" rel="noreferrer" style={{ marginLeft: 6, textDecoration: 'none', fontSize: 14 }} title="WhatsApp">💬</a>}
-                      </td>
-                      <td style={{ padding: '12px 10px' }}>{b.technician_label || <span style={{ color: '#ccc' }}>-</span>}</td>
-                      <td style={{ padding: '12px 10px', fontWeight: 'bold', fontSize: 15 }}>${b.total_price}</td>
-                      <td style={{ padding: '12px 10px' }}><span style={{ padding: '3px 10px', borderRadius: 20, fontSize: 11, color: '#fff', background: statusColor(b.status), fontWeight: 600 }}>{statusText(b.status)}</span></td>
-                      <td style={{ padding: '12px 10px', whiteSpace: 'nowrap' }}>
-                        <div style={{ display: 'flex', gap: 4 }}>
-                          {b.status === 'pending' && actBtn('✅', '#E8F5E9', '#A5D6A7', () => updateStatus(b.id, 'confirmed'), '確認')}
-                          {(b.status === 'pending' || b.status === 'confirmed') && actBtn('✔️', '#E3F2FD', '#90CAF9', () => updateStatus(b.id, 'completed'), '完成')}
-                          {b.status !== 'cancelled' && b.status !== 'completed' && actBtn('❌', '#FFEBEE', '#EF9A9A', () => updateStatus(b.id, 'cancelled'), '取消')}
-                          {actBtn('🗑️', '#fafafa', '#ddd', () => deleteBooking(b.id), '刪除')}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}</tbody>
-                </table>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
+                <span style={{ color: '#5c4a3a', fontWeight: 600, fontSize: 13 }}>日期：</span>
+                <input type="date" value={filterDateFrom} onChange={e => setFilterDateFrom(e.target.value)} style={{ padding: '6px 10px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13 }} />
+                <span style={{ color: '#999', fontSize: 12 }}>至</span>
+                <input type="date" value={filterDateTo} onChange={e => setFilterDateTo(e.target.value)} style={{ padding: '6px 10px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13 }} />
+                <div style={{ display: 'flex', gap: 4 }}>
+                  {[['今日', 'today'], ['明日', 'tomorrow'], ['本週', 'week'], ['本月', 'month'], ['下月', 'nextMonth']].map(([l, k]) => (
+                    <button key={k} onClick={() => setQuickDate(k)} style={{ padding: '5px 10px', borderRadius: 4, border: '1px solid #d0c8bc', background: '#faf6f0', color: '#5c4a3a', cursor: 'pointer', fontSize: 11, fontFamily: font }}>{l}</button>
+                  ))}
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} style={{ padding: '6px 10px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13, fontFamily: font }}>
+                  <option value="all">全部狀態</option><option value="pending">待確認</option><option value="confirmed">已確認</option><option value="completed">已完成</option><option value="cancelled">已取消</option>
+                </select>
+                <select value={filterTech} onChange={e => setFilterTech(e.target.value)} style={{ padding: '6px 10px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13, fontFamily: font }}>
+                  <option value="all">全部技師</option>{techList.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: '#999', cursor: 'pointer' }}>
+                  <input type="checkbox" checked={autoRefresh} onChange={e => setAutoRefresh(e.target.checked)} /> 自動刷新
+                </label>
+                <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+                  {hasFilters && <button onClick={clearFilters} style={{ padding: '6px 14px', background: '#f5f0eb', border: 'none', borderRadius: 6, cursor: 'pointer', color: '#999', fontSize: 12, fontFamily: font }}>✕ 清除篩選</button>}
+                  <button onClick={fetchBookings} style={{ padding: '6px 14px', background: '#5c4a3a', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontFamily: font }}>🔄 刷新</button>
+                </div>
+              </div>
+            </div>
+
+            {hasFilters && (
+              <div style={{ padding: '10px 16px', marginBottom: 12, borderRadius: 8, background: '#FFF8E1', border: '1px solid #FFE082', fontSize: 13, color: '#F57F17' }}>
+                🔍 篩選結果：{filteredBookings.length} / {allBookings.length} 筆預約
               </div>
             )}
-          </div>
+
+            <div style={{ background: '#fff', borderRadius: 12, overflow: 'hidden', boxShadow: '0 2px 10px rgba(0,0,0,0.05)' }}>
+              <div style={{ padding: '16px 20px', borderBottom: '1px solid #eee', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <h2 style={{ margin: 0, color: '#5c4a3a', fontSize: 17 }}>預約列表 ({filteredBookings.length})</h2>
+                {autoRefresh && <span style={{ fontSize: 11, color: '#999' }}>🔄 每 30 秒自動刷新</span>}
+              </div>
+
+              {bkLoading ? <p style={{ padding: 40, textAlign: 'center', color: '#999' }}>載入中...</p> : filteredBookings.length === 0 ? <p style={{ padding: 40, textAlign: 'center', color: '#999' }}>{hasFilters ? '搵唔到符合條件嘅預約' : '暫無預約'}</p> : isMobile ? (
+                <div style={{ padding: '12px 16px' }}>
+                  {filteredBookings.map(b => (
+                    <div key={b.id} style={{ background: rowBg(b.status), borderRadius: 10, padding: 14, marginBottom: 10, border: '1px solid #e8e0d8' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+                        <div>
+                          <span style={{ fontWeight: 700, fontSize: 15, color: '#5c4a3a' }}>{b.customer_name}</span>
+                          <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 4 }}>
+                            <span style={{ fontSize: 13, color: '#666' }}>{b.customer_phone}</span>
+                            {b.customer_phone && <a href={waLink(b.customer_phone)} target="_blank" rel="noreferrer" style={{ textDecoration: 'none', fontSize: 16 }}>💬</a>}
+                          </div>
+                        </div>
+                        <span style={{ padding: '3px 10px', borderRadius: 20, fontSize: 11, color: '#fff', background: statusColor(b.status), fontWeight: 600, whiteSpace: 'nowrap' }}>{statusText(b.status)}</span>
+                      </div>
+                      <div style={{ fontSize: 13, color: '#666', marginBottom: 6 }}>📅 {b.booking_date}（週{DAYS[new Date(b.booking_date + 'T00:00:00').getDay()]}）　🕐 {b.booking_time}</div>
+                      <div style={{ fontSize: 13, color: '#5c4a3a', marginBottom: 2 }}>🎨 {b.service_name}{b.variant_label && <span style={{ color: '#999' }}> · {b.variant_label}</span>}</div>
+                      {b.addon_names?.length > 0 && <div style={{ fontSize: 12, color: '#999', marginBottom: 4, paddingLeft: 20 }}>+ {b.addon_names.join('、')}</div>}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '8px 0', fontSize: 13 }}>
+                        <span style={{ color: '#999' }}>👤 {b.technician_label || '未指定'}</span>
+                        <span style={{ fontSize: 17, fontWeight: 700, color: '#5c4a3a' }}>${b.total_price}</span>
+                      </div>
+                      {(b.notes || b.remarks || b.customer_notes) && (
+                        <div style={{ padding: '8px 10px', background: 'rgba(0,0,0,0.03)', borderRadius: 6, fontSize: 12, color: '#888', marginBottom: 8 }}>📝 {b.notes || b.remarks || b.customer_notes}</div>
+                      )}
+                      <div style={{ display: 'flex', gap: 6, paddingTop: 8, borderTop: '1px solid rgba(0,0,0,0.06)', flexWrap: 'wrap' }}>
+                        {b.status === 'pending' && actBtn('✅', '#E8F5E9', '#A5D6A7', () => updateStatus(b.id, 'confirmed'), '確認')}
+                        {(b.status === 'pending' || b.status === 'confirmed') && actBtn('✔️', '#E3F2FD', '#90CAF9', () => updateStatus(b.id, 'completed'), '完成')}
+                        {b.status !== 'cancelled' && b.status !== 'completed' && actBtn('❌', '#FFEBEE', '#EF9A9A', () => updateStatus(b.id, 'cancelled'), '取消')}
+                        <div style={{ flex: 1 }} />
+                        {actBtn('🗑️', '#fafafa', '#ddd', () => deleteBooking(b.id), '刪除')}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+                    <thead><tr style={{ background: '#f9f6f3' }}>{['日期', '時間', '服務', '客人', '電話', '技師', '金額', '狀態', '操作'].map(h => <th key={h} style={{ padding: '12px 10px', textAlign: 'left', color: '#5c4a3a', fontWeight: 600, whiteSpace: 'nowrap', fontSize: 13 }}>{h}</th>)}</tr></thead>
+                    <tbody>{filteredBookings.map(b => (
+                      <tr key={b.id} style={{ borderBottom: '1px solid #f0f0f0', background: rowBg(b.status), transition: 'background 0.2s' }}>
+                        <td style={{ padding: '12px 10px', whiteSpace: 'nowrap' }}>{b.booking_date}<div style={{ fontSize: 11, color: '#999' }}>週{DAYS[new Date(b.booking_date + 'T00:00:00').getDay()]}</div></td>
+                        <td style={{ padding: '12px 10px', fontWeight: 600 }}>{b.booking_time}</td>
+                        <td style={{ padding: '12px 10px' }}>
+                          {b.service_name}
+                          {b.variant_label && <div style={{ fontSize: 12, color: '#999' }}>{b.variant_label}</div>}
+                          {b.addon_names?.length > 0 && <div style={{ fontSize: 11, color: '#aaa' }}>+ {b.addon_names.join('、')}</div>}
+                          {(b.notes || b.remarks || b.customer_notes) && <div style={{ fontSize: 11, color: '#FF9800', marginTop: 2 }}>📝 {(b.notes || b.remarks || b.customer_notes).slice(0, 30)}{(b.notes || b.remarks || b.customer_notes).length > 30 ? '...' : ''}</div>}
+                        </td>
+                        <td style={{ padding: '12px 10px', fontWeight: 500 }}>{b.customer_name}</td>
+                        <td style={{ padding: '12px 10px', whiteSpace: 'nowrap' }}>
+                          {b.customer_phone}
+                          {b.customer_phone && <a href={waLink(b.customer_phone)} target="_blank" rel="noreferrer" style={{ marginLeft: 6, textDecoration: 'none', fontSize: 14 }} title="WhatsApp">💬</a>}
+                        </td>
+                        <td style={{ padding: '12px 10px' }}>{b.technician_label || <span style={{ color: '#ccc' }}>-</span>}</td>
+                        <td style={{ padding: '12px 10px', fontWeight: 'bold', fontSize: 15 }}>${b.total_price}</td>
+                        <td style={{ padding: '12px 10px' }}><span style={{ padding: '3px 10px', borderRadius: 20, fontSize: 11, color: '#fff', background: statusColor(b.status), fontWeight: 600 }}>{statusText(b.status)}</span></td>
+                        <td style={{ padding: '12px 10px', whiteSpace: 'nowrap' }}>
+                          <div style={{ display: 'flex', gap: 4 }}>
+                            {b.status === 'pending' && actBtn('✅', '#E8F5E9', '#A5D6A7', () => updateStatus(b.id, 'confirmed'), '確認')}
+                            {(b.status === 'pending' || b.status === 'confirmed') && actBtn('✔️', '#E3F2FD', '#90CAF9', () => updateStatus(b.id, 'completed'), '完成')}
+                            {b.status !== 'cancelled' && b.status !== 'completed' && actBtn('❌', '#FFEBEE', '#EF9A9A', () => updateStatus(b.id, 'cancelled'), '取消')}
+                            {actBtn('🗑️', '#fafafa', '#ddd', () => deleteBooking(b.id), '刪除')}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}</tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </>)}
+
+          {/* ── SCHEDULE VIEW ── */}
+          {viewMode === 'schedule' && (<>
+            {/* Day navigation */}
+            <div style={{ ...card, padding: 20 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <button onClick={prevSchedDay} style={navBtn}>◀</button>
+                  <div style={{ textAlign: 'center' }}>
+                    <div style={{ fontSize: 18, fontWeight: 700, color: '#5c4a3a' }}>{scheduleDate}</div>
+                    <div style={{ fontSize: 13, color: '#999' }}>星期{DAYS[schedDow]}{scheduleDate === todayStr && <span style={{ marginLeft: 8, padding: '2px 8px', background: '#FF9800', color: '#fff', borderRadius: 4, fontSize: 11, fontWeight: 600 }}>今日</span>}</div>
+                  </div>
+                  <button onClick={nextSchedDay} style={navBtn}>▶</button>
+                </div>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button onClick={() => setScheduleDate(todayStr)} style={{ padding: '8px 16px', borderRadius: 6, border: scheduleDate === todayStr ? '2px solid #FF9800' : '1px solid #d0c8bc', background: scheduleDate === todayStr ? '#FFF3E0' : '#faf6f0', color: '#5c4a3a', cursor: 'pointer', fontSize: 13, fontFamily: font, fontWeight: scheduleDate === todayStr ? 600 : 400 }}>今日</button>
+                  <button onClick={() => { const t = new Date(Date.now() + 86400000).toISOString().split('T')[0]; setScheduleDate(t); }} style={{ padding: '8px 16px', borderRadius: 6, border: '1px solid #d0c8bc', background: '#faf6f0', color: '#5c4a3a', cursor: 'pointer', fontSize: 13, fontFamily: font }}>明日</button>
+                  <input type="date" value={scheduleDate} onChange={e => setScheduleDate(e.target.value)} style={{ padding: '6px 12px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13, fontFamily: font }} />
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: '#999', cursor: 'pointer' }}>
+                    <input type="checkbox" checked={showCancelled} onChange={e => setShowCancelled(e.target.checked)} /> 顯示已取消
+                  </label>
+                </div>
+              </div>
+
+              {/* Week strip */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 6, marginBottom: 16 }}>
+                {weekDates.map(d => {
+                  const dt = new Date(d + 'T00:00:00');
+                  const cnt = weekCounts[d] || 0;
+                  const isSel = d === scheduleDate;
+                  const isToday = d === todayStr;
+                  const pendCnt = allBookings.filter(b => b.booking_date === d && b.status === 'pending').length;
+                  return (
+                    <button key={d} onClick={() => setScheduleDate(d)} style={{ padding: '10px 4px', borderRadius: 8, cursor: 'pointer', border: isSel ? '2px solid #5c4a3a' : '2px solid transparent', background: isSel ? '#5c4a3a' : '#fff', color: isSel ? '#fff' : '#5c4a3a', fontFamily: font, textAlign: 'center', transition: 'all 0.15s', position: 'relative' }}>
+                      <div style={{ fontSize: 11, opacity: 0.7 }}>週{DAYS[dt.getDay()]}</div>
+                      <div style={{ fontSize: 16, fontWeight: 700, color: isToday && !isSel ? '#FF9800' : undefined }}>{dt.getDate()}</div>
+                      <div style={{ fontSize: 11, marginTop: 2, fontWeight: cnt > 0 ? 600 : 400, opacity: cnt > 0 ? 1 : 0.4 }}>{cnt} 個</div>
+                      {pendCnt > 0 && <div style={{ position: 'absolute', top: 4, right: 4, width: 8, height: 8, borderRadius: '50%', background: '#f44336' }} />}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Day stats */}
+              <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', padding: '12px 16px', background: '#f9f6f3', borderRadius: 8, fontSize: 14 }}>
+                <span>📊 預約 <b style={{ color: '#5c4a3a', fontSize: 18 }}>{dayStats.total}</b></span>
+                <span>💰 收入 <b style={{ color: '#5c4a3a', fontSize: 18 }}>${dayStats.revenue}</b></span>
+                {dayStats.pending > 0 && <span style={{ color: '#FF9800' }}>⏳ 待確認 <b>{dayStats.pending}</b></span>}
+                {dayStats.confirmed > 0 && <span style={{ color: '#4CAF50' }}>✅ 已確認 <b>{dayStats.confirmed}</b></span>}
+                {dayStats.completed > 0 && <span style={{ color: '#2196F3' }}>✔️ 已完成 <b>{dayStats.completed}</b></span>}
+              </div>
+            </div>
+
+            {/* Timetable */}
+            {scheduleStaff.length === 0 ? (
+              <div style={card}><p style={{ textAlign: 'center', color: '#999', padding: 30 }}>未有員工，請先喺「時段管理」新增。</p></div>
+            ) : (
+              <div style={{ ...card, padding: 0, overflow: 'hidden' }}>
+                <div style={{ overflowX: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: scheduleStaff.length * 160 + 80 }}>
+                    <thead>
+                      <tr style={{ background: '#f9f6f3' }}>
+                        <th style={{ padding: '14px 10px', borderBottom: '2px solid #e8e0d8', fontSize: 13, color: '#5c4a3a', fontWeight: 600, position: 'sticky', left: 0, background: '#f9f6f3', zIndex: 2, minWidth: 70, textAlign: 'center' }}>時間</th>
+                        {scheduleStaff.map(s => {
+                          const cnt = dayBookings.filter(b => (b.technician_label || '未指定') === s).length;
+                          return (
+                            <th key={s} style={{ padding: '14px 10px', borderBottom: '2px solid #e8e0d8', borderLeft: '1px solid #e8e0d8', fontSize: 14, color: '#5c4a3a', fontWeight: 700, minWidth: 150, textAlign: 'center' }}>
+                              {s}
+                              <div style={{ fontSize: 11, color: cnt > 0 ? '#4CAF50' : '#ccc', fontWeight: 500, marginTop: 2 }}>{cnt} 個預約</div>
+                            </th>
+                          );
+                        })}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {scheduleSlots.map((time, ti) => {
+                        const isHour = time.endsWith(':00');
+                        return (
+                          <tr key={time} style={{ borderBottom: isHour ? '2px solid #e8e0d8' : '1px solid #f0ebe3' }}>
+                            <td style={{ padding: '6px 8px', fontSize: 13, color: isHour ? '#5c4a3a' : '#bbb', fontWeight: isHour ? 700 : 400, position: 'sticky', left: 0, background: '#faf8f5', zIndex: 1, borderRight: '2px solid #e8e0d8', textAlign: 'center', verticalAlign: 'top', height: 56 }}>
+                              {time}
+                            </td>
+                            {scheduleStaff.map(s => {
+                              const bks = bookingGrid[`${time}|${s}`] || [];
+                              return (
+                                <td key={s} style={{ padding: '4px 6px', borderLeft: '1px solid #f0ebe3', verticalAlign: 'top', height: 56, background: bks.length > 0 ? 'transparent' : (ti % 2 === 0 ? '#fefefe' : '#fafafa') }}>
+                                  {bks.map(b => (
+                                    <div key={b.id} onClick={() => setSelectedBooking(b)} style={{ padding: '6px 10px', borderRadius: 8, marginBottom: 3, cursor: 'pointer', borderLeft: `4px solid ${statusColor(b.status)}`, background: rowBg(b.status), fontSize: 12, lineHeight: 1.5, transition: 'box-shadow 0.15s' }} onMouseEnter={e => e.currentTarget.style.boxShadow = '0 2px 12px rgba(0,0,0,0.12)'} onMouseLeave={e => e.currentTarget.style.boxShadow = 'none'}>
+                                      <div style={{ fontWeight: 700, color: '#5c4a3a', fontSize: 13 }}>{b.customer_name}</div>
+                                      <div style={{ color: '#888', marginTop: 1 }}>{b.service_name}</div>
+                                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 3 }}>
+                                        <span style={{ color: statusColor(b.status), fontWeight: 600, fontSize: 11 }}>{statusText(b.status)}</span>
+                                        <span style={{ fontWeight: 700, color: '#5c4a3a' }}>${b.total_price}</span>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                {/* Bookings outside grid range */}
+                {(() => {
+                  const slotSet = new Set(scheduleSlots);
+                  const outside = dayBookings.filter(b => !slotSet.has(b.booking_time?.slice(0, 5)));
+                  if (outside.length === 0) return null;
+                  return (
+                    <div style={{ padding: '12px 16px', borderTop: '2px solid #FFE082', background: '#FFF8E1' }}>
+                      <div style={{ fontSize: 13, color: '#F57F17', fontWeight: 600, marginBottom: 8 }}>⚠️ 以下預約唔喺 10:00–20:00 範圍內：</div>
+                      {outside.map(b => (
+                        <div key={b.id} onClick={() => setSelectedBooking(b)} style={{ display: 'inline-flex', gap: 8, alignItems: 'center', padding: '6px 12px', background: '#fff', borderRadius: 6, marginRight: 8, marginBottom: 6, cursor: 'pointer', border: '1px solid #e8e0d8', fontSize: 13 }}>
+                          <span style={{ fontWeight: 600 }}>{b.booking_time}</span>
+                          <span>{b.customer_name}</span>
+                          <span style={{ color: '#999' }}>{b.technician_label || '未指定'}</span>
+                          <span style={{ color: statusColor(b.status), fontWeight: 600, fontSize: 11 }}>{statusText(b.status)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
+                <div style={{ padding: '10px 16px', borderTop: '1px solid #f0ebe3', fontSize: 11, color: '#999', textAlign: 'right' }}>
+                  💡 點擊預約卡片可查看詳情及操作
+                </div>
+              </div>
+            )}
+          </>)}
         </>)}
 
         {/* ══════════ TIME SLOTS TAB ══════════ */}
