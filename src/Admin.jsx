@@ -88,7 +88,9 @@ export default function Admin() {
   const extraDbTimes = useMemo(() => { const gridSet = new Set(gridTimes); return [...(pending[activeDate] || dbTimes)].filter(t => !gridSet.has(t)).sort(); }, [gridTimes, dbTimes, pending, activeDate]);
 
   /* ═══════ Booking filtering & stats ═══════ */
-  const techList = useMemo(() => { const set = new Set(allBookings.map(b => b.technician_label).filter(Boolean)); return [...set].sort(); }, [allBookings]);
+  /* ✅ 改動1：技師篩選跟員工列表 */
+  const techList = useMemo(() => { return staffList.map(s => s.name).sort(); }, [staffList]);
+
   const filteredBookings = useMemo(() => {
     let r = allBookings;
     if (filterDateFrom) r = r.filter(b => b.booking_date >= filterDateFrom);
@@ -120,12 +122,14 @@ export default function Admin() {
   const statusText = (s) => s === 'confirmed' ? '已確認' : s === 'cancelled' ? '已取消' : s === 'completed' ? '已完成' : '待確認';
   const waLink = (phone) => { if (!phone) return null; const c = phone.replace(/[^0-9]/g, ''); return `https://wa.me/${c.length <= 8 ? '852' + c : c}`; };
 
+  /* ✅ 改動2：加咗 nextMonth case */
   const setQuickDate = (type) => {
     const today = todayStr;
     if (type === 'today') { setFilterDateFrom(today); setFilterDateTo(today); }
     else if (type === 'tomorrow') { const t = new Date(Date.now() + 86400000).toISOString().split('T')[0]; setFilterDateFrom(t); setFilterDateTo(t); }
     else if (type === 'week') { setFilterDateFrom(today); setFilterDateTo(new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0]); }
     else if (type === 'month') { const y = new Date().getFullYear(), m = new Date().getMonth(); setFilterDateFrom(`${y}-${String(m + 1).padStart(2, '0')}-01`); setFilterDateTo(`${y}-${String(m + 1).padStart(2, '0')}-${new Date(y, m + 1, 0).getDate()}`); }
+    else if (type === 'nextMonth') { const nm = new Date().getMonth() + 1; const ny = nm > 11 ? new Date().getFullYear() + 1 : new Date().getFullYear(); const m = nm > 11 ? 0 : nm; setFilterDateFrom(`${ny}-${String(m + 1).padStart(2, '0')}-01`); setFilterDateTo(`${ny}-${String(m + 1).padStart(2, '0')}-${new Date(ny, m + 1, 0).getDate()}`); }
   };
   const clearFilters = () => { setSearchTerm(''); setFilterDateFrom(''); setFilterDateTo(''); setFilterStatus('all'); setFilterTech('all'); };
   const hasFilters = searchTerm || filterDateFrom || filterDateTo || filterStatus !== 'all' || filterTech !== 'all';
@@ -207,7 +211,6 @@ export default function Admin() {
         ))}
       </div>
 
-      {/* Sticky Sync Bar */}
       {pendingCount > 0 && tab === 'timeslots' && (
         <div style={{ position: 'sticky', top: 0, zIndex: 100, background: 'linear-gradient(135deg, #FFF3E0, #FFE0B2)', borderBottom: '2px solid #FFB74D' }}>
           <div style={{ padding: '14px 30px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
@@ -237,9 +240,8 @@ export default function Admin() {
 
       <div style={{ maxWidth: 1200, margin: '0 auto', padding: '30px 20px' }}>
 
-        {/* ══════════ BOOKINGS TAB (全面升級版) ══════════ */}
+        {/* ══════════ BOOKINGS TAB ══════════ */}
         {tab === 'bookings' && (<>
-          {/* 統計卡片（含收入） */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12, marginBottom: 24 }}>
             {[
               { label: '今日預約', value: stats.today, sub: `$${stats.todayRev}`, color: '#FF9800' },
@@ -255,25 +257,22 @@ export default function Admin() {
               </div>))}
           </div>
 
-          {/* 篩選列 */}
           <div style={{ background: '#fff', padding: '16px 20px', borderRadius: 12, marginBottom: 16, boxShadow: '0 2px 10px rgba(0,0,0,0.05)' }}>
-            {/* 搜尋 */}
             <div style={{ marginBottom: 12 }}>
               <input type="text" placeholder="🔍 搜尋客人名稱或電話..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} style={{ width: '100%', padding: '10px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, boxSizing: 'border-box', fontFamily: font }} />
             </div>
-            {/* 日期範圍 + 快捷 */}
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
               <span style={{ color: '#5c4a3a', fontWeight: 600, fontSize: 13 }}>日期：</span>
               <input type="date" value={filterDateFrom} onChange={e => setFilterDateFrom(e.target.value)} style={{ padding: '6px 10px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13 }} />
               <span style={{ color: '#999', fontSize: 12 }}>至</span>
               <input type="date" value={filterDateTo} onChange={e => setFilterDateTo(e.target.value)} style={{ padding: '6px 10px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13 }} />
+              {/* ✅ 改動3：加咗「下月」按鈕 */}
               <div style={{ display: 'flex', gap: 4 }}>
-                {[['今日', 'today'], ['明日', 'tomorrow'], ['本週', 'week'], ['本月', 'month']].map(([l, k]) => (
+                {[['今日', 'today'], ['明日', 'tomorrow'], ['本週', 'week'], ['本月', 'month'], ['下月', 'nextMonth']].map(([l, k]) => (
                   <button key={k} onClick={() => setQuickDate(k)} style={{ padding: '5px 10px', borderRadius: 4, border: '1px solid #d0c8bc', background: '#faf6f0', color: '#5c4a3a', cursor: 'pointer', fontSize: 11, fontFamily: font }}>{l}</button>
                 ))}
               </div>
             </div>
-            {/* 狀態 + 技師 + 控制 */}
             <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
               <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} style={{ padding: '6px 10px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13, fontFamily: font }}>
                 <option value="all">全部狀態</option><option value="pending">待確認</option><option value="confirmed">已確認</option><option value="completed">已完成</option><option value="cancelled">已取消</option>
@@ -291,14 +290,12 @@ export default function Admin() {
             </div>
           </div>
 
-          {/* 結果提示 */}
           {hasFilters && (
             <div style={{ padding: '10px 16px', marginBottom: 12, borderRadius: 8, background: '#FFF8E1', border: '1px solid #FFE082', fontSize: 13, color: '#F57F17' }}>
               🔍 篩選結果：{filteredBookings.length} / {allBookings.length} 筆預約
             </div>
           )}
 
-          {/* 預約列表 */}
           <div style={{ background: '#fff', borderRadius: 12, overflow: 'hidden', boxShadow: '0 2px 10px rgba(0,0,0,0.05)' }}>
             <div style={{ padding: '16px 20px', borderBottom: '1px solid #eee', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <h2 style={{ margin: 0, color: '#5c4a3a', fontSize: 17 }}>預約列表 ({filteredBookings.length})</h2>
@@ -306,11 +303,9 @@ export default function Admin() {
             </div>
 
             {bkLoading ? <p style={{ padding: 40, textAlign: 'center', color: '#999' }}>載入中...</p> : filteredBookings.length === 0 ? <p style={{ padding: 40, textAlign: 'center', color: '#999' }}>{hasFilters ? '搵唔到符合條件嘅預約' : '暫無預約'}</p> : isMobile ? (
-              /* ═══ 手機卡片視圖 ═══ */
               <div style={{ padding: '12px 16px' }}>
                 {filteredBookings.map(b => (
                   <div key={b.id} style={{ background: rowBg(b.status), borderRadius: 10, padding: 14, marginBottom: 10, border: '1px solid #e8e0d8' }}>
-                    {/* 頂部：客人 + 狀態 */}
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
                       <div>
                         <span style={{ fontWeight: 700, fontSize: 15, color: '#5c4a3a' }}>{b.customer_name}</span>
@@ -321,27 +316,16 @@ export default function Admin() {
                       </div>
                       <span style={{ padding: '3px 10px', borderRadius: 20, fontSize: 11, color: '#fff', background: statusColor(b.status), fontWeight: 600, whiteSpace: 'nowrap' }}>{statusText(b.status)}</span>
                     </div>
-                    {/* 日期時間 */}
-                    <div style={{ fontSize: 13, color: '#666', marginBottom: 6 }}>
-                      📅 {b.booking_date}（週{DAYS[new Date(b.booking_date + 'T00:00:00').getDay()]}）　🕐 {b.booking_time}
-                    </div>
-                    {/* 服務 */}
-                    <div style={{ fontSize: 13, color: '#5c4a3a', marginBottom: 2 }}>
-                      🎨 {b.service_name}{b.variant_label && <span style={{ color: '#999' }}> · {b.variant_label}</span>}
-                    </div>
+                    <div style={{ fontSize: 13, color: '#666', marginBottom: 6 }}>📅 {b.booking_date}（週{DAYS[new Date(b.booking_date + 'T00:00:00').getDay()]}）　🕐 {b.booking_time}</div>
+                    <div style={{ fontSize: 13, color: '#5c4a3a', marginBottom: 2 }}>🎨 {b.service_name}{b.variant_label && <span style={{ color: '#999' }}> · {b.variant_label}</span>}</div>
                     {b.addon_names?.length > 0 && <div style={{ fontSize: 12, color: '#999', marginBottom: 4, paddingLeft: 20 }}>+ {b.addon_names.join('、')}</div>}
-                    {/* 技師 + 金額 */}
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '8px 0', fontSize: 13 }}>
                       <span style={{ color: '#999' }}>👤 {b.technician_label || '未指定'}</span>
                       <span style={{ fontSize: 17, fontWeight: 700, color: '#5c4a3a' }}>${b.total_price}</span>
                     </div>
-                    {/* 備註 */}
                     {(b.notes || b.remarks || b.customer_notes) && (
-                      <div style={{ padding: '8px 10px', background: 'rgba(0,0,0,0.03)', borderRadius: 6, fontSize: 12, color: '#888', marginBottom: 8 }}>
-                        📝 {b.notes || b.remarks || b.customer_notes}
-                      </div>
+                      <div style={{ padding: '8px 10px', background: 'rgba(0,0,0,0.03)', borderRadius: 6, fontSize: 12, color: '#888', marginBottom: 8 }}>📝 {b.notes || b.remarks || b.customer_notes}</div>
                     )}
-                    {/* 操作按鈕 */}
                     <div style={{ display: 'flex', gap: 6, paddingTop: 8, borderTop: '1px solid rgba(0,0,0,0.06)', flexWrap: 'wrap' }}>
                       {b.status === 'pending' && actBtn('✅', '#E8F5E9', '#A5D6A7', () => updateStatus(b.id, 'confirmed'), '確認')}
                       {(b.status === 'pending' || b.status === 'confirmed') && actBtn('✔️', '#E3F2FD', '#90CAF9', () => updateStatus(b.id, 'completed'), '完成')}
@@ -353,7 +337,6 @@ export default function Admin() {
                 ))}
               </div>
             ) : (
-              /* ═══ 桌面表格視圖 ═══ */
               <div style={{ overflowX: 'auto' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
                   <thead><tr style={{ background: '#f9f6f3' }}>{['日期', '時間', '服務', '客人', '電話', '技師', '金額', '狀態', '操作'].map(h => <th key={h} style={{ padding: '12px 10px', textAlign: 'left', color: '#5c4a3a', fontWeight: 600, whiteSpace: 'nowrap', fontSize: 13 }}>{h}</th>)}</tr></thead>
