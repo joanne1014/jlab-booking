@@ -33,7 +33,6 @@ export default function Admin() {
   const [loginLoading, setLoginLoading] = useState(false);
   const [loginError, setLoginError] = useState('');
   const [resetMsg, setResetMsg] = useState('');
-  // ✅ 改密碼 state
   const [showChangePw, setShowChangePw] = useState(false);
   const [cpOld, setCpOld] = useState('');
   const [cpNew, setCpNew] = useState('');
@@ -414,7 +413,6 @@ export default function Admin() {
     setLoginLoading(false);
   };
 
-  // ✅ 改密碼 function
   const handleChangePw = async () => {
     setCpError(''); setCpMsg('');
     if (!cpOld || !cpNew || !cpConfirm) { setCpError('請填寫所有欄位'); return; }
@@ -461,32 +459,21 @@ export default function Admin() {
         <input type="email" placeholder="管理員 Email" value={loginEmail} onChange={e => { setLoginEmail(e.target.value); setResetMsg(''); }} style={{ width: '100%', padding: '14px 16px', border: '1px solid #ddd', borderRadius: 8, fontSize: 16, marginBottom: 12, boxSizing: 'border-box', textAlign: 'center' }} />
         <input type="password" placeholder="密碼" value={pw} onChange={e => setPw(e.target.value)} style={{ width: '100%', padding: '14px 16px', border: '1px solid #ddd', borderRadius: 8, fontSize: 16, marginBottom: 20, boxSizing: 'border-box', textAlign: 'center' }} />
         <button type="submit" disabled={loginLoading} style={{ width: '100%', padding: 14, background: loginLoading ? '#a89888' : '#5c4a3a', color: '#fff', border: 'none', borderRadius: 8, fontSize: 16, cursor: loginLoading ? 'not-allowed' : 'pointer' }}>{loginLoading ? '登入中...' : '登入'}</button>
-        {/* ✅ 忘記密碼：即時重設成隨機密碼 */}
+        {/* ✅ 忘記密碼：發送重設連結到 Email */}
         <button type="button" onClick={async () => {
           if (!loginEmail) { setLoginError('請先輸入 Email'); setResetMsg(''); return; }
           setLoginError('');
           setResetMsg('');
           try {
-            const listRes = await fetch(`${SB}/auth/v1/admin/users`, {
-              headers: { apikey: SK, Authorization: `Bearer ${SK}` }
+            const res = await fetch(`${SB}/auth/v1/recover`, {
+              method: 'POST',
+              headers: { apikey: SK, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ email: loginEmail })
             });
-            if (!listRes.ok) throw new Error('無法取得用戶列表');
-            const listData = await listRes.json();
-            const user = listData.users?.find(u => u.email?.toLowerCase() === loginEmail.toLowerCase());
-            if (!user) { setLoginError('搵唔到呢個 Email 嘅帳號'); return; }
-            const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#';
-            let newPw = '';
-            for (let i = 0; i < 12; i++) newPw += chars[Math.floor(Math.random() * chars.length)];
-            const updateRes = await fetch(`${SB}/auth/v1/admin/users/${user.id}`, {
-              method: 'PUT',
-              headers: { apikey: SK, Authorization: `Bearer ${SK}`, 'Content-Type': 'application/json' },
-              body: JSON.stringify({ password: newPw })
-            });
-            if (!updateRes.ok) throw new Error('重設失敗');
-            setPw(newPw);
-            setResetMsg(`密碼已重設！你嘅新密碼：  ${newPw}    （已自動填入，直接撳「登入」即可）`);
+            if (!res.ok) throw new Error('發送失敗');
+            setResetMsg('重設密碼連結已發送到你嘅 Email，請查收信箱（包括垃圾郵件）。');
           } catch (err) {
-            setLoginError('重設失敗：' + (err.message || '請稍後再試'));
+            setLoginError('發送失敗：' + (err.message || '請稍後再試'));
           }
         }} style={{ background: 'none', border: 'none', color: '#999', fontSize: 13, marginTop: 16, cursor: 'pointer', textDecoration: 'underline', fontFamily: font }}>
           忘記密碼？
@@ -564,7 +551,6 @@ export default function Admin() {
         </div>
       )}
 
-      {/* ✅ HEADER（加咗「改密碼」按鈕） */}
       <div style={{ background: '#fff', padding: '20px 30px', boxShadow: '0 2px 10px rgba(0,0,0,0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div><h1 style={{ fontSize: 20, color: '#5c4a3a', margin: 0 }}>J.LAB 管理後台</h1><p style={{ color: '#999', fontSize: 12, margin: '4px 0 0', letterSpacing: 1 }}>ADMIN DASHBOARD</p></div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -573,7 +559,6 @@ export default function Admin() {
         </div>
       </div>
 
-      {/* ✅ 改密碼 Modal */}
       {showChangePw && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }} onClick={() => setShowChangePw(false)}>
           <div style={{ background: '#fff', borderRadius: 16, padding: 32, maxWidth: 400, width: '100%', boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }} onClick={e => e.stopPropagation()}>
@@ -602,7 +587,6 @@ export default function Admin() {
         </div>
       )}
 
-      {/* TABS */}
       <div style={{ background: '#fff', borderTop: '1px solid #f0ebe3', padding: '0 30px', display: 'flex', gap: 0, boxShadow: '0 2px 10px rgba(0,0,0,0.03)', overflowX: 'auto' }}>
         {[{ key: 'bookings', label: `📋 預約管理${stats.pending > 0 ? ` (${stats.pending})` : ''}` }, { key: 'timeslots', label: '🕐 時段管理' }, { key: 'blocked', label: '📅 封鎖日期' }].map(t => (
           <button key={t.key} onClick={() => setTab(t.key)} style={{ padding: '14px 24px', background: 'none', border: 'none', borderBottom: tab === t.key ? '2px solid #5c4a3a' : '2px solid transparent', fontSize: 14, color: tab === t.key ? '#5c4a3a' : '#999', fontWeight: tab === t.key ? 600 : 400, cursor: 'pointer', fontFamily: font, whiteSpace: 'nowrap' }}>{t.label}</button>
