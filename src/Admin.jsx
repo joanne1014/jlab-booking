@@ -41,6 +41,14 @@ export default function Admin() {
   const [cpError, setCpError] = useState('');
   const [cpLoading, setCpLoading] = useState(false);
 
+  /* ✅ 新增：Recovery token 相關 state */
+  const [recoveryToken, setRecoveryToken] = useState('');
+  const [showResetForm, setShowResetForm] = useState(false);
+  const [resetNewPw, setResetNewPw] = useState('');
+  const [resetConfirmPw, setResetConfirmPw] = useState('');
+  const [resetPwLoading, setResetPwLoading] = useState(false);
+  const [resetPwError, setResetPwError] = useState('');
+
   const [tab, setTab] = useState('bookings');
   const [toast, setToast] = useState('');
 
@@ -109,6 +117,48 @@ export default function Admin() {
   const smallBtn = (bg, co, bd) => ({ padding: '6px 14px', borderRadius: 6, border: bd ? `1px solid ${bd}` : 'none', background: bg, color: co, cursor: 'pointer', fontSize: 12, fontFamily: font });
 
   useEffect(() => { const h = () => setIsMobile(window.innerWidth < 768); h(); window.addEventListener('resize', h); return () => window.removeEventListener('resize', h); }, []);
+
+  /* ✅ 新增：頁面載入時檢查 URL 有冇 recovery token */
+  useEffect(() => {
+    const hash = window.location.hash.substring(1);
+    if (!hash) return;
+    const params = new URLSearchParams(hash);
+    const accessToken = params.get('access_token');
+    const type = params.get('type');
+    if (accessToken && type === 'recovery') {
+      setRecoveryToken(accessToken);
+      setShowResetForm(true);
+      // 清除 URL 嘅 hash，唔好顯示 token
+      window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    }
+  }, []);
+
+  /* ✅ 新增：用 recovery token 設定新密碼 */
+  const handleResetNewPw = async () => {
+    setResetPwError('');
+    if (!resetNewPw || resetNewPw.length < 6) { setResetPwError('新密碼至少要 6 個字元'); return; }
+    if (resetNewPw !== resetConfirmPw) { setResetPwError('兩次輸入嘅密碼唔一樣'); return; }
+    setResetPwLoading(true);
+    try {
+      const res = await fetch(`${SB}/auth/v1/user`, {
+        method: 'PUT',
+        headers: { apikey: SK, Authorization: `Bearer ${recoveryToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: resetNewPw })
+      });
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(errText || '更新失敗');
+      }
+      setShowResetForm(false);
+      setRecoveryToken('');
+      setResetNewPw('');
+      setResetConfirmPw('');
+      setResetMsg('密碼已重設成功！請用新密碼登入。');
+    } catch (err) {
+      setResetPwError('重設失敗：連結可能已過期，請重新申請。');
+    }
+    setResetPwLoading(false);
+  };
 
   const logChange = (text) => {
     const id = Date.now();
@@ -449,6 +499,22 @@ export default function Admin() {
 
   /* ═══════ RENDER ═══════ */
 
+  /* ✅ 新增：Recovery 重設密碼表單 */
+  if (!auth && showResetForm) return (
+    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(135deg,#f5f0eb,#e8e0d8)', fontFamily: font }}>
+      <div style={{ background: '#fff', padding: '60px 40px', borderRadius: 16, boxShadow: '0 10px 40px rgba(0,0,0,0.1)', textAlign: 'center', maxWidth: 400, width: '90%' }}>
+        <h1 style={{ fontSize: 24, color: '#5c4a3a', marginBottom: 8 }}>J.LAB</h1>
+        <p style={{ color: '#FF9800', fontSize: 16, marginBottom: 30, fontWeight: 600 }}>🔑 重設密碼</p>
+        <p style={{ color: '#999', fontSize: 13, marginBottom: 24 }}>請輸入你嘅新密碼</p>
+        {resetPwError && <div style={{ padding: '10px 16px', background: '#FFEBEE', color: '#c62828', borderRadius: 8, fontSize: 14, marginBottom: 16 }}>❌ {resetPwError}</div>}
+        <input type="password" placeholder="新密碼（至少 6 個字元）" value={resetNewPw} onChange={e => { setResetNewPw(e.target.value); setResetPwError(''); }} style={{ width: '100%', padding: '14px 16px', border: '1px solid #ddd', borderRadius: 8, fontSize: 16, marginBottom: 12, boxSizing: 'border-box', textAlign: 'center' }} />
+        <input type="password" placeholder="確認新密碼" value={resetConfirmPw} onChange={e => { setResetConfirmPw(e.target.value); setResetPwError(''); }} onKeyDown={e => e.key === 'Enter' && handleResetNewPw()} style={{ width: '100%', padding: '14px 16px', border: '1px solid #ddd', borderRadius: 8, fontSize: 16, marginBottom: 20, boxSizing: 'border-box', textAlign: 'center' }} />
+        <button onClick={handleResetNewPw} disabled={resetPwLoading} style={{ width: '100%', padding: 14, background: resetPwLoading ? '#a89888' : '#FF9800', color: '#fff', border: 'none', borderRadius: 8, fontSize: 16, cursor: resetPwLoading ? 'not-allowed' : 'pointer', fontFamily: font, fontWeight: 600 }}>{resetPwLoading ? '處理中...' : '確認重設密碼'}</button>
+        <button type="button" onClick={() => { setShowResetForm(false); setRecoveryToken(''); setResetPwError(''); setResetNewPw(''); setResetConfirmPw(''); }} style={{ background: 'none', border: 'none', color: '#999', fontSize: 13, marginTop: 16, cursor: 'pointer', textDecoration: 'underline', fontFamily: font }}>返回登入</button>
+      </div>
+    </div>
+  );
+
   if (!auth) return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(135deg,#f5f0eb,#e8e0d8)', fontFamily: font }}>
       <form onSubmit={handleLogin} style={{ background: '#fff', padding: '60px 40px', borderRadius: 16, boxShadow: '0 10px 40px rgba(0,0,0,0.1)', textAlign: 'center', maxWidth: 400, width: '90%' }}>
@@ -459,19 +525,20 @@ export default function Admin() {
         <input type="email" placeholder="管理員 Email" value={loginEmail} onChange={e => { setLoginEmail(e.target.value); setResetMsg(''); }} style={{ width: '100%', padding: '14px 16px', border: '1px solid #ddd', borderRadius: 8, fontSize: 16, marginBottom: 12, boxSizing: 'border-box', textAlign: 'center' }} />
         <input type="password" placeholder="密碼" value={pw} onChange={e => setPw(e.target.value)} style={{ width: '100%', padding: '14px 16px', border: '1px solid #ddd', borderRadius: 8, fontSize: 16, marginBottom: 20, boxSizing: 'border-box', textAlign: 'center' }} />
         <button type="submit" disabled={loginLoading} style={{ width: '100%', padding: 14, background: loginLoading ? '#a89888' : '#5c4a3a', color: '#fff', border: 'none', borderRadius: 8, fontSize: 16, cursor: loginLoading ? 'not-allowed' : 'pointer' }}>{loginLoading ? '登入中...' : '登入'}</button>
-        {/* ✅ 忘記密碼：發送重設連結到 Email */}
+        {/* ✅ 忘記密碼：發送重設連結到 Email，redirect_to 指向當前頁面 */}
         <button type="button" onClick={async () => {
           if (!loginEmail) { setLoginError('請先輸入 Email'); setResetMsg(''); return; }
           setLoginError('');
           setResetMsg('');
           try {
+            const redirectUrl = window.location.origin + window.location.pathname;
             const res = await fetch(`${SB}/auth/v1/recover`, {
               method: 'POST',
               headers: { apikey: SK, 'Content-Type': 'application/json' },
-              body: JSON.stringify({ email: loginEmail })
+              body: JSON.stringify({ email: loginEmail, redirect_to: redirectUrl })
             });
             if (!res.ok) throw new Error('發送失敗');
-            setResetMsg('重設密碼連結已發送到你嘅 Email，請查收信箱（包括垃圾郵件）。');
+            setResetMsg('重設密碼連結已發送到你嘅 Email，請查收信箱（包括垃圾郵件）。撳 Email 入面嘅連結會返嚟呢度設定新密碼。');
           } catch (err) {
             setLoginError('發送失敗：' + (err.message || '請稍後再試'));
           }
