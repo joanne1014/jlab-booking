@@ -32,7 +32,16 @@ export default function Admin() {
   const [loginEmail, setLoginEmail] = useState('');
   const [loginLoading, setLoginLoading] = useState(false);
   const [loginError, setLoginError] = useState('');
-  const [resetMsg, setResetMsg] = useState(''); // ✅ 新增
+  const [resetMsg, setResetMsg] = useState('');
+  // ✅ 改密碼 state
+  const [showChangePw, setShowChangePw] = useState(false);
+  const [cpOld, setCpOld] = useState('');
+  const [cpNew, setCpNew] = useState('');
+  const [cpConfirm, setCpConfirm] = useState('');
+  const [cpMsg, setCpMsg] = useState('');
+  const [cpError, setCpError] = useState('');
+  const [cpLoading, setCpLoading] = useState(false);
+
   const [tab, setTab] = useState('bookings');
   const [toast, setToast] = useState('');
 
@@ -53,10 +62,8 @@ export default function Admin() {
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [isMobile, setIsMobile] = useState(false);
 
-  /* ═══ 操作記錄 ═══ */
   const [changeLog, setChangeLog] = useState([]);
 
-  /* ═══ 日程表 ═══ */
   const [viewMode, setViewMode] = useState('list');
   const [schedYear, setSchedYear] = useState(new Date().getFullYear());
   const [schedMonth, setSchedMonth] = useState(new Date().getMonth());
@@ -68,7 +75,6 @@ export default function Admin() {
   const [showCancelled, setShowCancelled] = useState(false);
   const [schedRefreshKey, setSchedRefreshKey] = useState(0);
 
-  /* ═══ 改期 ═══ */
   const [reschedMode, setReschedMode] = useState(false);
   const [reschedDate, setReschedDate] = useState('');
   const [reschedTime, setReschedTime] = useState('');
@@ -76,7 +82,6 @@ export default function Admin() {
   const [reschedSlots, setReschedSlots] = useState({});
   const [reschedLoading, setReschedLoading] = useState(false);
 
-  /* ═══ 時段管理 ═══ */
   const [calYear, setCalYear] = useState(new Date().getFullYear());
   const [calMonth, setCalMonth] = useState(new Date().getMonth());
   const [selDates, setSelDates] = useState(new Set());
@@ -106,14 +111,12 @@ export default function Admin() {
 
   useEffect(() => { const h = () => setIsMobile(window.innerWidth < 768); h(); window.addEventListener('resize', h); return () => window.removeEventListener('resize', h); }, []);
 
-  /* ═══ 操作記錄 ═══ */
   const logChange = (text) => {
     const id = Date.now();
     const ts = new Date().toLocaleTimeString('zh-HK', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
     setChangeLog(prev => [{ id, text, ts }, ...prev].slice(0, 30));
   };
 
-  /* ═══ 時段管理 computed ═══ */
   const gridTimes = useMemo(() => { const times = []; let mins = toMins(gridStart); const end = toMins(gridEnd); while (mins <= end) { times.push(toTimeStr(mins)); mins += gridInterval; } return times; }, [gridStart, gridEnd, gridInterval]);
   const displayTimes = pending[activeDate] || dbTimes;
   const isInPending = !!pending[activeDate];
@@ -121,7 +124,6 @@ export default function Admin() {
   const activeDow = activeDate ? new Date(activeDate + 'T00:00:00').getDay() : 0;
   const extraDbTimes = useMemo(() => { const gridSet = new Set(gridTimes); return [...(pending[activeDate] || dbTimes)].filter(t => !gridSet.has(t)).sort(); }, [gridTimes, dbTimes, pending, activeDate]);
 
-  /* ═══ Booking filtering & stats ═══ */
   const techList = useMemo(() => staffList.map(s => s.name).sort(), [staffList]);
   const filteredBookings = useMemo(() => {
     let r = allBookings;
@@ -151,7 +153,6 @@ export default function Admin() {
     };
   }, [allBookings, todayStr, nextMonthStr]);
 
-  /* ═══ 日程表 computed ═══ */
   const monthBkStats = useMemo(() => {
     const c = {};
     allBookings.forEach(b => { const d = b.booking_date; if (!d) return; if (!c[d]) c[d] = { total: 0, pending: 0, revenue: 0 }; if (b.status === 'cancelled') return; c[d].total++; if (b.status === 'pending') c[d].pending++; c[d].revenue += b.total_price || 0; });
@@ -196,7 +197,6 @@ export default function Admin() {
     const days = []; for (let i = 0; i < dow; i++) days.push(null); for (let d = 1; d <= total; d++) days.push(d); return days;
   }, [schedYear, schedMonth]);
 
-  /* ═══ 改期 computed ═══ */
   const reschedAvailTimes = useMemo(() => {
     const staffObj = staffList.find(s => s.name === reschedTech);
     if (!staffObj) return [];
@@ -208,7 +208,6 @@ export default function Admin() {
     return allBookings.some(b => b.booking_date === reschedDate && b.booking_time?.slice(0, 5) === reschedTime && b.technician_label === reschedTech && b.status !== 'cancelled' && b.id !== selectedBooking?.id);
   }, [reschedDate, reschedTime, reschedTech, allBookings, selectedBooking]);
 
-  /* ═══ Schedule data loading ═══ */
   const loadMonthAvail = useCallback(async (y, m) => {
     try {
       const s = `${y}-${String(m + 1).padStart(2, '0')}-01`;
@@ -238,7 +237,6 @@ export default function Admin() {
   const nextSchedCal = () => { if (schedMonth === 11) { setSchedYear(y => y + 1); setSchedMonth(0); } else setSchedMonth(m => m + 1); };
   const schedToToday = () => { const now = new Date(); setSchedYear(now.getFullYear()); setSchedMonth(now.getMonth()); setSchedDate(todayStr); };
 
-  /* ═══ Booking Modal helpers ═══ */
   const openBooking = (b) => { setSelectedBooking(b); setReschedMode(false); setReschedSlots({}); };
   const closeBooking = () => { setSelectedBooking(null); setReschedMode(false); };
   const rowBg = (s) => s === 'pending' ? '#FFFDE7' : s === 'confirmed' ? '#E8F5E9' : s === 'completed' ? '#E3F2FD' : s === 'cancelled' ? '#FFEBEE' : '#fff';
@@ -246,7 +244,6 @@ export default function Admin() {
   const statusText = (s) => s === 'confirmed' ? '已確認' : s === 'cancelled' ? '已取消' : s === 'completed' ? '已完成' : '待確認';
   const waLink = (phone) => { if (!phone) return null; const c = phone.replace(/[^0-9]/g, ''); return `https://wa.me/${c.length <= 8 ? '852' + c : c}`; };
 
-  /* ═══ 改期 ═══ */
   const startResched = () => {
     if (!selectedBooking) return;
     setReschedMode(true);
@@ -266,9 +263,7 @@ export default function Admin() {
   const handleReschedDateChange = (date) => { setReschedDate(date); setReschedTime(''); loadReschedSlots(date); };
   const saveResched = async () => {
     if (!selectedBooking || !reschedDate || !reschedTime) return showToast('❌ 請選擇日期同時間');
-    if (isTimeConflict) {
-      return showToast('❌ 此時段已有其他預約，請選擇其他時間');
-    }
+    if (isTimeConflict) return showToast('❌ 此時段已有其他預約，請選擇其他時間');
     setReschedLoading(true);
     try {
       const updates = { booking_date: reschedDate, booking_time: reschedTime };
@@ -284,7 +279,6 @@ export default function Admin() {
     setReschedLoading(false);
   };
 
-  /* ═══ Booking status ═══ */
   const updateStatus = async (id, s) => {
     const b = allBookings.find(x => x.id === id);
     try {
@@ -325,7 +319,6 @@ export default function Admin() {
     } catch (e) { console.error(e); }
   };
 
-  /* ═══ 批量確認 ═══ */
   const confirmAllPending = async () => {
     const pend = allBookings.filter(b => b.status === 'pending' && b.booking_date >= todayStr);
     if (!pend.length) return showToast('❌ 沒有待確認嘅預約');
@@ -362,18 +355,15 @@ export default function Admin() {
   const clearFilters = () => { setSearchTerm(''); setFilterDateFrom(''); setFilterDateTo(''); setFilterStatus('all'); setFilterTech('all'); };
   const hasFilters = searchTerm || filterDateFrom || filterDateTo || filterStatus !== 'all' || filterTech !== 'all';
 
-  /* ═══ 員工 CRUD ═══ */
   const fetchStaff = async () => { try { const data = await sbGet('staff?is_active=eq.true&order=sort_order,created_at'); setStaffList(data || []); if (data && data.length > 0) setActiveStaff(prev => { if (prev && data.find(s => s.id === prev.id)) return prev; return data[0]; }); } catch (e) { console.error(e); } };
   const addStaff = async () => { const name = newStaffName.trim(); if (!name) return showToast('❌ 請輸入員工名稱'); try { const data = await sbPost('staff', [{ name, sort_order: staffList.length }]); if (data && data[0]) { setStaffList(prev => [...prev, data[0]]); setActiveStaff(data[0]); setPending({}); setNewStaffName(''); setShowAddStaff(false); showToast(`✅ 已新增員工「${name}」`); } } catch (e) { showToast('❌ 新增失敗'); } };
   const saveStaffName = async () => { if (!editStaffId || !editStaffName.trim()) return; try { await sbPatch(`staff?id=eq.${editStaffId}`, { name: editStaffName.trim() }); const n = editStaffName.trim(); setStaffList(prev => prev.map(s => s.id === editStaffId ? { ...s, name: n } : s)); if (activeStaff?.id === editStaffId) setActiveStaff(prev => ({ ...prev, name: n })); setEditStaffId(null); showToast('✅ 已更新名稱'); } catch (e) { showToast('❌ 更新失敗'); } };
   const removeStaff = async (id) => { if (staffList.length <= 1) return showToast('❌ 至少要保留一個員工'); const s = staffList.find(x => x.id === id); if (!window.confirm(`確定刪除「${s?.name}」？`)) return; try { await sbDel(`staff?id=eq.${id}`); const rest = staffList.filter(x => x.id !== id); setStaffList(rest); if (activeStaff?.id === id) { setActiveStaff(rest[0] || null); setPending({}); } showToast('✅ 已刪除員工'); } catch (e) { showToast('❌ 刪除失敗'); } };
   const switchStaff = (s) => { if (activeStaff?.id === s.id) return; if (pendingCount > 0 && !window.confirm(`你有 ${pendingCount} 個未同步嘅變更，切換會清除，繼續？`)) return; setPending({}); setActiveStaff(s); setSelDates(new Set()); };
 
-  /* ═══ LOAD DB (時段管理) ═══ */
   const loadActiveFromDB = useCallback(async (date) => { if (!date || !activeStaff) return; setGridLoading(true); try { const sid = activeStaff.id; const [dateData, enabledData] = await Promise.all([sbGet(`date_availability?available_date=eq.${date}&staff_id=eq.${sid}`), sbGet(`enabled_timeslots?slot_date=eq.${date}&staff_id=eq.${sid}&order=slot_time`)]); const info = dateData?.[0]; setDbStatus(info?.status || null); if (!info || info.status !== 'available') setDbTimes(new Set()); else setDbTimes(new Set((enabledData || []).map(r => r.slot_time?.slice(0, 5)))); } catch (e) { console.error(e); } setGridLoading(false); }, [activeStaff]);
   useEffect(() => { if (auth && activeDate && activeStaff) loadActiveFromDB(activeDate); }, [activeDate, auth, activeStaff, loadActiveFromDB]);
 
-  /* ═══ CALENDAR (時段管理) ═══ */
   const getCalDays = (y, m) => { const dow = new Date(y, m, 1).getDay(); const total = new Date(y, m + 1, 0).getDate(); const days = []; for (let i = 0; i < dow; i++) days.push(null); for (let d = 1; d <= total; d++) days.push(d); return days; };
   const prevCal = () => { if (calMonth === 0) { setCalYear(y => y - 1); setCalMonth(11); } else setCalMonth(m => m - 1); };
   const nextCal = () => { if (calMonth === 11) { setCalYear(y => y + 1); setCalMonth(0); } else setCalMonth(m => m + 1); };
@@ -388,19 +378,17 @@ export default function Admin() {
   const applyBreakLocal = () => { const dates = [...selDates].filter(d => pending[d] && pending[d].size > 0); if (!dates.length) return; if (breakFrom >= breakTo) return; const next = { ...pending }; const bTimes = gridTimes.filter(t => t >= breakFrom && t < breakTo); dates.forEach(d => { next[d] = new Set(next[d]); bTimes.forEach(t => next[d].delete(t)); }); setPending(next); showToast(`🍽️ 已關閉 ${breakFrom}–${breakTo}（${dates.length} 個日期）`); };
   const autoFitRange = () => { const starts = templates.filter(t => t.from).map(t => toMins(t.from)); const ends = templates.filter(t => t.to).map(t => toMins(t.to)); if (!starts.length) return; setGridStart(toTimeStr(Math.max(0, Math.min(...starts) - gridInterval))); setGridEnd(toTimeStr(Math.min(23 * 60 + 30, Math.max(...ends) + gridInterval))); showToast('📐 已自動適應範圍'); };
 
-  /* ═══ SYNC ═══ */
   const syncPending = async () => { if (!activeStaff) return; const entries = Object.entries(pending); if (!entries.length) return; if (!window.confirm(`確定將「${activeStaff.name}」嘅 ${entries.length} 個日期同步到前台？`)) return; setBatchLoading(true); try { const dates = entries.map(([d]) => d); const sid = activeStaff.id; await sbDel(`date_availability?available_date=in.(${dates.join(',')})&staff_id=eq.${sid}`); await sbDel(`enabled_timeslots?slot_date=in.(${dates.join(',')})&staff_id=eq.${sid}`); try { await sbDel(`disabled_timeslots?slot_date=in.(${dates.join(',')})`); } catch (_) {} await sbPost('date_availability', entries.map(([d, times]) => ({ available_date: d, status: times.size > 0 ? 'available' : 'closed', staff_id: sid }))); const enabledRows = []; entries.forEach(([d, times]) => { [...times].forEach(t => { enabledRows.push({ slot_date: d, slot_time: t, staff_id: sid }); }); }); if (enabledRows.length > 0) { for (let i = 0; i < enabledRows.length; i += 500) await sbPost('enabled_timeslots', enabledRows.slice(i, i + 500)); } setPending({}); setSelDates(new Set()); setSchedRefreshKey(k => k + 1); showToast(`✅ 成功同步「${activeStaff.name}」嘅 ${dates.length} 個日期！`); loadActiveFromDB(activeDate); } catch (e) { console.error(e); alert('同步失敗：' + e.message); } setBatchLoading(false); };
   const removePendingDate = (d) => { setPending(prev => { const n = { ...prev }; delete n[d]; return n; }); };
 
-  /* ═══ BOOKINGS ═══ */
   const fetchBookings = async () => { setBkLoading(true); try { const data = await sbGet('bookings?order=booking_date.desc,booking_time.desc&limit=1000'); setAllBookings(data || []); } catch (e) { console.error(e); } setBkLoading(false); };
   useEffect(() => { bookingCountRef.current = allBookings.length; }, [allBookings.length]);
   useEffect(() => { if (!auth || !autoRefresh) return; const id = setInterval(async () => { try { const data = await sbGet('bookings?order=booking_date.desc,booking_time.desc&limit=1000'); if (data && data.length > bookingCountRef.current && bookingCountRef.current > 0) showToast(`🔔 有 ${data.length - bookingCountRef.current} 個新預約！`); setAllBookings(data || []); } catch (_) {} }, 30000); return () => clearInterval(id); }, [auth, autoRefresh]);
 
-  /* ═══ BLOCKED ═══ */
   const fetchBlocked = async () => { try { setBlocked(await sbGet('blocked_dates?order=date') || []); } catch (e) { console.error(e); } };
   const addBlocked = async () => { if (!newBD) return; try { const d = await sbPost('blocked_dates', { date: newBD, reason: newBR }); setBlocked(prev => [...prev, ...d].sort((a, b) => a.date.localeCompare(b.date))); setNewBD(''); setNewBR(''); } catch (e) { console.error(e); } };
   const removeBlocked = async (id) => { try { await sbDel(`blocked_dates?id=eq.${id}`); setBlocked(prev => prev.filter(b => b.id !== id)); } catch (e) { console.error(e); } };
+
   const handleLogin = async (e) => {
     e.preventDefault();
     setLoginError('');
@@ -426,9 +414,43 @@ export default function Admin() {
     setLoginLoading(false);
   };
 
+  // ✅ 改密碼 function
+  const handleChangePw = async () => {
+    setCpError(''); setCpMsg('');
+    if (!cpOld || !cpNew || !cpConfirm) { setCpError('請填寫所有欄位'); return; }
+    if (cpNew.length < 6) { setCpError('新密碼至少要 6 個字元'); return; }
+    if (cpNew !== cpConfirm) { setCpError('兩次輸入嘅新密碼唔一樣'); return; }
+    setCpLoading(true);
+    try {
+      const verifyRes = await fetch(`${SB}/auth/v1/token?grant_type=password`, {
+        method: 'POST',
+        headers: { apikey: SK, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: loginEmail, password: cpOld })
+      });
+      if (!verifyRes.ok) { setCpLoading(false); setCpError('舊密碼不正確'); return; }
+      const listRes = await fetch(`${SB}/auth/v1/admin/users`, {
+        headers: { apikey: SK, Authorization: `Bearer ${SK}` }
+      });
+      const listData = await listRes.json();
+      const user = listData.users?.find(u => u.email?.toLowerCase() === loginEmail.toLowerCase());
+      if (!user) { setCpLoading(false); setCpError('搵唔到用戶'); return; }
+      const updateRes = await fetch(`${SB}/auth/v1/admin/users/${user.id}`, {
+        method: 'PUT',
+        headers: { apikey: SK, Authorization: `Bearer ${SK}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: cpNew })
+      });
+      if (!updateRes.ok) throw new Error('更新失敗');
+      setCpMsg('✅ 密碼已更新！');
+      setCpOld(''); setCpNew(''); setCpConfirm('');
+      setTimeout(() => { setShowChangePw(false); setCpMsg(''); }, 2000);
+    } catch (err) {
+      setCpError('更新失敗：' + (err.message || '請稍後再試'));
+    }
+    setCpLoading(false);
+  };
+
   /* ═══════ RENDER ═══════ */
 
-  // ✅ 新增：成個登入畫面換咗，加咗「忘記密碼」按鈕
   if (!auth) return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(135deg,#f5f0eb,#e8e0d8)', fontFamily: font }}>
       <form onSubmit={handleLogin} style={{ background: '#fff', padding: '60px 40px', borderRadius: 16, boxShadow: '0 10px 40px rgba(0,0,0,0.1)', textAlign: 'center', maxWidth: 400, width: '90%' }}>
@@ -439,12 +461,12 @@ export default function Admin() {
         <input type="email" placeholder="管理員 Email" value={loginEmail} onChange={e => { setLoginEmail(e.target.value); setResetMsg(''); }} style={{ width: '100%', padding: '14px 16px', border: '1px solid #ddd', borderRadius: 8, fontSize: 16, marginBottom: 12, boxSizing: 'border-box', textAlign: 'center' }} />
         <input type="password" placeholder="密碼" value={pw} onChange={e => setPw(e.target.value)} style={{ width: '100%', padding: '14px 16px', border: '1px solid #ddd', borderRadius: 8, fontSize: 16, marginBottom: 20, boxSizing: 'border-box', textAlign: 'center' }} />
         <button type="submit" disabled={loginLoading} style={{ width: '100%', padding: 14, background: loginLoading ? '#a89888' : '#5c4a3a', color: '#fff', border: 'none', borderRadius: 8, fontSize: 16, cursor: loginLoading ? 'not-allowed' : 'pointer' }}>{loginLoading ? '登入中...' : '登入'}</button>
-       <button type="button" onClick={async () => {
+        {/* ✅ 忘記密碼：即時重設成隨機密碼 */}
+        <button type="button" onClick={async () => {
           if (!loginEmail) { setLoginError('請先輸入 Email'); setResetMsg(''); return; }
           setLoginError('');
           setResetMsg('');
           try {
-            // 1) 用 admin API 搵 user
             const listRes = await fetch(`${SB}/auth/v1/admin/users`, {
               headers: { apikey: SK, Authorization: `Bearer ${SK}` }
             });
@@ -452,23 +474,17 @@ export default function Admin() {
             const listData = await listRes.json();
             const user = listData.users?.find(u => u.email?.toLowerCase() === loginEmail.toLowerCase());
             if (!user) { setLoginError('搵唔到呢個 Email 嘅帳號'); return; }
-
-            // 2) 產生隨機新密碼
             const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#';
             let newPw = '';
             for (let i = 0; i < 12; i++) newPw += chars[Math.floor(Math.random() * chars.length)];
-
-            // 3) 用 admin API 直接改密碼
             const updateRes = await fetch(`${SB}/auth/v1/admin/users/${user.id}`, {
               method: 'PUT',
               headers: { apikey: SK, Authorization: `Bearer ${SK}`, 'Content-Type': 'application/json' },
               body: JSON.stringify({ password: newPw })
             });
             if (!updateRes.ok) throw new Error('重設失敗');
-
-            // 4) 顯示新密碼 + 自動填入
             setPw(newPw);
-            setResetMsg(`✅ 密碼已重設！你嘅新密碼：  ${newPw}    （已自動填入，直接撳「登入」即可）`);
+            setResetMsg(`密碼已重設！你嘅新密碼：  ${newPw}    （已自動填入，直接撳「登入」即可）`);
           } catch (err) {
             setLoginError('重設失敗：' + (err.message || '請稍後再試'));
           }
@@ -486,7 +502,6 @@ export default function Admin() {
       {toast && <div style={{ position: 'fixed', top: 20, left: '50%', transform: 'translateX(-50%)', background: '#5c4a3a', color: '#fff', padding: '12px 28px', borderRadius: 8, fontSize: 14, zIndex: 9999, boxShadow: '0 4px 20px rgba(0,0,0,0.2)' }}>{toast}</div>}
       {batchLoading && <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.3)', zIndex: 999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><div style={{ background: '#fff', padding: '30px 40px', borderRadius: 12, textAlign: 'center' }}><div style={{ fontSize: 24, marginBottom: 10 }}>⏳</div><div style={{ fontSize: 14, color: '#5c4a3a' }}>處理中...</div></div></div>}
 
-      {/* ═══ 預約詳情 Modal（含改期）═══ */}
       {selectedBooking && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }} onClick={closeBooking}>
           <div style={{ background: '#fff', borderRadius: 16, padding: 28, maxWidth: 480, width: '100%', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }} onClick={e => e.stopPropagation()}>
@@ -503,8 +518,6 @@ export default function Admin() {
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}><span style={{ fontSize: 18 }}>💰</span><div style={{ fontSize: 22, fontWeight: 700 }}>${selectedBooking.total_price}</div></div>
               {(selectedBooking.notes || selectedBooking.remarks || selectedBooking.customer_notes) && <div style={{ padding: '10px 14px', background: '#FFF8E1', borderRadius: 8, fontSize: 13, color: '#F57F17' }}>📝 {selectedBooking.notes || selectedBooking.remarks || selectedBooking.customer_notes}</div>}
             </div>
-
-            {/* ── 改期區 ── */}
             {reschedMode ? (
               <div style={{ marginTop: 20, padding: 16, background: '#FFF3E0', borderRadius: 10, border: '1px solid #FFB74D' }}>
                 <div style={{ fontSize: 14, fontWeight: 700, color: '#E65100', marginBottom: 12 }}>✏️ 更改預約時間</div>
@@ -539,8 +552,6 @@ export default function Admin() {
                 </div>
               </div>
             ) : null}
-
-            {/* ── 操作按鈕 ── */}
             <div style={{ display: 'flex', gap: 8, marginTop: 20, paddingTop: 20, borderTop: '1px solid #f0ebe3', flexWrap: 'wrap' }}>
               {selectedBooking.status === 'pending' && <button onClick={() => modalUpdate('confirmed')} style={{ padding: '10px 20px', borderRadius: 8, border: 'none', background: '#4CAF50', color: '#fff', cursor: 'pointer', fontSize: 14, fontFamily: font, fontWeight: 600 }}>✅ 確認預約</button>}
               {(selectedBooking.status === 'pending' || selectedBooking.status === 'confirmed') && <button onClick={() => modalUpdate('completed')} style={{ padding: '10px 20px', borderRadius: 8, border: 'none', background: '#2196F3', color: '#fff', cursor: 'pointer', fontSize: 14, fontFamily: font, fontWeight: 600 }}>✔️ 完成</button>}
@@ -553,11 +564,43 @@ export default function Admin() {
         </div>
       )}
 
-      {/* HEADER */}
+      {/* ✅ HEADER（加咗「改密碼」按鈕） */}
       <div style={{ background: '#fff', padding: '20px 30px', boxShadow: '0 2px 10px rgba(0,0,0,0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div><h1 style={{ fontSize: 20, color: '#5c4a3a', margin: 0 }}>J.LAB 管理後台</h1><p style={{ color: '#999', fontSize: 12, margin: '4px 0 0', letterSpacing: 1 }}>ADMIN DASHBOARD</p></div>
-        <button onClick={() => setAuth(false)} style={{ padding: '8px 20px', background: 'transparent', border: '1px solid #ccc', borderRadius: 6, cursor: 'pointer', color: '#666', fontFamily: font }}>登出</button>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <button onClick={() => { setShowChangePw(true); setCpOld(''); setCpNew(''); setCpConfirm(''); setCpMsg(''); setCpError(''); }} style={{ padding: '8px 16px', background: 'transparent', border: '1px solid #d0c8bc', borderRadius: 6, cursor: 'pointer', color: '#5c4a3a', fontFamily: font, fontSize: 13 }}>🔑 改密碼</button>
+          <button onClick={() => setAuth(false)} style={{ padding: '8px 20px', background: 'transparent', border: '1px solid #ccc', borderRadius: 6, cursor: 'pointer', color: '#666', fontFamily: font }}>登出</button>
+        </div>
       </div>
+
+      {/* ✅ 改密碼 Modal */}
+      {showChangePw && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }} onClick={() => setShowChangePw(false)}>
+          <div style={{ background: '#fff', borderRadius: 16, padding: 32, maxWidth: 400, width: '100%', boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+              <h3 style={{ margin: 0, color: '#5c4a3a', fontSize: 18 }}>🔑 更改密碼</h3>
+              <button onClick={() => setShowChangePw(false)} style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: '#999' }}>✕</button>
+            </div>
+            {cpMsg && <div style={{ padding: '12px 16px', background: '#E8F5E9', color: '#2e7d32', borderRadius: 8, fontSize: 14, marginBottom: 16, textAlign: 'center', fontWeight: 600 }}>{cpMsg}</div>}
+            {cpError && <div style={{ padding: '12px 16px', background: '#FFEBEE', color: '#c62828', borderRadius: 8, fontSize: 14, marginBottom: 16 }}>❌ {cpError}</div>}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div>
+                <label style={{ fontSize: 13, color: '#5c4a3a', fontWeight: 600, marginBottom: 4, display: 'block' }}>舊密碼</label>
+                <input type="password" value={cpOld} onChange={e => setCpOld(e.target.value)} placeholder="輸入目前嘅密碼" style={{ width: '100%', padding: '12px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, boxSizing: 'border-box', fontFamily: font }} />
+              </div>
+              <div>
+                <label style={{ fontSize: 13, color: '#5c4a3a', fontWeight: 600, marginBottom: 4, display: 'block' }}>新密碼</label>
+                <input type="password" value={cpNew} onChange={e => setCpNew(e.target.value)} placeholder="至少 6 個字元" style={{ width: '100%', padding: '12px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, boxSizing: 'border-box', fontFamily: font }} />
+              </div>
+              <div>
+                <label style={{ fontSize: 13, color: '#5c4a3a', fontWeight: 600, marginBottom: 4, display: 'block' }}>確認新密碼</label>
+                <input type="password" value={cpConfirm} onChange={e => setCpConfirm(e.target.value)} placeholder="再輸入一次新密碼" style={{ width: '100%', padding: '12px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, boxSizing: 'border-box', fontFamily: font }} />
+              </div>
+            </div>
+            <button onClick={handleChangePw} disabled={cpLoading} style={{ width: '100%', padding: 14, background: cpLoading ? '#a89888' : '#5c4a3a', color: '#fff', border: 'none', borderRadius: 8, fontSize: 15, cursor: cpLoading ? 'not-allowed' : 'pointer', fontFamily: font, fontWeight: 600, marginTop: 20 }}>{cpLoading ? '處理中...' : '確認更改'}</button>
+          </div>
+        </div>
+      )}
 
       {/* TABS */}
       <div style={{ background: '#fff', borderTop: '1px solid #f0ebe3', padding: '0 30px', display: 'flex', gap: 0, boxShadow: '0 2px 10px rgba(0,0,0,0.03)', overflowX: 'auto' }}>
@@ -566,7 +609,6 @@ export default function Admin() {
         ))}
       </div>
 
-      {/* ═══ 操作記錄條 ═══ */}
       {tab === 'bookings' && changeLog.length > 0 && (
         <div style={{ position: 'sticky', top: 0, zIndex: 100, background: 'linear-gradient(135deg, #E8F5E9, #C8E6C9)', borderBottom: '2px solid #66BB6A' }}>
           <div style={{ padding: '10px 30px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -579,7 +621,6 @@ export default function Admin() {
         </div>
       )}
 
-      {/* SYNC BAR */}
       {pendingCount > 0 && tab === 'timeslots' && (
         <div style={{ position: 'sticky', top: 0, zIndex: 100, background: 'linear-gradient(135deg, #FFF3E0, #FFE0B2)', borderBottom: '2px solid #FFB74D' }}>
           <div style={{ padding: '14px 30px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
@@ -609,7 +650,6 @@ export default function Admin() {
 
       <div style={{ maxWidth: 1200, margin: '0 auto', padding: '30px 20px' }}>
 
-        {/* ══════════ BOOKINGS TAB ══════════ */}
         {tab === 'bookings' && (<>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12, marginBottom: 24 }}>
             {[
@@ -633,7 +673,6 @@ export default function Admin() {
             ))}
           </div>
 
-          {/* ── LIST VIEW ── */}
           {viewMode === 'list' && (<>
             <div style={{ background: '#fff', padding: '16px 20px', borderRadius: 12, marginBottom: 16, boxShadow: '0 2px 10px rgba(0,0,0,0.05)' }}>
               <div style={{ marginBottom: 12 }}><input type="text" placeholder="🔍 搜尋客人名稱或電話..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} style={{ width: '100%', padding: '10px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, boxSizing: 'border-box', fontFamily: font }} /></div>
@@ -711,7 +750,6 @@ export default function Admin() {
             </div>
           </>)}
 
-          {/* ═══ SCHEDULE (月曆) VIEW ═══ */}
           {viewMode === 'schedule' && (<>
             <div style={card}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
@@ -747,7 +785,6 @@ export default function Admin() {
               </div>
             </div>
 
-            {/* Day Detail */}
             <div style={card}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
                 <div>
@@ -820,7 +857,6 @@ export default function Admin() {
           </>)}
         </>)}
 
-        {/* ══════════ TIME SLOTS TAB ══════════ */}
         {tab === 'timeslots' && (<>
           <div style={{ ...card, background: '#e8f5e9', border: '1px solid #a5d6a7' }}>
             <div style={{ fontSize: 14, color: '#2e7d32', lineHeight: 2 }}>💡 <b>使用流程：</b>選擇員工 → 月曆選日期 → 套用模板 → 按「<b>確認同步到前台</b>」<br />🔒 每個員工有獨立嘅時間表。同步後日程表月曆會即時更新。</div>
@@ -933,7 +969,6 @@ export default function Admin() {
           </>)}
         </>)}
 
-        {/* ══════════ BLOCKED TAB ══════════ */}
         {tab === 'blocked' && (
           <div style={card}>
             <h2 style={{ margin: '0 0 20px', color: '#5c4a3a', fontSize: 18 }}>封鎖日期</h2>
