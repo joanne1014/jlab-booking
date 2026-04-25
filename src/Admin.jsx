@@ -439,23 +439,38 @@ export default function Admin() {
         <input type="email" placeholder="管理員 Email" value={loginEmail} onChange={e => { setLoginEmail(e.target.value); setResetMsg(''); }} style={{ width: '100%', padding: '14px 16px', border: '1px solid #ddd', borderRadius: 8, fontSize: 16, marginBottom: 12, boxSizing: 'border-box', textAlign: 'center' }} />
         <input type="password" placeholder="密碼" value={pw} onChange={e => setPw(e.target.value)} style={{ width: '100%', padding: '14px 16px', border: '1px solid #ddd', borderRadius: 8, fontSize: 16, marginBottom: 20, boxSizing: 'border-box', textAlign: 'center' }} />
         <button type="submit" disabled={loginLoading} style={{ width: '100%', padding: 14, background: loginLoading ? '#a89888' : '#5c4a3a', color: '#fff', border: 'none', borderRadius: 8, fontSize: 16, cursor: loginLoading ? 'not-allowed' : 'pointer' }}>{loginLoading ? '登入中...' : '登入'}</button>
-        <button type="button" onClick={async () => {
+       <button type="button" onClick={async () => {
           if (!loginEmail) { setLoginError('請先輸入 Email'); setResetMsg(''); return; }
           setLoginError('');
           setResetMsg('');
           try {
-            const res = await fetch(`${SB}/auth/v1/recover`, {
-              method: 'POST',
-              headers: { apikey: SK, 'Content-Type': 'application/json' },
-              body: JSON.stringify({ email: loginEmail })
+            // 1) 用 admin API 搵 user
+            const listRes = await fetch(`${SB}/auth/v1/admin/users`, {
+              headers: { apikey: SK, Authorization: `Bearer ${SK}` }
             });
-            if (res.ok) {
-              setResetMsg('重設密碼連結已發送到你嘅 Email，請去信箱查收');
-            } else {
-              setLoginError('發送失敗，請稍後再試');
-            }
+            if (!listRes.ok) throw new Error('無法取得用戶列表');
+            const listData = await listRes.json();
+            const user = listData.users?.find(u => u.email?.toLowerCase() === loginEmail.toLowerCase());
+            if (!user) { setLoginError('搵唔到呢個 Email 嘅帳號'); return; }
+
+            // 2) 產生隨機新密碼
+            const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#';
+            let newPw = '';
+            for (let i = 0; i < 12; i++) newPw += chars[Math.floor(Math.random() * chars.length)];
+
+            // 3) 用 admin API 直接改密碼
+            const updateRes = await fetch(`${SB}/auth/v1/admin/users/${user.id}`, {
+              method: 'PUT',
+              headers: { apikey: SK, Authorization: `Bearer ${SK}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ password: newPw })
+            });
+            if (!updateRes.ok) throw new Error('重設失敗');
+
+            // 4) 顯示新密碼 + 自動填入
+            setPw(newPw);
+            setResetMsg(`✅ 密碼已重設！你嘅新密碼：  ${newPw}    （已自動填入，直接撳「登入」即可）`);
           } catch (err) {
-            setLoginError('發送失敗，請檢查網絡');
+            setLoginError('重設失敗：' + (err.message || '請稍後再試'));
           }
         }} style={{ background: 'none', border: 'none', color: '#999', fontSize: 13, marginTop: 16, cursor: 'pointer', textDecoration: 'underline', fontFamily: font }}>
           忘記密碼？
