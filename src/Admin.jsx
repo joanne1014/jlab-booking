@@ -8,7 +8,6 @@ const sbPost = async (t, d) => { const r = await fetch(`${SB}/rest/v1/${t}`, { m
 const sbDel = async (p) => { const r = await fetch(`${SB}/rest/v1/${p}`, { method: 'DELETE', headers: H }); if (!r.ok) throw new Error(await r.text()); };
 const sbPatch = async (p, d) => { const r = await fetch(`${SB}/rest/v1/${p}`, { method: 'PATCH', headers: { ...H, Prefer: 'return=representation' }, body: JSON.stringify(d) }); if (!r.ok) throw new Error(await r.text()); return r.json(); };
 
-// 刪除: const PASS = 'jlab2024';
 const DAYS = ['日', '一', '二', '三', '四', '五', '六'];
 const ALL_TIMES = []; for (let h = 0; h < 24; h++) for (let m = 0; m < 60; m += 30) ALL_TIMES.push(`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`);
 const ALL_TIMES_15 = []; for (let h = 0; h < 24; h++) for (let m = 0; m < 60; m += 15) ALL_TIMES_15.push(`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`);
@@ -30,10 +29,10 @@ const toMins = (t) => { const [h, m] = t.split(':').map(Number); return h * 60 +
 export default function Admin() {
   const [auth, setAuth] = useState(false);
   const [pw, setPw] = useState('');
-const [loginEmail, setLoginEmail] = useState('');
-const [loginLoading, setLoginLoading] = useState(false);
-const [loginError, setLoginError] = useState('');
-  const [resetMsg, setResetMsg] = useState('');
+  const [loginEmail, setLoginEmail] = useState('');
+  const [loginLoading, setLoginLoading] = useState(false);
+  const [loginError, setLoginError] = useState('');
+  const [resetMsg, setResetMsg] = useState(''); // ✅ 新增
   const [tab, setTab] = useState('bookings');
   const [toast, setToast] = useState('');
 
@@ -267,12 +266,9 @@ const [loginError, setLoginError] = useState('');
   const handleReschedDateChange = (date) => { setReschedDate(date); setReschedTime(''); loadReschedSlots(date); };
   const saveResched = async () => {
     if (!selectedBooking || !reschedDate || !reschedTime) return showToast('❌ 請選擇日期同時間');
-
-    // ═══ 新增：強制禁止衝突 ═══
     if (isTimeConflict) {
       return showToast('❌ 此時段已有其他預約，請選擇其他時間');
     }
-
     setReschedLoading(true);
     try {
       const updates = { booking_date: reschedDate, booking_time: reschedTime };
@@ -405,7 +401,7 @@ const [loginError, setLoginError] = useState('');
   const fetchBlocked = async () => { try { setBlocked(await sbGet('blocked_dates?order=date') || []); } catch (e) { console.error(e); } };
   const addBlocked = async () => { if (!newBD) return; try { const d = await sbPost('blocked_dates', { date: newBD, reason: newBR }); setBlocked(prev => [...prev, ...d].sort((a, b) => a.date.localeCompare(b.date))); setNewBD(''); setNewBR(''); } catch (e) { console.error(e); } };
   const removeBlocked = async (id) => { try { await sbDel(`blocked_dates?id=eq.${id}`); setBlocked(prev => prev.filter(b => b.id !== id)); } catch (e) { console.error(e); } };
-const handleLogin = async (e) => {
+  const handleLogin = async (e) => {
     e.preventDefault();
     setLoginError('');
     setLoginLoading(true);
@@ -431,15 +427,39 @@ const handleLogin = async (e) => {
   };
 
   /* ═══════ RENDER ═══════ */
-if (!auth) return (
+
+  // ✅ 新增：成個登入畫面換咗，加咗「忘記密碼」按鈕
+  if (!auth) return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(135deg,#f5f0eb,#e8e0d8)', fontFamily: font }}>
       <form onSubmit={handleLogin} style={{ background: '#fff', padding: '60px 40px', borderRadius: 16, boxShadow: '0 10px 40px rgba(0,0,0,0.1)', textAlign: 'center', maxWidth: 400, width: '90%' }}>
         <h1 style={{ fontSize: 24, color: '#5c4a3a', marginBottom: 8 }}>J.LAB</h1>
         <p style={{ color: '#999', fontSize: 14, marginBottom: 40, letterSpacing: 2 }}>管理後台 ADMIN</p>
         {loginError && <div style={{ padding: '10px 16px', background: '#FFEBEE', color: '#c62828', borderRadius: 8, fontSize: 14, marginBottom: 16 }}>❌ {loginError}</div>}
-        <input type="email" placeholder="管理員 Email" value={loginEmail} onChange={e => setLoginEmail(e.target.value)} style={{ width: '100%', padding: '14px 16px', border: '1px solid #ddd', borderRadius: 8, fontSize: 16, marginBottom: 12, boxSizing: 'border-box', textAlign: 'center' }} />
+        {resetMsg && <div style={{ padding: '10px 16px', background: '#E8F5E9', color: '#2e7d32', borderRadius: 8, fontSize: 14, marginBottom: 16 }}>✅ {resetMsg}</div>}
+        <input type="email" placeholder="管理員 Email" value={loginEmail} onChange={e => { setLoginEmail(e.target.value); setResetMsg(''); }} style={{ width: '100%', padding: '14px 16px', border: '1px solid #ddd', borderRadius: 8, fontSize: 16, marginBottom: 12, boxSizing: 'border-box', textAlign: 'center' }} />
         <input type="password" placeholder="密碼" value={pw} onChange={e => setPw(e.target.value)} style={{ width: '100%', padding: '14px 16px', border: '1px solid #ddd', borderRadius: 8, fontSize: 16, marginBottom: 20, boxSizing: 'border-box', textAlign: 'center' }} />
         <button type="submit" disabled={loginLoading} style={{ width: '100%', padding: 14, background: loginLoading ? '#a89888' : '#5c4a3a', color: '#fff', border: 'none', borderRadius: 8, fontSize: 16, cursor: loginLoading ? 'not-allowed' : 'pointer' }}>{loginLoading ? '登入中...' : '登入'}</button>
+        <button type="button" onClick={async () => {
+          if (!loginEmail) { setLoginError('請先輸入 Email'); setResetMsg(''); return; }
+          setLoginError('');
+          setResetMsg('');
+          try {
+            const res = await fetch(`${SB}/auth/v1/recover`, {
+              method: 'POST',
+              headers: { apikey: SK, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ email: loginEmail })
+            });
+            if (res.ok) {
+              setResetMsg('重設密碼連結已發送到你嘅 Email，請去信箱查收');
+            } else {
+              setLoginError('發送失敗，請稍後再試');
+            }
+          } catch (err) {
+            setLoginError('發送失敗，請檢查網絡');
+          }
+        }} style={{ background: 'none', border: 'none', color: '#999', fontSize: 13, marginTop: 16, cursor: 'pointer', textDecoration: 'underline', fontFamily: font }}>
+          忘記密碼？
+        </button>
       </form>
     </div>
   );
