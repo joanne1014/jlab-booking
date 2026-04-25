@@ -33,6 +33,7 @@ export default function Admin() {
 const [loginEmail, setLoginEmail] = useState('');
 const [loginLoading, setLoginLoading] = useState(false);
 const [loginError, setLoginError] = useState('');
+  const [resetMsg, setResetMsg] = useState('');
   const [tab, setTab] = useState('bookings');
   const [toast, setToast] = useState('');
 
