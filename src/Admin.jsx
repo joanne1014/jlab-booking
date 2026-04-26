@@ -1,11 +1,11 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+@Claude-Opus-4.6 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 
 const apiCall = async (action, payload = {}) => {
   const res = await fetch('/api/admin', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'x-admin-secret': '$jlab1014'
+      'x-admin-secret': 'jlab1014'
     },
     body: JSON.stringify({ action, payload })
   });
@@ -304,16 +304,13 @@ const [showTemplateEditor, setShowTemplateEditor] = useState(false);
 
 // 載入模板
 useEffect(() => {
-  if (auth) {
-    sbGet('notification_templates?order=id')
-      .then(data => { if (data) setMsgTemplates(data); })
-      .catch(e => console.error('載入模板失敗', e));
-  }
-}, [auth]);
+  supabase.from('notification_templates').select('*').order('id')
+    .then(({ data }) => { if (data) setMsgTemplates(data); });
+}, []);
 
 // 將模板入面嘅 {variable} 替換成真實值
-const fillTemplate = (templateKey, booking, extras = {}) => {
-  const tpl = msgTemplates.find(t => t.key === templateKey);
+const fillTemplate = (templateId, booking, extras = {}) => {
+  const tpl = msgTemplates.find(t => t.id === templateId);
   if (!tpl) return '';
   const vars = {
     customer_name: booking.customer_name || '',
@@ -338,16 +335,21 @@ const sendWhatsApp = (phone, message) => {
 
 // 儲存模板到 DB
 const saveTemplate = async (id, newContent) => {
-  try {
-    await sbPatch(`notification_templates?id=eq.${id}`, {
-      content: newContent,
-      updated_at: new Date().toISOString()
-    });
-    setMsgTemplates(prev => prev.map(t => t.id === id ? { ...t, content: newContent } : t));
-    showToast('✅ 模板已儲存');
-  } catch (e) {
-    showToast('❌ 儲存失敗');
-  }
+  const { error } = await supabase
+    .from('notification_templates')
+    .update({ content: newContent, updated_at: new Date().toISOString() })
+    .eq('id', id);
+  if (error) { showToast('❌ 儲存失敗'); return; }
+  setMsgTemplates(prev => prev.map(t => t.id === id ? { ...t, content: newContent } : t));
+  showToast('✅ 模板已儲存');
+};
+
+const sendWhatsApp = (phone, message) => {
+  if (!phone) { showToast('⚠️ 呢個客人冇留電話號碼'); return; }
+  const cleaned = phone.replace(/[^0-9]/g, '');
+  const num = cleaned.length <= 8 ? '852' + cleaned : cleaned;
+  const encoded = encodeURIComponent(message);
+  window.open(`https://wa.me/${num}?text=${encoded}`, '_blank');
 };
   const startResched = () => {
     if (!selectedBooking) return;
@@ -417,26 +419,25 @@ const saveResched = async () => {
       showToast('✅ 已刪除');
     } catch (e) { console.error(e); }
   };
- const modalUpdate = async (s) => {
-    if (!selectedBooking) return;
-    try {
-      await sbPatch(`bookings?id=eq.${selectedBooking.id}`, { status: s });
-      const updated = { ...selectedBooking, status: s };
-      setAllBookings(prev => prev.map(b => b.id === selectedBooking.id ? updated : b));
-      setSelectedBooking(updated);
-     logChange(`${statusText(s)} — ${selectedBooking.customer_name} ${selectedBooking.booking_date} ${selectedBooking.booking_time}`);
-      showToast(`✅ 狀態已更新為「${statusText(s)}」`);
+  const modalUpdate = async (s) => {
+  if (newStatus === 'confirmed' || newStatus === 'cancelled') {
+  const ask = window.confirm('📲 要唔要 WhatsApp 通知客人？');
+  if (ask) {
+    const templateId = newStatus === 'confirmed' ? 'confirmed' : 'cancelled';
+    const msg = fillTemplate(templateId, sel);
+    sendWhatsApp(sel.customer_phone, msg);
+  }
+}
 
-      // ═══ WhatsApp 通知 ═══
-      if (s === 'confirmed' || s === 'cancelled') {
-        const ask = window.confirm(`📲 要唔要 WhatsApp 通知 ${selectedBooking.customer_name}？`);
-        if (ask) {
-          const msg = fillTemplate(s, updated);
-          sendWhatsApp(selectedBooking.customer_phone, msg);
-        }
+    // ═══ WhatsApp 通知 ═══
+    const template = notifyTemplates[s];
+    if (selectedBooking.customer_phone && template) {
+      if (window.confirm(`要透過 WhatsApp 通知 ${selectedBooking.customer_name} 嗎？`)) {
+        sendWhatsApp(selectedBooking.customer_phone, template(updated));
       }
-    } catch (e) { showToast('❌ 更新失敗'); }
-  };
+    }
+  } catch (e) { showToast('❌ 更新失敗'); }
+};
   const modalDelete = async () => {
     if (!selectedBooking || !window.confirm('確定要刪除？')) return;
     try {
@@ -662,12 +663,13 @@ const saveResched = async () => {
               {!reschedMode && selectedBooking.status !== 'cancelled' && <button onClick={startResched} style={{ padding: '10px 16px', borderRadius: 8, border: '1px solid #FFB74D', background: '#FFF3E0', color: '#E65100', cursor: 'pointer', fontSize: 14, fontFamily: font }}>✏️ 改期</button>}
 {selectedBooking.customer_phone && (
   <button onClick={() => {
-    const msg = fillTemplate('reminder', selectedBooking);
-    if (msg) {
-      sendWhatsApp(selectedBooking.customer_phone, msg);
+    const s = selectedBooking.status;
+    const template = notifyTemplates[s];
+    if (template) {
+      sendWhatsApp(selectedBooking.customer_phone, template(selectedBooking));
     } else {
       sendWhatsApp(selectedBooking.customer_phone,
-`${selectedBooking.customer_name} 你好！關於你 ${selectedBooking.booking_date} ${selectedBooking.booking_time} 嘅預約，如有任何疑問歡迎聯絡我哋。\n— J.LAB`
+        `${selectedBooking.customer_name} 你好！關於你 ${selectedBooking.booking_date} ${selectedBooking.booking_time} 嘅預約，如有任何疑問歡迎聯絡我哋。\n— J.LAB`
       );
     }
   }} style={{ padding: '10px 16px', borderRadius: 8, border: '1px solid #25D366', background: '#E8F5E9', color: '#25D366', cursor: 'pointer', fontSize: 14, fontFamily: font, fontWeight: 600 }}>
@@ -718,7 +720,7 @@ const saveResched = async () => {
       )}
 
       <div style={{ background: '#fff', borderTop: '1px solid #f0ebe3', padding: '0 30px', display: 'flex', gap: 0, boxShadow: '0 2px 10px rgba(0,0,0,0.03)', overflowX: 'auto' }}>
-       {[{ key: 'bookings', label: `📋 預約管理${stats.pending > 0 ? ` (${stats.pending})` : ''}` }, { key: 'timeslots', label: '🕐 時段管理' }, { key: 'blocked', label: '📅 封鎖日期' }, { key: 'templates', label: '📝 訊息模板' }].map(t => (
+        {[{ key: 'bookings', label: `📋 預約管理${stats.pending > 0 ? ` (${stats.pending})` : ''}` }, { key: 'timeslots', label: '🕐 時段管理' }, { key: 'blocked', label: '📅 封鎖日期' }].map(t => (
           <button key={t.key} onClick={() => setTab(t.key)} style={{ padding: '14px 24px', background: 'none', border: 'none', borderBottom: tab === t.key ? '2px solid #5c4a3a' : '2px solid transparent', fontSize: 14, color: tab === t.key ? '#5c4a3a' : '#999', fontWeight: tab === t.key ? 600 : 400, cursor: 'pointer', fontFamily: font, whiteSpace: 'nowrap' }}>{t.label}</button>
         ))}
       </div>
@@ -1083,7 +1085,7 @@ const saveResched = async () => {
           </>)}
         </>)}
 
-{tab === 'blocked' && (
+        {tab === 'blocked' && (
           <div style={card}>
             <h2 style={{ margin: '0 0 20px', color: '#5c4a3a', fontSize: 18 }}>封鎖日期</h2>
             <p style={{ fontSize: 13, color: '#999', marginBottom: 20 }}>封鎖特定日期，該日將無法被預約。</p>
@@ -1101,66 +1103,84 @@ const saveResched = async () => {
             )}
           </div>
         )}
-
-        {tab === 'templates' && (
-          <div style={{
-            background: '#fff', borderRadius: 14, padding: 20,
-            margin: '0 auto', maxWidth: 800,
-            boxShadow: '0 2px 12px rgba(0,0,0,0.08)'
-          }}>
-            <h3 style={{ margin: '0 0 16px', color: '#5c4a3a', fontSize: 18 }}>📝 WhatsApp 訊息模板</h3>
-            <div style={{
-              background: '#fff8e1', borderRadius: 10, padding: 12,
-              marginBottom: 16, fontSize: 13
-            }}>
-              <strong>📌 可用變數（會自動替換成客人資料）：</strong><br/>
-              <code>{'{customer_name}'}</code> 客人名 &nbsp;
-              <code>{'{booking_date}'}</code> 日期 &nbsp;
-              <code>{'{booking_time}'}</code> 時間 &nbsp;
-              <code>{'{service_name}'}</code> 服務 &nbsp;
-              <code>{'{technician_label}'}</code> 技師 &nbsp;
-              <code>{'{total_price}'}</code> 價錢 &nbsp;
-              <code>{'{old_date}'}</code> 原日期 &nbsp;
-              <code>{'{old_time}'}</code> 原時間
-            </div>
-
-            {msgTemplates.length === 0 ? (
-              <p style={{ textAlign: 'center', color: '#999', padding: 30 }}>載入中... 或未有模板</p>
-            ) : msgTemplates.map(tpl => (
-              <div key={tpl.id} style={{
-                marginBottom: 16, padding: 16, background: '#fafafa',
-                borderRadius: 10, border: '1px solid #eee'
-              }}>
-                <div style={{ fontWeight: 600, marginBottom: 8, color: '#5c4a3a' }}>{tpl.label}</div>
-                <textarea
-                  value={tpl.content}
-                  onChange={e => setMsgTemplates(prev =>
-                    prev.map(t => t.id === tpl.id ? { ...t, content: e.target.value } : t)
-                  )}
-                  style={{
-                    width: '100%', minHeight: 120, padding: 10,
-                    borderRadius: 8, border: '1px solid #ddd',
-                    fontFamily: 'inherit', fontSize: 14, resize: 'vertical',
-                    boxSizing: 'border-box'
-                  }}
-                />
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8 }}>
-                  <span style={{ fontSize: 12, color: '#999' }}>用 {'\\n'} 代表換行</span>
-                  <button
-                    onClick={() => saveTemplate(tpl.id, tpl.content)}
-                    style={{
-                      padding: '6px 20px', borderRadius: 8, border: 'none',
-                      background: '#4CAF50', color: '#fff', cursor: 'pointer',
-                      fontWeight: 600, fontFamily: font
-                    }}
-                  >💾 儲存</button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
       </div>
     </div>
   );
 }
+{/* ═══ 訊息模板編輯器 ═══ */}
+<div style={{
+  background: '#fff', borderRadius: 14, padding: 20,
+  margin: '20px auto', maxWidth: 800,
+  boxShadow: '0 2px 12px rgba(0,0,0,0.08)'
+}}>
+  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+    <h3 style={{ margin: 0 }}>📝 WhatsApp 訊息模板</h3>
+    <button
+      onClick={() => setShowTemplateEditor(!showTemplateEditor)}
+      style={{
+        padding: '6px 16px', borderRadius: 8, border: '1px solid #ccc',
+        background: showTemplateEditor ? '#f0f0f0' : '#fff', cursor: 'pointer'
+      }}
+    >
+      {showTemplateEditor ? '收起' : '展開編輯'}
+    </button>
+  </div>
+
+  {showTemplateEditor && (
+    <div style={{ marginTop: 16 }}>
+      {/* 可用變數提示 */}
+      <div style={{
+        background: '#fff8e1', borderRadius: 10, padding: 12,
+        marginBottom: 16, fontSize: 13
+      }}>
+        <strong>📌 可用變數（會自動替換成客人資料）：</strong><br/>
+        <code>{'{customer_name}'}</code> 客人名 &nbsp;
+        <code>{'{booking_date}'}</code> 日期 &nbsp;
+        <code>{'{booking_time}'}</code> 時間 &nbsp;
+        <code>{'{service_name}'}</code> 服務 &nbsp;
+        <code>{'{technician_label}'}</code> 技師 &nbsp;
+        <code>{'{total_price}'}</code> 價錢 &nbsp;
+        <code>{'{old_date}'}</code> 原日期 &nbsp;
+        <code>{'{old_time}'}</code> 原時間
+      </div>
+
+      {msgTemplates.map(tpl => (
+        <div key={tpl.id} style={{
+          marginBottom: 16, padding: 16, background: '#fafafa',
+          borderRadius: 10, border: '1px solid #eee'
+        }}>
+          <div style={{ fontWeight: 600, marginBottom: 8 }}>{tpl.label}</div>
+          <textarea
+            value={tpl.content}
+            onChange={e => setMsgTemplates(prev =>
+              prev.map(t => t.id === tpl.id ? { ...t, content: e.target.value } : t)
+            )}
+            style={{
+              width: '100%', minHeight: 120, padding: 10,
+              borderRadius: 8, border: '1px solid #ddd',
+              fontFamily: 'inherit', fontSize: 14, resize: 'vertical',
+              boxSizing: 'border-box'
+            }}
+          />
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8 }}>
+            <span style={{ fontSize: 12, color: '#999' }}>
+              用 \n 代表換行
+            </span>
+            <button
+              onClick={() => saveTemplate(tpl.id, tpl.content)}
+              style={{
+                padding: '6px 20px', borderRadius: 8, border: 'none',
+                background: '#4CAF50', color: '#fff', cursor: 'pointer',
+                fontWeight: 600
+              }}
+            >
+              💾 儲存
+            </button>
+          </div>
+        </div>
+      ))}
+    </div>
+  )}
+</div>
+唔識改法 3：「📲 通知客人」按鈕
+搵呢段（喺 Modal 底部嘅按鈕區）：
