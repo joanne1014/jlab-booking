@@ -1,12 +1,19 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 
-const SB = 'https://vqyfbwnkdpncwvdonbcz.supabase.co';
-const SK = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZxeWZid25rZHBuY3d2ZG9uYmN6Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NjYwOTUxOSwiZXhwIjoyMDkyMTg1NTE5fQ.Hnjtc-LY653Ftpp9JvIaEJzFg7xwgoJLFIs5ezRwlN0';
-const H = { apikey: SK, Authorization: `Bearer ${SK}`, 'Content-Type': 'application/json' };
-const sbGet = async (p) => { const r = await fetch(`${SB}/rest/v1/${p}`, { headers: H }); if (!r.ok) throw new Error(await r.text()); return r.json(); };
-const sbPost = async (t, d) => { const r = await fetch(`${SB}/rest/v1/${t}`, { method: 'POST', headers: { ...H, Prefer: 'return=representation' }, body: JSON.stringify(d) }); if (!r.ok) throw new Error(await r.text()); return r.json(); };
-const sbDel = async (p) => { const r = await fetch(`${SB}/rest/v1/${p}`, { method: 'DELETE', headers: H }); if (!r.ok) throw new Error(await r.text()); };
-const sbPatch = async (p, d) => { const r = await fetch(`${SB}/rest/v1/${p}`, { method: 'PATCH', headers: { ...H, Prefer: 'return=representation' }, body: JSON.stringify(d) }); if (!r.ok) throw new Error(await r.text()); return r.json(); };
+const apiCall = async (action, payload = {}) => {
+  const res = await fetch('/api/admin', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, payload })
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'API error');
+  return data;
+};
+const sbGet = async (p) => apiCall('db', { path: p });
+const sbPost = async (t, d) => apiCall('db', { path: t, method: 'POST', body: d });
+const sbDel = async (p) => apiCall('db', { path: p, method: 'DELETE' });
+const sbPatch = async (p, d) => apiCall('db', { path: p, method: 'PATCH', body: d });};
 
 const DAYS = ['日', '一', '二', '三', '四', '五', '六'];
 const ALL_TIMES = []; for (let h = 0; h < 24; h++) for (let m = 0; m < 60; m += 30) ALL_TIMES.push(`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`);
@@ -474,7 +481,7 @@ export default function Admin() {
     setLoginLoading(false);
   };
 
-    const handleChangePw = async () => {
+      const handleChangePw = async () => {
     setCpError(''); setCpMsg('');
     if (!cpOld || !cpNew || !cpConfirm) { setCpError('請填寫所有欄位'); return; }
     if (cpNew.length < 6) { setCpError('新密碼至少要 6 個字元'); return; }
