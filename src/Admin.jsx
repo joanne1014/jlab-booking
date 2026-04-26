@@ -295,42 +295,53 @@ export default function Admin() {
   const statusText = (s) => s === 'confirmed' ? '已確認' : s === 'cancelled' ? '已取消' : s === 'completed' ? '已完成' : '待確認';
   const waLink = (phone) => { if (!phone) return null; const c = phone.replace(/[^0-9]/g, ''); return `https://wa.me/${c.length <= 8 ? '852' + c : c}`; };
 // ═══ WhatsApp 通知模板 + 發送 ═══
-const notifyTemplates = {
-  confirmed: (b) =>
-    `✅ 預約確認通知\n\n` +
-    `${b.customer_name} 你好！\n` +
-    `你嘅預約已確認：\n\n` +
-    `📅 日期：${b.booking_date}\n` +
-    `🕐 時間：${b.booking_time}\n` +
-    `🎨 服務：${b.service_name || '未指定'}\n` +
-    `👤 技師：${b.technician_label || '待定'}\n` +
-    `💰 費用：$${b.total_price || '—'}\n\n` +
-    `如需更改請提前聯絡我哋，多謝！\n` +
-    `— J.LAB`,
-  cancelled: (b) =>
-    `❌ 預約取消通知\n\n` +
-    `${b.customer_name} 你好！\n` +
-    `你 ${b.booking_date} ${b.booking_time} 嘅預約已取消。\n\n` +
-    `如有需要可重新預約，多謝！\n` +
-    `— J.LAB`,
-  completed: (b) =>
-    `✔️ 服務完成通知\n\n` +
-    `${b.customer_name} 你好！\n` +
-    `你嘅服務已完成，多謝光臨！\n\n` +
-    `📅 日期：${b.booking_date}\n` +
-    `🎨 服務：${b.service_name || '未指定'}\n` +
-    `💰 費用：$${b.total_price || '—'}\n\n` +
-    `期待下次見！\n` +
-    `— J.LAB`,
-  rescheduled: (b, oldDate, oldTime) =>
-    `✏️ 預約更改通知\n\n` +
-    `${b.customer_name} 你好！\n` +
-    `你嘅預約已更改：\n\n` +
-    `原時間：${oldDate} ${oldTime}\n` +
-    `新時間：${b.booking_date} ${b.booking_time}\n` +
-    `🎨 服務：${b.service_name || '未指定'}\n\n` +
-    `如有問題請聯絡我哋，多謝！\n` +
-    `— J.LAB`,
+// ═══════════════════════════════════════════
+// WhatsApp 通知模板（從 DB 載入）
+// ═══════════════════════════════════════════
+
+const [msgTemplates, setMsgTemplates] = useState([]);
+const [showTemplateEditor, setShowTemplateEditor] = useState(false);
+
+// 載入模板
+useEffect(() => {
+  supabase.from('notification_templates').select('*').order('id')
+    .then(({ data }) => { if (data) setMsgTemplates(data); });
+}, []);
+
+// 將模板入面嘅 {variable} 替換成真實值
+const fillTemplate = (templateId, booking, extras = {}) => {
+  const tpl = msgTemplates.find(t => t.id === templateId);
+  if (!tpl) return '';
+  const vars = {
+    customer_name: booking.customer_name || '',
+    booking_date: booking.booking_date || '',
+    booking_time: booking.booking_time || '',
+    service_name: booking.service_name || '未指定',
+    technician_label: booking.technician_label || '待定',
+    total_price: booking.total_price || '—',
+    old_date: extras.oldDate || '',
+    old_time: extras.oldTime || '',
+  };
+  return tpl.content.replace(/\{(\w+)\}/g, (_, key) => vars[key] ?? '');
+};
+
+// 發送 WhatsApp
+const sendWhatsApp = (phone, message) => {
+  if (!phone) { showToast('⚠️ 呢個客人冇留電話號碼'); return; }
+  const cleaned = phone.replace(/[^0-9]/g, '');
+  const num = cleaned.length <= 8 ? '852' + cleaned : cleaned;
+  window.open(`https://wa.me/${num}?text=${encodeURIComponent(message)}`, '_blank');
+};
+
+// 儲存模板到 DB
+const saveTemplate = async (id, newContent) => {
+  const { error } = await supabase
+    .from('notification_templates')
+    .update({ content: newContent, updated_at: new Date().toISOString() })
+    .eq('id', id);
+  if (error) { showToast('❌ 儲存失敗'); return; }
+  setMsgTemplates(prev => prev.map(t => t.id === id ? { ...t, content: newContent } : t));
+  showToast('✅ 模板已儲存');
 };
 
 const sendWhatsApp = (phone, message) => {
