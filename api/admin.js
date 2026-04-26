@@ -5,10 +5,15 @@ const ADMIN_SECRET = process.env.ADMIN_SECRET;
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const authHeader = req.headers['x-admin-secret'];
-  if (authHeader !== ADMIN_SECRET) return res.status(401).json({ error: 'Unauthorized' });
-
   const { action, payload } = req.body;
+
+  // 呢幾個 action 唔需要驗證 admin secret（未登入時使用）
+  const publicActions = ['login', 'recover', 'reset-via-token'];
+
+  if (!publicActions.includes(action)) {
+    const authHeader = req.headers['x-admin-secret'];
+    if (authHeader !== ADMIN_SECRET) return res.status(401).json({ error: 'Unauthorized' });
+  }
 
   try {
     if (action === 'login') {
