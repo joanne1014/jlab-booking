@@ -27,7 +27,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ ok: true, user: data.user?.email });
     }
     // 發送重設密碼郵件
-if (action === 'forgot-password') {
+if (action === 'recover') {
   const r = await fetch(`${SB}/auth/v1/recover`, {
     method: 'POST',
     headers: { apikey: SK, 'Content-Type': 'application/json' },
