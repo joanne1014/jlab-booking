@@ -481,7 +481,7 @@ export default function Admin() {
     setLoginLoading(false);
   };
 
-      const handleChangePw = async () => {
+  const handleChangePw = async () => {
     setCpError(''); setCpMsg('');
     if (!cpOld || !cpNew || !cpConfirm) { setCpError('請填寫所有欄位'); return; }
     if (cpNew.length < 6) { setCpError('新密碼至少要 6 個字元'); return; }
