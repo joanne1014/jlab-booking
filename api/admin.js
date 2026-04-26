@@ -26,6 +26,31 @@ export default async function handler(req, res) {
       const data = await r.json();
       return res.status(200).json({ ok: true, user: data.user?.email });
     }
+    // 發送重設密碼郵件
+if (action === 'forgot-password') {
+  const r = await fetch(`${SB}/auth/v1/recover`, {
+    method: 'POST',
+    headers: { apikey: SK, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: payload.email })
+  });
+  if (!r.ok) return res.status(400).json({ error: '發送失敗' });
+  return res.status(200).json({ ok: true });
+}
+
+// 用 recovery token 更新密碼
+if (action === 'update-password') {
+  const r = await fetch(`${SB}/auth/v1/user`, {
+    method: 'PUT',
+    headers: {
+      apikey: SK,
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${payload.access_token}`
+    },
+    body: JSON.stringify({ password: payload.new_password })
+  });
+  if (!r.ok) return res.status(400).json({ error: '更新密碼失敗' });
+  return res.status(200).json({ ok: true });
+}
 
     if (action === 'reset-password') {
       const listRes = await fetch(`${SB}/auth/v1/admin/users`, {
