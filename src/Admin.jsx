@@ -5,7 +5,7 @@ const apiCall = async (action, payload = {}) => {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'x-admin-secret': 'YOUR_ADMIN_SECRET_HERE'
+      'x-admin-secret': 'jlab1014'
     },
     body: JSON.stringify({ action, payload })
   });
