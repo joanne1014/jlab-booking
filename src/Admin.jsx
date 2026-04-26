@@ -1093,3 +1093,78 @@ const sendWhatsApp = (phone, message) => {
     </div>
   );
 }
+{/* ═══ 訊息模板編輯器 ═══ */}
+<div style={{
+  background: '#fff', borderRadius: 14, padding: 20,
+  margin: '20px auto', maxWidth: 800,
+  boxShadow: '0 2px 12px rgba(0,0,0,0.08)'
+}}>
+  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+    <h3 style={{ margin: 0 }}>📝 WhatsApp 訊息模板</h3>
+    <button
+      onClick={() => setShowTemplateEditor(!showTemplateEditor)}
+      style={{
+        padding: '6px 16px', borderRadius: 8, border: '1px solid #ccc',
+        background: showTemplateEditor ? '#f0f0f0' : '#fff', cursor: 'pointer'
+      }}
+    >
+      {showTemplateEditor ? '收起' : '展開編輯'}
+    </button>
+  </div>
+
+  {showTemplateEditor && (
+    <div style={{ marginTop: 16 }}>
+      {/* 可用變數提示 */}
+      <div style={{
+        background: '#fff8e1', borderRadius: 10, padding: 12,
+        marginBottom: 16, fontSize: 13
+      }}>
+        <strong>📌 可用變數（會自動替換成客人資料）：</strong><br/>
+        <code>{'{customer_name}'}</code> 客人名 &nbsp;
+        <code>{'{booking_date}'}</code> 日期 &nbsp;
+        <code>{'{booking_time}'}</code> 時間 &nbsp;
+        <code>{'{service_name}'}</code> 服務 &nbsp;
+        <code>{'{technician_label}'}</code> 技師 &nbsp;
+        <code>{'{total_price}'}</code> 價錢 &nbsp;
+        <code>{'{old_date}'}</code> 原日期 &nbsp;
+        <code>{'{old_time}'}</code> 原時間
+      </div>
+
+      {msgTemplates.map(tpl => (
+        <div key={tpl.id} style={{
+          marginBottom: 16, padding: 16, background: '#fafafa',
+          borderRadius: 10, border: '1px solid #eee'
+        }}>
+          <div style={{ fontWeight: 600, marginBottom: 8 }}>{tpl.label}</div>
+          <textarea
+            value={tpl.content}
+            onChange={e => setMsgTemplates(prev =>
+              prev.map(t => t.id === tpl.id ? { ...t, content: e.target.value } : t)
+            )}
+            style={{
+              width: '100%', minHeight: 120, padding: 10,
+              borderRadius: 8, border: '1px solid #ddd',
+              fontFamily: 'inherit', fontSize: 14, resize: 'vertical',
+              boxSizing: 'border-box'
+            }}
+          />
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8 }}>
+            <span style={{ fontSize: 12, color: '#999' }}>
+              用 \n 代表換行
+            </span>
+            <button
+              onClick={() => saveTemplate(tpl.id, tpl.content)}
+              style={{
+                padding: '6px 20px', borderRadius: 8, border: 'none',
+                background: '#4CAF50', color: '#fff', cursor: 'pointer',
+                fontWeight: 600
+              }}
+            >
+              💾 儲存
+            </button>
+          </div>
+        </div>
+      ))}
+    </div>
+  )}
+</div>
