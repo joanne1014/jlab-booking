@@ -497,27 +497,6 @@ export default function Admin() {
     }
     setCpLoading(false);
   };
-      if (!verifyRes.ok) { setCpLoading(false); setCpError('舊密碼不正確'); return; }
-      const listRes = await fetch(`${SB}/auth/v1/admin/users`, {
-        headers: { apikey: SK, Authorization: `Bearer ${SK}` }
-      });
-      const listData = await listRes.json();
-      const user = listData.users?.find(u => u.email?.toLowerCase() === loginEmail.toLowerCase());
-      if (!user) { setCpLoading(false); setCpError('搵唔到用戶'); return; }
-      const updateRes = await fetch(`${SB}/auth/v1/admin/users/${user.id}`, {
-        method: 'PUT',
-        headers: { apikey: SK, Authorization: `Bearer ${SK}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: cpNew })
-      });
-      if (!updateRes.ok) throw new Error('更新失敗');
-      setCpMsg('✅ 密碼已更新！');
-      setCpOld(''); setCpNew(''); setCpConfirm('');
-      setTimeout(() => { setShowChangePw(false); setCpMsg(''); }, 2000);
-    } catch (err) {
-      setCpError('更新失敗：' + (err.message || '請稍後再試'));
-    }
-    setCpLoading(false);
-  };
 
   /* ═══════ RENDER ═══════ */
 
