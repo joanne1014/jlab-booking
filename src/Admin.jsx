@@ -368,24 +368,38 @@ const sendWhatsApp = (phone, message) => {
     } catch (e) { setReschedSlots({}); }
   };
   const handleReschedDateChange = (date) => { setReschedDate(date); setReschedTime(''); loadReschedSlots(date); };
-  const saveResched = async () => {
-    if (!selectedBooking || !reschedDate || !reschedTime) return showToast('❌ 請選擇日期同時間');
-    if (isTimeConflict) return showToast('❌ 此時段已有其他預約，請選擇其他時間');
-    setReschedLoading(true);
-    try {
-      const updates = { booking_date: reschedDate, booking_time: reschedTime };
-      if (reschedTech) updates.technician_label = reschedTech;
-      await sbPatch(`bookings?id=eq.${selectedBooking.id}`, updates);
-      const oldInfo = `${selectedBooking.booking_date} ${selectedBooking.booking_time}`;
-      setAllBookings(prev => prev.map(b => b.id === selectedBooking.id ? { ...b, ...updates } : b));
-      setSelectedBooking(prev => prev ? { ...prev, ...updates } : null);
-      setReschedMode(false);
-      logChange(`✏️ 改期 ${selectedBooking.customer_name}：${oldInfo} → ${reschedDate} ${reschedTime}`);
-      showToast('✅ 已更改預約時間');
-    } catch (e) { showToast('❌ 更改失敗'); }
-    setReschedLoading(false);
-  };
+const saveResched = async () => {
+  if (!selectedBooking || !reschedDate || !reschedTime) return showToast('❌ 請選擇日期同時間');
+  if (isTimeConflict) return showToast('❌ 此時段已有其他預約，請選擇其他時間');
+  setReschedLoading(true);
+  try {
+    // 記住舊時間（通知用）
+    const oldDate = selectedBooking.booking_date;
+    const oldTime = selectedBooking.booking_time;
 
+    const updates = { booking_date: reschedDate, booking_time: reschedTime };
+    if (reschedTech) updates.technician_label = reschedTech;
+    await sbPatch(`bookings?id=eq.${selectedBooking.id}`, updates);
+
+    const oldInfo = `${oldDate} ${oldTime}`;
+    const updatedBooking = { ...selectedBooking, ...updates };
+
+    setAllBookings(prev => prev.map(b => b.id === selectedBooking.id ? updatedBooking : b));
+    setSelectedBooking(updatedBooking);
+    setReschedMode(false);
+    logChange(`✏️ 改期 ${selectedBooking.customer_name}：${oldInfo} → ${reschedDate} ${reschedTime}`);
+    showToast('✅ 已更改預約時間');
+
+    // ═══ 問要唔要 WhatsApp 通知客人 ═══
+    const ask = window.confirm('📲 要唔要 WhatsApp 通知客人改期？');
+    if (ask) {
+      const msg = fillTemplate('rescheduled', updatedBooking, { oldDate, oldTime });
+      sendWhatsApp(selectedBooking.customer_phone, msg);
+    }
+
+  } catch (e) { showToast('❌ 更改失敗'); }
+  setReschedLoading(false);
+};
   const updateStatus = async (id, s) => {
     const b = allBookings.find(x => x.id === id);
     try {
@@ -406,20 +420,21 @@ const sendWhatsApp = (phone, message) => {
     } catch (e) { console.error(e); }
   };
   const modalUpdate = async (s) => {
-  if (!selectedBooking) return;
-  try {
-    await sbPatch(`bookings?id=eq.${selectedBooking.id}`, { status: s });
-    const updated = { ...selectedBooking, status: s };
-    setAllBookings(prev => prev.map(b => b.id === selectedBooking.id ? { ...b, status: s } : b));
-    setSelectedBooking(prev => prev ? { ...prev, status: s } : null);
-    logChange(`${statusText(s)} — ${selectedBooking.customer_name} ${selectedBooking.booking_date} ${selectedBooking.booking_time}`);
-    showToast(`✅ 狀態已更新為「${statusText(s)}」`);
+  if (newStatus === 'confirmed' || newStatus === 'cancelled') {
+  const ask = window.confirm('📲 要唔要 WhatsApp 通知客人？');
+  if (ask) {
+    const templateId = newStatus === 'confirmed' ? 'confirmed' : 'cancelled';
+    const msg = fillTemplate(templateId, sel);
+    sendWhatsApp(sel.customer_phone, msg);
+  }
+}
 
-    // ═══ WhatsApp 通知 ═══
-    const template = notifyTemplates[s];
-    if (selectedBooking.customer_phone && template) {
-      if (window.confirm(`要透過 WhatsApp 通知 ${selectedBooking.customer_name} 嗎？`)) {
-        sendWhatsApp(selectedBooking.customer_phone, template(updated));
+  // ═══ WhatsApp 通知 ═══
+    if (s === 'confirmed' || s === 'cancelled') {
+      const ask = window.confirm(`📲 要唔要 WhatsApp 通知 ${selectedBooking.customer_name}？`);
+      if (ask) {
+        const msg = fillTemplate(s, updated);
+        sendWhatsApp(selectedBooking.customer_phone, msg);
       }
     }
   } catch (e) { showToast('❌ 更新失敗'); }
