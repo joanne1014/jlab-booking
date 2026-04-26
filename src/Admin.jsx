@@ -424,7 +424,7 @@ const saveResched = async () => {
       const updated = { ...selectedBooking, status: s };
       setAllBookings(prev => prev.map(b => b.id === selectedBooking.id ? updated : b));
       setSelectedBooking(updated);
-      logChange(`\({statusText(s)} — \){selectedBooking.customer_name} \({selectedBooking.booking_date} \){selectedBooking.booking_time}`);
+     logChange(`${statusText(s)} — ${selectedBooking.customer_name} ${selectedBooking.booking_date} ${selectedBooking.booking_time}`);
       showToast(`✅ 狀態已更新為「${statusText(s)}」`);
 
       // ═══ WhatsApp 通知 ═══
@@ -667,7 +667,7 @@ const saveResched = async () => {
       sendWhatsApp(selectedBooking.customer_phone, msg);
     } else {
       sendWhatsApp(selectedBooking.customer_phone,
-        `\({selectedBooking.customer_name} 你好！關於你 \){selectedBooking.booking_date} ${selectedBooking.booking_time} 嘅預約，如有任何疑問歡迎聯絡我哋。\n— J.LAB`
+`${selectedBooking.customer_name} 你好！關於你 ${selectedBooking.booking_date} ${selectedBooking.booking_time} 嘅預約，如有任何疑問歡迎聯絡我哋。\n— J.LAB`
       );
     }
   }} style={{ padding: '10px 16px', borderRadius: 8, border: '1px solid #25D366', background: '#E8F5E9', color: '#25D366', cursor: 'pointer', fontSize: 14, fontFamily: font, fontWeight: 600 }}>
