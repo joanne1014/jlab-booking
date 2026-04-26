@@ -312,8 +312,8 @@ useEffect(() => {
 }, [auth]);
 
 // 將模板入面嘅 {variable} 替換成真實值
-const fillTemplate = (templateId, booking, extras = {}) => {
-  const tpl = msgTemplates.find(t => t.id === templateId);
+const fillTemplate = (templateKey, booking, extras = {}) => {
+  const tpl = msgTemplates.find(t => t.key === templateKey);
   if (!tpl) return '';
   const vars = {
     customer_name: booking.customer_name || '',
@@ -718,7 +718,7 @@ const saveResched = async () => {
       )}
 
       <div style={{ background: '#fff', borderTop: '1px solid #f0ebe3', padding: '0 30px', display: 'flex', gap: 0, boxShadow: '0 2px 10px rgba(0,0,0,0.03)', overflowX: 'auto' }}>
-        {[{ key: 'bookings', label: `📋 預約管理${stats.pending > 0 ? ` (${stats.pending})` : ''}` }, { key: 'timeslots', label: '🕐 時段管理' }, { key: 'blocked', label: '📅 封鎖日期' }].map(t => (
+       {[{ key: 'bookings', label: `📋 預約管理${stats.pending > 0 ? ` (${stats.pending})` : ''}` }, { key: 'timeslots', label: '🕐 時段管理' }, { key: 'blocked', label: '📅 封鎖日期' }, { key: 'templates', label: '📝 訊息模板' }].map(t => (
           <button key={t.key} onClick={() => setTab(t.key)} style={{ padding: '14px 24px', background: 'none', border: 'none', borderBottom: tab === t.key ? '2px solid #5c4a3a' : '2px solid transparent', fontSize: 14, color: tab === t.key ? '#5c4a3a' : '#999', fontWeight: tab === t.key ? 600 : 400, cursor: 'pointer', fontFamily: font, whiteSpace: 'nowrap' }}>{t.label}</button>
         ))}
       </div>
@@ -1099,85 +1099,79 @@ const saveResched = async () => {
                   <button onClick={() => removeBlocked(b.id)} style={smallBtn('#ffebee', '#c62828', '#ffcdd2')}>刪除</button>
                 </div>))}</div>
             )}
-            {/* ═══ 訊息模板編輯器 ═══ */}
-<div style={{
-  background: '#fff', borderRadius: 14, padding: 20,
-  margin: '20px auto', maxWidth: 800,
-  boxShadow: '0 2px 12px rgba(0,0,0,0.08)'
-}}>
-  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-    <h3 style={{ margin: 0 }}>📝 WhatsApp 訊息模板</h3>
-    <button
-      onClick={() => setShowTemplateEditor(!showTemplateEditor)}
-      style={{
-        padding: '6px 16px', borderRadius: 8, border: '1px solid #ccc',
-        background: showTemplateEditor ? '#f0f0f0' : '#fff', cursor: 'pointer'
-      }}
-    >
-      {showTemplateEditor ? '收起' : '展開編輯'}
-    </button>
-  </div>
-
-  {showTemplateEditor && (
-    <div style={{ marginTop: 16 }}>
-      {/* 可用變數提示 */}
-      <div style={{
-        background: '#fff8e1', borderRadius: 10, padding: 12,
-        marginBottom: 16, fontSize: 13
-      }}>
-        <strong>📌 可用變數（會自動替換成客人資料）：</strong><br/>
-        <code>{'{customer_name}'}</code> 客人名 &nbsp;
-        <code>{'{booking_date}'}</code> 日期 &nbsp;
-        <code>{'{booking_time}'}</code> 時間 &nbsp;
-        <code>{'{service_name}'}</code> 服務 &nbsp;
-        <code>{'{technician_label}'}</code> 技師 &nbsp;
-        <code>{'{total_price}'}</code> 價錢 &nbsp;
-        <code>{'{old_date}'}</code> 原日期 &nbsp;
-        <code>{'{old_time}'}</code> 原時間
-      </div>
-
-      {msgTemplates.map(tpl => (
-        <div key={tpl.id} style={{
-          marginBottom: 16, padding: 16, background: '#fafafa',
-          borderRadius: 10, border: '1px solid #eee'
-        }}>
-          <div style={{ fontWeight: 600, marginBottom: 8 }}>{tpl.label}</div>
-          <textarea
-            value={tpl.content}
-            onChange={e => setMsgTemplates(prev =>
-              prev.map(t => t.id === tpl.id ? { ...t, content: e.target.value } : t)
+ {tab === 'blocked' && (
+          <div style={card}>
+            <h2 style={{ margin: '0 0 20px', color: '#5c4a3a', fontSize: 18 }}>封鎖日期</h2>
+            <p style={{ fontSize: 13, color: '#999', marginBottom: 20 }}>封鎖特定日期，該日將無法被預約。</p>
+            <div style={{ display: 'flex', gap: 10, marginBottom: 24, paddingBottom: 24, borderBottom: '1px solid #f0ebe3', flexWrap: 'wrap' }}>
+              <input type="date" value={newBD} onChange={e => setNewBD(e.target.value)} style={{ padding: '10px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, flex: '1 1 150px' }} />
+              <input type="text" placeholder="原因（可選）" value={newBR} onChange={e => setNewBR(e.target.value)} style={{ padding: '10px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, flex: '2 1 200px', fontFamily: font }} />
+              <button onClick={addBlocked} style={{ padding: '10px 20px', background: '#c62828', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, cursor: 'pointer', fontFamily: font }}>封鎖</button>
+            </div>
+            {blocked.length === 0 ? <p style={{ textAlign: 'center', color: '#999', padding: 30 }}>未有封鎖日期</p> : (
+              <div>{blocked.map(b => (
+                <div key={b.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px', borderRadius: 8, background: '#faf6f0', marginBottom: 8 }}>
+                  <div><span style={{ fontWeight: 500, fontSize: 14 }}>{b.date}</span>{b.reason && <span style={{ color: '#999', fontSize: 13, marginLeft: 12 }}>— {b.reason}</span>}</div>
+                  <button onClick={() => removeBlocked(b.id)} style={smallBtn('#ffebee', '#c62828', '#ffcdd2')}>刪除</button>
+                </div>))}</div>
             )}
-            style={{
-              width: '100%', minHeight: 120, padding: 10,
-              borderRadius: 8, border: '1px solid #ddd',
-              fontFamily: 'inherit', fontSize: 14, resize: 'vertical',
-              boxSizing: 'border-box'
-            }}
-          />
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8 }}>
-            <span style={{ fontSize: 12, color: '#999' }}>
-              用 \n 代表換行
-            </span>
-            <button
-              onClick={() => saveTemplate(tpl.id, tpl.content)}
-              style={{
-                padding: '6px 20px', borderRadius: 8, border: 'none',
-                background: '#4CAF50', color: '#fff', cursor: 'pointer',
-                fontWeight: 600
-              }}
-            >
-              💾 儲存
-            </button>
-          </div>
-        </div>
-      ))}
-    </div>
-  )}
-</div>
-
           </div>
         )}
-      </div>
-    </div>
-  );
-}
+
+        {tab === 'templates' && (
+          <div style={{
+            background: '#fff', borderRadius: 14, padding: 20,
+            margin: '0 auto', maxWidth: 800,
+            boxShadow: '0 2px 12px rgba(0,0,0,0.08)'
+          }}>
+            <h3 style={{ margin: '0 0 16px', color: '#5c4a3a', fontSize: 18 }}>📝 WhatsApp 訊息模板</h3>
+            <div style={{
+              background: '#fff8e1', borderRadius: 10, padding: 12,
+              marginBottom: 16, fontSize: 13
+            }}>
+              <strong>📌 可用變數（會自動替換成客人資料）：</strong><br/>
+              <code>{'{customer_name}'}</code> 客人名 &nbsp;
+              <code>{'{booking_date}'}</code> 日期 &nbsp;
+              <code>{'{booking_time}'}</code> 時間 &nbsp;
+              <code>{'{service_name}'}</code> 服務 &nbsp;
+              <code>{'{technician_label}'}</code> 技師 &nbsp;
+              <code>{'{total_price}'}</code> 價錢 &nbsp;
+              <code>{'{old_date}'}</code> 原日期 &nbsp;
+              <code>{'{old_time}'}</code> 原時間
+            </div>
+
+            {msgTemplates.length === 0 ? (
+              <p style={{ textAlign: 'center', color: '#999', padding: 30 }}>載入中... 或未有模板</p>
+            ) : msgTemplates.map(tpl => (
+              <div key={tpl.id} style={{
+                marginBottom: 16, padding: 16, background: '#fafafa',
+                borderRadius: 10, border: '1px solid #eee'
+              }}>
+                <div style={{ fontWeight: 600, marginBottom: 8, color: '#5c4a3a' }}>{tpl.label}</div>
+                <textarea
+                  value={tpl.content}
+                  onChange={e => setMsgTemplates(prev =>
+                    prev.map(t => t.id === tpl.id ? { ...t, content: e.target.value } : t)
+                  )}
+                  style={{
+                    width: '100%', minHeight: 120, padding: 10,
+                    borderRadius: 8, border: '1px solid #ddd',
+                    fontFamily: 'inherit', fontSize: 14, resize: 'vertical',
+                    boxSizing: 'border-box'
+                  }}
+                />
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8 }}>
+                  <span style={{ fontSize: 12, color: '#999' }}>用 {'\\n'} 代表換行</span>
+                  <button
+                    onClick={() => saveTemplate(tpl.id, tpl.content)}
+                    style={{
+                      padding: '6px 20px', borderRadius: 8, border: 'none',
+                      background: '#4CAF50', color: '#fff', cursor: 'pointer',
+                      fontWeight: 600, fontFamily: font
+                    }}
+                  >💾 儲存</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
