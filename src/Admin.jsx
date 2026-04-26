@@ -161,18 +161,6 @@ export default function Admin() {
     }
     setResetPwLoading(false);
   };
-      const data = await r.json();
-      if (!r.ok) throw new Error(data.error || '重設失敗');
-      alert('✅ 密碼已重設，請重新登入');
-      setShowResetForm(false);
-      setRecoveryToken('');
-      setResetNewPw('');
-      setResetConfirmPw('');
-    } catch (err) {
-      setResetPwError(err.message);
-    }
-    setResetPwLoading(false);
-  };
 
   const logChange = (text) => {
     const id = Date.now();
