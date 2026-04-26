@@ -16,6 +16,7 @@ export default async function handler(req, res) {
   }
 
   try {
+    // ===== 登入 =====
     if (action === 'login') {
       const r = await fetch(`${SB}/auth/v1/token?grant_type=password`, {
         method: 'POST',
@@ -26,32 +27,40 @@ export default async function handler(req, res) {
       const data = await r.json();
       return res.status(200).json({ ok: true, user: data.user?.email });
     }
-    // 發送重設密碼郵件
-if (action === 'recover') {
-  const r = await fetch(`${SB}/auth/v1/recover`, {
-    method: 'POST',
-    headers: { apikey: SK, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email: payload.email })
-  });
-  if (!r.ok) return res.status(400).json({ error: '發送失敗' });
-  return res.status(200).json({ ok: true });
-}
 
-// 用 recovery token 更新密碼
-if (action === 'update-password') {
-  const r = await fetch(`${SB}/auth/v1/user`, {
-    method: 'PUT',
-    headers: {
-      apikey: SK,
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${payload.access_token}`
-    },
-    body: JSON.stringify({ password: payload.new_password })
-  });
-  if (!r.ok) return res.status(400).json({ error: '更新密碼失敗' });
-  return res.status(200).json({ ok: true });
-}
+    // ===== 發送重設密碼郵件 =====
+    if (action === 'recover') {
+      const r = await fetch(`${SB}/auth/v1/recover`, {
+        method: 'POST',
+        headers: { apikey: SK, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: payload.email,
+          redirect_to: 'https://jlab-booking.vercel.app/admin'
+        })
+      });
+      if (!r.ok) {
+        const errText = await r.text().catch(() => '');
+        return res.status(400).json({ error: errText || '發送失敗' });
+      }
+      return res.status(200).json({ ok: true });
+    }
 
+    // ===== 用 recovery token 更新密碼 =====
+    if (action === 'reset-via-token') {
+      const r = await fetch(`${SB}/auth/v1/user`, {
+        method: 'PUT',
+        headers: {
+          apikey: SK,
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${payload.token}`
+        },
+        body: JSON.stringify({ password: payload.newPassword })
+      });
+      if (!r.ok) return res.status(400).json({ error: '重設密碼失敗' });
+      return res.status(200).json({ ok: true });
+    }
+
+    // ===== Admin 重設用戶密碼 =====
     if (action === 'reset-password') {
       const listRes = await fetch(`${SB}/auth/v1/admin/users`, {
         headers: { apikey: SK, Authorization: `Bearer ${SK}` }
@@ -68,6 +77,7 @@ if (action === 'update-password') {
       return res.status(200).json({ ok: true });
     }
 
+    // ===== 用戶自行更改密碼 =====
     if (action === 'change-password') {
       const verifyRes = await fetch(`${SB}/auth/v1/token?grant_type=password`, {
         method: 'POST',
@@ -90,6 +100,7 @@ if (action === 'update-password') {
       return res.status(200).json({ ok: true });
     }
 
+    // ===== 資料庫操作 =====
     if (action === 'db') {
       const { method, path, body } = payload;
       const headers = { apikey: SK, Authorization: `Bearer ${SK}`, 'Content-Type': 'application/json' };
@@ -106,32 +117,6 @@ if (action === 'update-password') {
       if (method === 'DELETE') return res.status(200).json({ ok: true });
       const data = await r.json();
       return res.status(200).json(data);
-    }
-
-    if (action === 'recover') {
-      const r = await fetch(`${SB}/auth/v1/recover`, {
-        method: 'POST',
-        headers: { apikey: SK, 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: payload.email,
-          redirect_to: 'https://jlab-booking.vercel.app/admin'
-        })
-      });
-      if (!r.ok) {
-        const errText = await r.text().catch(() => '');
-        return res.status(500).json({ error: errText || '發送失敗' });
-      }
-      return res.status(200).json({ ok: true });
-    }
-
-    if (action === 'reset-via-token') {
-      const r = await fetch(`${SB}/auth/v1/user`, {
-        method: 'PUT',
-        headers: { apikey: SK, Authorization: `Bearer ${payload.token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: payload.newPassword })
-      });
-      if (!r.ok) return res.status(500).json({ error: '重設失敗' });
-      return res.status(200).json({ ok: true });
     }
 
     return res.status(400).json({ error: 'Unknown action' });
