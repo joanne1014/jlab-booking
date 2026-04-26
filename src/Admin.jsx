@@ -294,63 +294,7 @@ export default function Admin() {
   const statusColor = (s) => s === 'confirmed' ? '#4CAF50' : s === 'cancelled' ? '#f44336' : s === 'completed' ? '#2196F3' : '#FF9800';
   const statusText = (s) => s === 'confirmed' ? '已確認' : s === 'cancelled' ? '已取消' : s === 'completed' ? '已完成' : '待確認';
   const waLink = (phone) => { if (!phone) return null; const c = phone.replace(/[^0-9]/g, ''); return `https://wa.me/${c.length <= 8 ? '852' + c : c}`; };
-// ═══ WhatsApp 通知模板 + 發送 ═══
-// ═══════════════════════════════════════════
-// WhatsApp 通知模板（從 DB 載入）
-// ═══════════════════════════════════════════
 
-const [msgTemplates, setMsgTemplates] = useState([]);
-const [showTemplateEditor, setShowTemplateEditor] = useState(false);
-
-// 載入模板
-useEffect(() => {
-  supabase.from('notification_templates').select('*').order('id')
-    .then(({ data }) => { if (data) setMsgTemplates(data); });
-}, []);
-
-// 將模板入面嘅 {variable} 替換成真實值
-const fillTemplate = (templateId, booking, extras = {}) => {
-  const tpl = msgTemplates.find(t => t.id === templateId);
-  if (!tpl) return '';
-  const vars = {
-    customer_name: booking.customer_name || '',
-    booking_date: booking.booking_date || '',
-    booking_time: booking.booking_time || '',
-    service_name: booking.service_name || '未指定',
-    technician_label: booking.technician_label || '待定',
-    total_price: booking.total_price || '—',
-    old_date: extras.oldDate || '',
-    old_time: extras.oldTime || '',
-  };
-  return tpl.content.replace(/\{(\w+)\}/g, (_, key) => vars[key] ?? '');
-};
-
-// 發送 WhatsApp
-const sendWhatsApp = (phone, message) => {
-  if (!phone) { showToast('⚠️ 呢個客人冇留電話號碼'); return; }
-  const cleaned = phone.replace(/[^0-9]/g, '');
-  const num = cleaned.length <= 8 ? '852' + cleaned : cleaned;
-  window.open(`https://wa.me/${num}?text=${encodeURIComponent(message)}`, '_blank');
-};
-
-// 儲存模板到 DB
-const saveTemplate = async (id, newContent) => {
-  const { error } = await supabase
-    .from('notification_templates')
-    .update({ content: newContent, updated_at: new Date().toISOString() })
-    .eq('id', id);
-  if (error) { showToast('❌ 儲存失敗'); return; }
-  setMsgTemplates(prev => prev.map(t => t.id === id ? { ...t, content: newContent } : t));
-  showToast('✅ 模板已儲存');
-};
-
-const sendWhatsApp = (phone, message) => {
-  if (!phone) { showToast('⚠️ 呢個客人冇留電話號碼'); return; }
-  const cleaned = phone.replace(/[^0-9]/g, '');
-  const num = cleaned.length <= 8 ? '852' + cleaned : cleaned;
-  const encoded = encodeURIComponent(message);
-  window.open(`https://wa.me/${num}?text=${encoded}`, '_blank');
-};
   const startResched = () => {
     if (!selectedBooking) return;
     setReschedMode(true);
@@ -368,38 +312,24 @@ const sendWhatsApp = (phone, message) => {
     } catch (e) { setReschedSlots({}); }
   };
   const handleReschedDateChange = (date) => { setReschedDate(date); setReschedTime(''); loadReschedSlots(date); };
-const saveResched = async () => {
-  if (!selectedBooking || !reschedDate || !reschedTime) return showToast('❌ 請選擇日期同時間');
-  if (isTimeConflict) return showToast('❌ 此時段已有其他預約，請選擇其他時間');
-  setReschedLoading(true);
-  try {
-    // 記住舊時間（通知用）
-    const oldDate = selectedBooking.booking_date;
-    const oldTime = selectedBooking.booking_time;
+  const saveResched = async () => {
+    if (!selectedBooking || !reschedDate || !reschedTime) return showToast('❌ 請選擇日期同時間');
+    if (isTimeConflict) return showToast('❌ 此時段已有其他預約，請選擇其他時間');
+    setReschedLoading(true);
+    try {
+      const updates = { booking_date: reschedDate, booking_time: reschedTime };
+      if (reschedTech) updates.technician_label = reschedTech;
+      await sbPatch(`bookings?id=eq.${selectedBooking.id}`, updates);
+      const oldInfo = `${selectedBooking.booking_date} ${selectedBooking.booking_time}`;
+      setAllBookings(prev => prev.map(b => b.id === selectedBooking.id ? { ...b, ...updates } : b));
+      setSelectedBooking(prev => prev ? { ...prev, ...updates } : null);
+      setReschedMode(false);
+      logChange(`✏️ 改期 ${selectedBooking.customer_name}：${oldInfo} → ${reschedDate} ${reschedTime}`);
+      showToast('✅ 已更改預約時間');
+    } catch (e) { showToast('❌ 更改失敗'); }
+    setReschedLoading(false);
+  };
 
-    const updates = { booking_date: reschedDate, booking_time: reschedTime };
-    if (reschedTech) updates.technician_label = reschedTech;
-    await sbPatch(`bookings?id=eq.${selectedBooking.id}`, updates);
-
-    const oldInfo = `${oldDate} ${oldTime}`;
-    const updatedBooking = { ...selectedBooking, ...updates };
-
-    setAllBookings(prev => prev.map(b => b.id === selectedBooking.id ? updatedBooking : b));
-    setSelectedBooking(updatedBooking);
-    setReschedMode(false);
-    logChange(`✏️ 改期 ${selectedBooking.customer_name}：${oldInfo} → ${reschedDate} ${reschedTime}`);
-    showToast('✅ 已更改預約時間');
-
-    // ═══ 問要唔要 WhatsApp 通知客人 ═══
-    const ask = window.confirm('📲 要唔要 WhatsApp 通知客人改期？');
-    if (ask) {
-      const msg = fillTemplate('rescheduled', updatedBooking, { oldDate, oldTime });
-      sendWhatsApp(selectedBooking.customer_phone, msg);
-    }
-
-  } catch (e) { showToast('❌ 更改失敗'); }
-  setReschedLoading(false);
-};
   const updateStatus = async (id, s) => {
     const b = allBookings.find(x => x.id === id);
     try {
@@ -420,24 +350,15 @@ const saveResched = async () => {
     } catch (e) { console.error(e); }
   };
   const modalUpdate = async (s) => {
-  if (newStatus === 'confirmed' || newStatus === 'cancelled') {
-  const ask = window.confirm('📲 要唔要 WhatsApp 通知客人？');
-  if (ask) {
-    const templateId = newStatus === 'confirmed' ? 'confirmed' : 'cancelled';
-    const msg = fillTemplate(templateId, sel);
-    sendWhatsApp(sel.customer_phone, msg);
-  }
-}
-
-    // ═══ WhatsApp 通知 ═══
-    const template = notifyTemplates[s];
-    if (selectedBooking.customer_phone && template) {
-      if (window.confirm(`要透過 WhatsApp 通知 ${selectedBooking.customer_name} 嗎？`)) {
-        sendWhatsApp(selectedBooking.customer_phone, template(updated));
-      }
-    }
-  } catch (e) { showToast('❌ 更新失敗'); }
-};
+    if (!selectedBooking) return;
+    try {
+      await sbPatch(`bookings?id=eq.${selectedBooking.id}`, { status: s });
+      setAllBookings(prev => prev.map(b => b.id === selectedBooking.id ? { ...b, status: s } : b));
+      setSelectedBooking(prev => prev ? { ...prev, status: s } : null);
+      logChange(`${statusText(s)} — ${selectedBooking.customer_name} ${selectedBooking.booking_date} ${selectedBooking.booking_time}`);
+      showToast(`✅ 狀態已更新為「${statusText(s)}」`);
+    } catch (e) { showToast('❌ 更新失敗'); }
+  };
   const modalDelete = async () => {
     if (!selectedBooking || !window.confirm('確定要刪除？')) return;
     try {
@@ -661,23 +582,8 @@ const saveResched = async () => {
               {(selectedBooking.status === 'pending' || selectedBooking.status === 'confirmed') && <button onClick={() => modalUpdate('completed')} style={{ padding: '10px 20px', borderRadius: 8, border: 'none', background: '#2196F3', color: '#fff', cursor: 'pointer', fontSize: 14, fontFamily: font, fontWeight: 600 }}>✔️ 完成</button>}
               {selectedBooking.status !== 'cancelled' && selectedBooking.status !== 'completed' && <button onClick={() => modalUpdate('cancelled')} style={{ padding: '10px 20px', borderRadius: 8, border: '1px solid #ef9a9a', background: '#ffebee', color: '#c62828', cursor: 'pointer', fontSize: 14, fontFamily: font }}>❌ 取消</button>}
               {!reschedMode && selectedBooking.status !== 'cancelled' && <button onClick={startResched} style={{ padding: '10px 16px', borderRadius: 8, border: '1px solid #FFB74D', background: '#FFF3E0', color: '#E65100', cursor: 'pointer', fontSize: 14, fontFamily: font }}>✏️ 改期</button>}
-{selectedBooking.customer_phone && (
-  <button onClick={() => {
-    const s = selectedBooking.status;
-    const template = notifyTemplates[s];
-    if (template) {
-      sendWhatsApp(selectedBooking.customer_phone, template(selectedBooking));
-    } else {
-      sendWhatsApp(selectedBooking.customer_phone,
-        `${selectedBooking.customer_name} 你好！關於你 ${selectedBooking.booking_date} ${selectedBooking.booking_time} 嘅預約，如有任何疑問歡迎聯絡我哋。\n— J.LAB`
-      );
-    }
-  }} style={{ padding: '10px 16px', borderRadius: 8, border: '1px solid #25D366', background: '#E8F5E9', color: '#25D366', cursor: 'pointer', fontSize: 14, fontFamily: font, fontWeight: 600 }}>
-    📲 通知客人
-  </button>
-)}
-<div style={{ flex: 1 }} />
-<button onClick={modalDelete} style={{ padding: '10px 16px', borderRadius: 8, border: '1px solid #ddd', background: '#fafafa', color: '#999', cursor: 'pointer', fontSize: 14, fontFamily: font }}>🗑️</button>
+              <div style={{ flex: 1 }} />
+              <button onClick={modalDelete} style={{ padding: '10px 16px', borderRadius: 8, border: '1px solid #ddd', background: '#fafafa', color: '#999', cursor: 'pointer', fontSize: 14, fontFamily: font }}>🗑️</button>
             </div>
           </div>
         </div>
@@ -1107,80 +1013,4 @@ const saveResched = async () => {
     </div>
   );
 }
-{/* ═══ 訊息模板編輯器 ═══ */}
-<div style={{
-  background: '#fff', borderRadius: 14, padding: 20,
-  margin: '20px auto', maxWidth: 800,
-  boxShadow: '0 2px 12px rgba(0,0,0,0.08)'
-}}>
-  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-    <h3 style={{ margin: 0 }}>📝 WhatsApp 訊息模板</h3>
-    <button
-      onClick={() => setShowTemplateEditor(!showTemplateEditor)}
-      style={{
-        padding: '6px 16px', borderRadius: 8, border: '1px solid #ccc',
-        background: showTemplateEditor ? '#f0f0f0' : '#fff', cursor: 'pointer'
-      }}
-    >
-      {showTemplateEditor ? '收起' : '展開編輯'}
-    </button>
-  </div>
-
-  {showTemplateEditor && (
-    <div style={{ marginTop: 16 }}>
-      {/* 可用變數提示 */}
-      <div style={{
-        background: '#fff8e1', borderRadius: 10, padding: 12,
-        marginBottom: 16, fontSize: 13
-      }}>
-        <strong>📌 可用變數（會自動替換成客人資料）：</strong><br/>
-        <code>{'{customer_name}'}</code> 客人名 &nbsp;
-        <code>{'{booking_date}'}</code> 日期 &nbsp;
-        <code>{'{booking_time}'}</code> 時間 &nbsp;
-        <code>{'{service_name}'}</code> 服務 &nbsp;
-        <code>{'{technician_label}'}</code> 技師 &nbsp;
-        <code>{'{total_price}'}</code> 價錢 &nbsp;
-        <code>{'{old_date}'}</code> 原日期 &nbsp;
-        <code>{'{old_time}'}</code> 原時間
-      </div>
-
-      {msgTemplates.map(tpl => (
-        <div key={tpl.id} style={{
-          marginBottom: 16, padding: 16, background: '#fafafa',
-          borderRadius: 10, border: '1px solid #eee'
-        }}>
-          <div style={{ fontWeight: 600, marginBottom: 8 }}>{tpl.label}</div>
-          <textarea
-            value={tpl.content}
-            onChange={e => setMsgTemplates(prev =>
-              prev.map(t => t.id === tpl.id ? { ...t, content: e.target.value } : t)
-            )}
-            style={{
-              width: '100%', minHeight: 120, padding: 10,
-              borderRadius: 8, border: '1px solid #ddd',
-              fontFamily: 'inherit', fontSize: 14, resize: 'vertical',
-              boxSizing: 'border-box'
-            }}
-          />
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8 }}>
-            <span style={{ fontSize: 12, color: '#999' }}>
-              用 \n 代表換行
-            </span>
-            <button
-              onClick={() => saveTemplate(tpl.id, tpl.content)}
-              style={{
-                padding: '6px 20px', borderRadius: 8, border: 'none',
-                background: '#4CAF50', color: '#fff', cursor: 'pointer',
-                fontWeight: 600
-              }}
-            >
-              💾 儲存
-            </button>
-          </div>
-        </div>
-      ))}
-    </div>
-  )}
-</div>
-唔識改法 3：「📲 通知客人」按鈕
-搵呢段（喺 Modal 底部嘅按鈕區）：
+我唔識要加係邊
