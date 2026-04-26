@@ -294,7 +294,52 @@ export default function Admin() {
   const statusColor = (s) => s === 'confirmed' ? '#4CAF50' : s === 'cancelled' ? '#f44336' : s === 'completed' ? '#2196F3' : '#FF9800';
   const statusText = (s) => s === 'confirmed' ? '已確認' : s === 'cancelled' ? '已取消' : s === 'completed' ? '已完成' : '待確認';
   const waLink = (phone) => { if (!phone) return null; const c = phone.replace(/[^0-9]/g, ''); return `https://wa.me/${c.length <= 8 ? '852' + c : c}`; };
+// ═══ WhatsApp 通知模板 + 發送 ═══
+const notifyTemplates = {
+  confirmed: (b) =>
+    `✅ 預約確認通知\n\n` +
+    `${b.customer_name} 你好！\n` +
+    `你嘅預約已確認：\n\n` +
+    `📅 日期：${b.booking_date}\n` +
+    `🕐 時間：${b.booking_time}\n` +
+    `🎨 服務：${b.service_name || '未指定'}\n` +
+    `👤 技師：${b.technician_label || '待定'}\n` +
+    `💰 費用：$${b.total_price || '—'}\n\n` +
+    `如需更改請提前聯絡我哋，多謝！\n` +
+    `— J.LAB`,
+  cancelled: (b) =>
+    `❌ 預約取消通知\n\n` +
+    `${b.customer_name} 你好！\n` +
+    `你 ${b.booking_date} ${b.booking_time} 嘅預約已取消。\n\n` +
+    `如有需要可重新預約，多謝！\n` +
+    `— J.LAB`,
+  completed: (b) =>
+    `✔️ 服務完成通知\n\n` +
+    `${b.customer_name} 你好！\n` +
+    `你嘅服務已完成，多謝光臨！\n\n` +
+    `📅 日期：${b.booking_date}\n` +
+    `🎨 服務：${b.service_name || '未指定'}\n` +
+    `💰 費用：$${b.total_price || '—'}\n\n` +
+    `期待下次見！\n` +
+    `— J.LAB`,
+  rescheduled: (b, oldDate, oldTime) =>
+    `✏️ 預約更改通知\n\n` +
+    `${b.customer_name} 你好！\n` +
+    `你嘅預約已更改：\n\n` +
+    `原時間：${oldDate} ${oldTime}\n` +
+    `新時間：${b.booking_date} ${b.booking_time}\n` +
+    `🎨 服務：${b.service_name || '未指定'}\n\n` +
+    `如有問題請聯絡我哋，多謝！\n` +
+    `— J.LAB`,
+};
 
+const sendWhatsApp = (phone, message) => {
+  if (!phone) { showToast('⚠️ 呢個客人冇留電話號碼'); return; }
+  const cleaned = phone.replace(/[^0-9]/g, '');
+  const num = cleaned.length <= 8 ? '852' + cleaned : cleaned;
+  const encoded = encodeURIComponent(message);
+  window.open(`https://wa.me/${num}?text=${encoded}`, '_blank');
+};
   const startResched = () => {
     if (!selectedBooking) return;
     setReschedMode(true);
@@ -350,15 +395,24 @@ export default function Admin() {
     } catch (e) { console.error(e); }
   };
   const modalUpdate = async (s) => {
-    if (!selectedBooking) return;
-    try {
-      await sbPatch(`bookings?id=eq.${selectedBooking.id}`, { status: s });
-      setAllBookings(prev => prev.map(b => b.id === selectedBooking.id ? { ...b, status: s } : b));
-      setSelectedBooking(prev => prev ? { ...prev, status: s } : null);
-      logChange(`${statusText(s)} — ${selectedBooking.customer_name} ${selectedBooking.booking_date} ${selectedBooking.booking_time}`);
-      showToast(`✅ 狀態已更新為「${statusText(s)}」`);
-    } catch (e) { showToast('❌ 更新失敗'); }
-  };
+  if (!selectedBooking) return;
+  try {
+    await sbPatch(`bookings?id=eq.${selectedBooking.id}`, { status: s });
+    const updated = { ...selectedBooking, status: s };
+    setAllBookings(prev => prev.map(b => b.id === selectedBooking.id ? { ...b, status: s } : b));
+    setSelectedBooking(prev => prev ? { ...prev, status: s } : null);
+    logChange(`${statusText(s)} — ${selectedBooking.customer_name} ${selectedBooking.booking_date} ${selectedBooking.booking_time}`);
+    showToast(`✅ 狀態已更新為「${statusText(s)}」`);
+
+    // ═══ WhatsApp 通知 ═══
+    const template = notifyTemplates[s];
+    if (selectedBooking.customer_phone && template) {
+      if (window.confirm(`要透過 WhatsApp 通知 ${selectedBooking.customer_name} 嗎？`)) {
+        sendWhatsApp(selectedBooking.customer_phone, template(updated));
+      }
+    }
+  } catch (e) { showToast('❌ 更新失敗'); }
+};
   const modalDelete = async () => {
     if (!selectedBooking || !window.confirm('確定要刪除？')) return;
     try {
@@ -582,8 +636,23 @@ export default function Admin() {
               {(selectedBooking.status === 'pending' || selectedBooking.status === 'confirmed') && <button onClick={() => modalUpdate('completed')} style={{ padding: '10px 20px', borderRadius: 8, border: 'none', background: '#2196F3', color: '#fff', cursor: 'pointer', fontSize: 14, fontFamily: font, fontWeight: 600 }}>✔️ 完成</button>}
               {selectedBooking.status !== 'cancelled' && selectedBooking.status !== 'completed' && <button onClick={() => modalUpdate('cancelled')} style={{ padding: '10px 20px', borderRadius: 8, border: '1px solid #ef9a9a', background: '#ffebee', color: '#c62828', cursor: 'pointer', fontSize: 14, fontFamily: font }}>❌ 取消</button>}
               {!reschedMode && selectedBooking.status !== 'cancelled' && <button onClick={startResched} style={{ padding: '10px 16px', borderRadius: 8, border: '1px solid #FFB74D', background: '#FFF3E0', color: '#E65100', cursor: 'pointer', fontSize: 14, fontFamily: font }}>✏️ 改期</button>}
-              <div style={{ flex: 1 }} />
-              <button onClick={modalDelete} style={{ padding: '10px 16px', borderRadius: 8, border: '1px solid #ddd', background: '#fafafa', color: '#999', cursor: 'pointer', fontSize: 14, fontFamily: font }}>🗑️</button>
+{selectedBooking.customer_phone && (
+  <button onClick={() => {
+    const s = selectedBooking.status;
+    const template = notifyTemplates[s];
+    if (template) {
+      sendWhatsApp(selectedBooking.customer_phone, template(selectedBooking));
+    } else {
+      sendWhatsApp(selectedBooking.customer_phone,
+        `${selectedBooking.customer_name} 你好！關於你 ${selectedBooking.booking_date} ${selectedBooking.booking_time} 嘅預約，如有任何疑問歡迎聯絡我哋。\n— J.LAB`
+      );
+    }
+  }} style={{ padding: '10px 16px', borderRadius: 8, border: '1px solid #25D366', background: '#E8F5E9', color: '#25D366', cursor: 'pointer', fontSize: 14, fontFamily: font, fontWeight: 600 }}>
+    📲 通知客人
+  </button>
+)}
+<div style={{ flex: 1 }} />
+<button onClick={modalDelete} style={{ padding: '10px 16px', borderRadius: 8, border: '1px solid #ddd', background: '#fafafa', color: '#999', cursor: 'pointer', fontSize: 14, fontFamily: font }}>🗑️</button>
             </div>
           </div>
         </div>
