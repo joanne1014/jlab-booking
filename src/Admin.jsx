@@ -3,7 +3,10 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 const apiCall = async (action, payload = {}) => {
   const res = await fetch('/api/admin', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'x-admin-secret': 'YOUR_ADMIN_SECRET_HERE'
+    },
     body: JSON.stringify({ action, payload })
   });
   const data = await res.json();
@@ -13,7 +16,7 @@ const apiCall = async (action, payload = {}) => {
 const sbGet = async (p) => apiCall('db', { path: p });
 const sbPost = async (t, d) => apiCall('db', { path: t, method: 'POST', body: d });
 const sbDel = async (p) => apiCall('db', { path: p, method: 'DELETE' });
-const sbPatch = async (p, d) => apiCall('db', { path: p, method: 'PATCH', body: d });};
+const sbPatch = async (p, d) => apiCall('db', { path: p, method: 'PATCH', body: d });
 
 const DAYS = ['日', '一', '二', '三', '四', '五', '六'];
 const ALL_TIMES = []; for (let h = 0; h < 24; h++) for (let m = 0; m < 60; m += 30) ALL_TIMES.push(`${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`);
@@ -147,11 +150,17 @@ export default function Admin() {
     if (resetNewPw !== resetConfirmPw) { setResetPwError('兩次密碼不一致'); return; }
     setResetPwLoading(true);
     try {
-      const r = await fetch('/api/admin', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-admin-secret': adminSecret },
-        body: JSON.stringify({ action: 'reset-via-token', payload: { token: recoveryToken, newPassword: resetNewPw } })
-      });
+      await apiCall('reset-via-token', { token: recoveryToken, newPassword: resetNewPw });
+      alert('✅ 密碼已重設，請重新登入');
+      setShowResetForm(false);
+      setRecoveryToken('');
+      setResetNewPw('');
+      setResetConfirmPw('');
+    } catch (err) {
+      setResetPwError(err.message || '重設失敗');
+    }
+    setResetPwLoading(false);
+  };
       const data = await r.json();
       if (!r.ok) throw new Error(data.error || '重設失敗');
       alert('✅ 密碼已重設，請重新登入');
@@ -161,20 +170,6 @@ export default function Admin() {
       setResetConfirmPw('');
     } catch (err) {
       setResetPwError(err.message);
-    }
-    setResetPwLoading(false);
-  };
-      if (!res.ok) {
-        const errText = await res.text();
-        throw new Error(errText || '更新失敗');
-      }
-      setShowResetForm(false);
-      setRecoveryToken('');
-      setResetNewPw('');
-      setResetConfirmPw('');
-      setResetMsg('密碼已重設成功！請用新密碼登入。');
-    } catch (err) {
-      setResetPwError('重設失敗：連結可能已過期，請重新申請。');
     }
     setResetPwLoading(false);
   };
@@ -469,20 +464,6 @@ export default function Admin() {
       fetchStaff();
     } catch (err) {
       setLoginError(err.message || '帳號或密碼錯誤');
-    }
-    setLoginLoading(false);
-  };
-      if (!res.ok) {
-        setLoginLoading(false);
-        setLoginError('帳號或密碼錯誤');
-        return;
-      }
-      setAuth(true);
-      fetchBookings();
-      fetchBlocked();
-      fetchStaff();
-    } catch (err) {
-      setLoginError('登入失敗，請稍後再試');
     }
     setLoginLoading(false);
   };
