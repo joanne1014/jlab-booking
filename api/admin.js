@@ -78,13 +78,21 @@ export default async function handler(req, res) {
       return res.status(200).json(data);
     }
 
-    if (action === 'recover') {
+      if (action === 'recover') {
       const r = await fetch(`${SB}/auth/v1/recover`, {
         method: 'POST',
         headers: { apikey: SK, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           email: payload.email,
           redirect_to: 'https://jlab-booking.vercel.app/admin'
+        })
+      });
+      if (!r.ok) {
+        const errText = await r.text().catch(() => '');
+        return res.status(500).json({ error: errText || '發送失敗' });
+      }
+      return res.status(200).json({ ok: true });
+    }
         })
       });
       if (!r.ok) return res.status(500).json({ error: '發送失敗' });
