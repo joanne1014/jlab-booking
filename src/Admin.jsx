@@ -134,17 +134,23 @@ export default function Admin() {
   }, []);
 
   /* ✅ 新增：用 recovery token 設定新密碼 */
-  const handleResetNewPw = async () => {
+    const handleResetNewPw = async () => {
     setResetPwError('');
     if (!resetNewPw || resetNewPw.length < 6) { setResetPwError('新密碼至少要 6 個字元'); return; }
     if (resetNewPw !== resetConfirmPw) { setResetPwError('兩次輸入嘅密碼唔一樣'); return; }
     setResetPwLoading(true);
     try {
-      const res = await fetch(`${SB}/auth/v1/user`, {
-        method: 'PUT',
-        headers: { apikey: SK, Authorization: `Bearer ${recoveryToken}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: resetNewPw })
-      });
+      await apiCall('reset-via-token', { token: recoveryToken, newPassword: resetNewPw });
+      setShowResetForm(false);
+      setRecoveryToken('');
+      setResetNewPw('');
+      setResetConfirmPw('');
+      setResetMsg('密碼已重設成功！請用新密碼登入。');
+    } catch (err) {
+      setResetPwError('重設失敗：連結可能已過期，請重新申請。');
+    }
+    setResetPwLoading(false);
+  };
       if (!res.ok) {
         const errText = await res.text();
         throw new Error(errText || '更新失敗');
@@ -438,16 +444,21 @@ export default function Admin() {
   const addBlocked = async () => { if (!newBD) return; try { const d = await sbPost('blocked_dates', { date: newBD, reason: newBR }); setBlocked(prev => [...prev, ...d].sort((a, b) => a.date.localeCompare(b.date))); setNewBD(''); setNewBR(''); } catch (e) { console.error(e); } };
   const removeBlocked = async (id) => { try { await sbDel(`blocked_dates?id=eq.${id}`); setBlocked(prev => prev.filter(b => b.id !== id)); } catch (e) { console.error(e); } };
 
-  const handleLogin = async (e) => {
+    const handleLogin = async (e) => {
     e.preventDefault();
     setLoginError('');
     setLoginLoading(true);
     try {
-      const res = await fetch(`${SB}/auth/v1/token?grant_type=password`, {
-        method: 'POST',
-        headers: { apikey: SK, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: loginEmail, password: pw })
-      });
+      await apiCall('login', { email: loginEmail, password: pw });
+      setAuth(true);
+      fetchBookings();
+      fetchBlocked();
+      fetchStaff();
+    } catch (err) {
+      setLoginError(err.message || '帳號或密碼錯誤');
+    }
+    setLoginLoading(false);
+  };
       if (!res.ok) {
         setLoginLoading(false);
         setLoginError('帳號或密碼錯誤');
@@ -463,18 +474,22 @@ export default function Admin() {
     setLoginLoading(false);
   };
 
-  const handleChangePw = async () => {
+    const handleChangePw = async () => {
     setCpError(''); setCpMsg('');
     if (!cpOld || !cpNew || !cpConfirm) { setCpError('請填寫所有欄位'); return; }
     if (cpNew.length < 6) { setCpError('新密碼至少要 6 個字元'); return; }
     if (cpNew !== cpConfirm) { setCpError('兩次輸入嘅新密碼唔一樣'); return; }
     setCpLoading(true);
     try {
-      const verifyRes = await fetch(`${SB}/auth/v1/token?grant_type=password`, {
-        method: 'POST',
-        headers: { apikey: SK, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: loginEmail, password: cpOld })
-      });
+      await apiCall('change-password', { email: loginEmail, oldPassword: cpOld, newPassword: cpNew });
+      setCpMsg('✅ 密碼已更新！');
+      setCpOld(''); setCpNew(''); setCpConfirm('');
+      setTimeout(() => { setShowChangePw(false); setCpMsg(''); }, 2000);
+    } catch (err) {
+      setCpError(err.message || '更新失敗');
+    }
+    setCpLoading(false);
+  };
       if (!verifyRes.ok) { setCpLoading(false); setCpError('舊密碼不正確'); return; }
       const listRes = await fetch(`${SB}/auth/v1/admin/users`, {
         headers: { apikey: SK, Authorization: `Bearer ${SK}` }
@@ -532,12 +547,7 @@ export default function Admin() {
           setResetMsg('');
           try {
             const redirectUrl = window.location.origin + window.location.pathname;
-            const res = await fetch(`${SB}/auth/v1/recover`, {
-              method: 'POST',
-              headers: { apikey: SK, 'Content-Type': 'application/json' },
-              body: JSON.stringify({ email: loginEmail, redirect_to: redirectUrl })
-            });
-            if (!res.ok) throw new Error('發送失敗');
+            await apiCall('recover', { email: loginEmail, redirectUrl });
             setResetMsg('重設密碼連結已發送到你嘅 Email，請查收信箱（包括垃圾郵件）。撳 Email 入面嘅連結會返嚟呢度設定新密碼。');
           } catch (err) {
             setLoginError('發送失敗：' + (err.message || '請稍後再試'));
