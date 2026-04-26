@@ -144,17 +144,23 @@ export default function Admin() {
     const handleResetNewPw = async () => {
     setResetPwError('');
     if (!resetNewPw || resetNewPw.length < 6) { setResetPwError('新密碼至少要 6 個字元'); return; }
-    if (resetNewPw !== resetConfirmPw) { setResetPwError('兩次輸入嘅密碼唔一樣'); return; }
+    if (resetNewPw !== resetConfirmPw) { setResetPwError('兩次密碼不一致'); return; }
     setResetPwLoading(true);
     try {
-      await apiCall('reset-via-token', { token: recoveryToken, newPassword: resetNewPw });
+      const r = await fetch('/api/admin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-admin-secret': adminSecret },
+        body: JSON.stringify({ action: 'reset-via-token', payload: { token: recoveryToken, newPassword: resetNewPw } })
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || '重設失敗');
+      alert('✅ 密碼已重設，請重新登入');
       setShowResetForm(false);
       setRecoveryToken('');
       setResetNewPw('');
       setResetConfirmPw('');
-      setResetMsg('密碼已重設成功！請用新密碼登入。');
     } catch (err) {
-      setResetPwError('重設失敗：連結可能已過期，請重新申請。');
+      setResetPwError(err.message);
     }
     setResetPwLoading(false);
   };
