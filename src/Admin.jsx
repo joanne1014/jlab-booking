@@ -313,7 +313,27 @@ export default function Admin() {
     try { await apiCall('change-password', { oldPassword: cpOld, newPassword: cpNew }); setCpMsg('✅ 密碼已更改'); setCpOld(''); setCpNew(''); setCpConfirm(''); } catch (err) { setCpError(err.message || '更改失敗'); }
     setCpLoading(false);
   };
-
+// ═══ 一鍵完整備份 ═══
+const exportFullBackup = async () => {
+  showToast('⏳ 備份中...');
+  const backup = { exportedAt: new Date().toISOString(), tables: {} };
+  const tables = [
+    'staff', 'services', 'service_variants', 'service_addons',
+    'enabled_timeslots', 'date_availability', 'blocked_dates',
+    'customers', 'bookings', 'notification_templates'
+  ];
+  for (const t of tables) {
+    try { backup.tables[t] = await sbGet(`${t}?limit=10000`); }
+    catch (_) { backup.tables[t] = []; }
+  }
+  const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `JLAB_full_backup_${todayStr}.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+  showToast('✅ 完整備份已下載！');
+};
   const exportCSV = () => {
     const hdrs = ['日期', '時間', '客人', '電話', '服務', '技師', '金額', '狀態'];
     const rows = filteredBookings.map(b => [b.booking_date, b.booking_time, b.customer_name, b.customer_phone, b.service_name, b.technician_label || '', b.total_price, statusText(b.status)]);
@@ -749,6 +769,12 @@ export default function Admin() {
         <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
           <button onClick={openHistory} style={headerBtn}>🔍 {!isMobile && '歷史'}</button>
           <button onClick={() => { setShowChangePw(true); setCpOld(''); setCpNew(''); setCpConfirm(''); setCpMsg(''); setCpError(''); }} style={headerBtn}>🔑{!isMobile && ' 密碼'}</button>
+      <button
+  onClick={exportFullBackup}
+  className="px-3 py-1 bg-green-600 text-white rounded hover:bg-green-700 text-sm"
+>
+  📦 備份
+</button>
           <button onClick={() => { setAuth(false); authToken = null; sessionStorage.removeItem('jlab_token'); showToast('已登出'); }} style={headerBtn}>登出</button>
         </div>
       </div>
