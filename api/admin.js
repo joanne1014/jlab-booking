@@ -25,6 +25,22 @@ async function verifyToken(req) {
   }
 }
 
+/* ═══ 用 service_role 去 call Supabase RPC ═══ */
+async function callRPC(fnName, params) {
+  const r = await fetch(`${SB_URL}/rest/v1/rpc/${fnName}`, {
+    method: 'POST',
+    headers: {
+      apikey: ANON_KEY,
+      Authorization: `Bearer ${SERVICE_ROLE_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(params),
+  });
+  const data = await r.json();
+  if (!r.ok) throw new Error(data.message || data.error || JSON.stringify(data));
+  return data;
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -108,11 +124,10 @@ export default async function handler(req, res) {
     // ═══ change-password ═══
     if (action === 'change-password') {
       const { oldPassword, newPassword } = payload;
-      const email = user.email; // ★ 從 token 取得 email，唔需要前端傳
+      const email = user.email;
       if (!oldPassword || !newPassword) throw new Error('請填寫所有欄位');
       if (newPassword.length < 6) throw new Error('新密碼至少要 6 個字元');
 
-      // 先驗證舊密碼
       const loginR = await fetch(`${SB_URL}/auth/v1/token?grant_type=password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', apikey: ANON_KEY },
@@ -121,7 +136,6 @@ export default async function handler(req, res) {
       if (!loginR.ok) throw new Error('舊密碼錯誤');
       const loginData = await loginR.json();
 
-      // 用新 token 更新密碼
       const updateR = await fetch(`${SB_URL}/auth/v1/user`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', apikey: ANON_KEY, Authorization: `Bearer ${loginData.access_token}` },
@@ -134,11 +148,118 @@ export default async function handler(req, res) {
       return res.json({ success: true });
     }
 
-    // ═══ db — 所有資料庫操作 ═══
+    // ══════════════════════════════════════
+    // 5) check-conflict — 衝突檢測（用 DB function）
+    // ══════════════════════════════════════
+    if (action === 'check-conflict') {
+      const { date, time, duration, technician, excludeId } = payload;
+      if (!date || !time || !technician) {
+        return res.status(400).json({ error: '缺少必要參數' });
+      }
+      const result = await callRPC('check_booking_conflict', {
+        p_date: date,
+        p_start_time: time,
+        p_duration: duration || 60,
+        p_technician: technician,
+        p_exclude_id: excludeId || null,
+      });
+      return res.json({ hasConflict: result });
+    }
+
+    // ══════════════════════════════════════
+    // 6) create-booking-safe — 防撞單建立預約
+    // ══════════════════════════════════════
+    if (action === 'create-booking-safe') {
+      const {
+        date, time, duration, technician,
+        customerName, customerPhone, serviceName,
+        variantLabel, addonNames, totalPrice, notes, staffId,
+      } = payload;
+      if (!date || !time || !technician || !customerName) {
+        return res.status(400).json({ error: '缺少必要參數' });
+      }
+      const result = await callRPC('create_booking_safe', {
+        p_date: date,
+        p_time: time,
+        p_duration: duration || 60,
+        p_technician: technician,
+        p_customer_name: customerName,
+        p_customer_phone: customerPhone || '',
+        p_service_name: serviceName || '',
+        p_variant_label: variantLabel || null,
+        p_addon_names: addonNames || [],
+        p_total_price: totalPrice || 0,
+        p_notes: notes || '',
+        p_staff_id: staffId || null,
+      });
+      if (result && result.success === false) {
+        return res.status(409).json({ error: result.error || '此時段已被預約' });
+      }
+      return res.json(result);
+    }
+
+    // ══════════════════════════════════════
+    // 7) bookings-paginated — 分頁載入預約
+    // ══════════════════════════════════════
+    if (action === 'bookings-paginated') {
+      const {
+        page = 1,
+        pageSize = 50,
+        dateFrom,
+        dateTo,
+        status,
+        technician,
+        search,
+      } = payload;
+      const offset = (page - 1) * pageSize;
+
+      // 構建 query string
+      let qs = `order=booking_date.desc,booking_time.desc&offset=${offset}&limit=${pageSize}`;
+      if (dateFrom) qs += `&booking_date=gte.${dateFrom}`;
+      if (dateTo) qs += `&booking_date=lte.${dateTo}`;
+      if (status && status !== 'all') qs += `&status=eq.${status}`;
+      if (technician && technician !== 'all') qs += `&technician_label=eq.${encodeURIComponent(technician)}`;
+      if (search) qs += `&or=(customer_name.ilike.%25${encodeURIComponent(search)}%25,customer_phone.ilike.%25${encodeURIComponent(search)}%25)`;
+
+      const r = await fetch(`${SB_URL}/rest/v1/bookings?${qs}`, {
+        headers: {
+          apikey: ANON_KEY,
+          Authorization: `Bearer ${SERVICE_ROLE_KEY}`,
+          'Content-Type': 'application/json',
+          Prefer: 'count=exact',
+        },
+      });
+
+      if (!r.ok) {
+        const text = await r.text();
+        throw new Error(`${r.status}: ${text}`);
+      }
+
+      const data = await r.json();
+      // Supabase 喺 content-range header 返回 total count
+      const contentRange = r.headers.get('content-range');
+      let total = data.length;
+      if (contentRange) {
+        const match = contentRange.match(/\/(\d+)/);
+        if (match) total = parseInt(match[1], 10);
+      }
+
+      return res.json({
+        bookings: data,
+        total,
+        page,
+        pageSize,
+        totalPages: Math.ceil(total / pageSize),
+      });
+    }
+
+    // ══════════════════════════════════════
+    // 8) db — 所有資料庫操作
+    // ══════════════════════════════════════
     if (action === 'db') {
       const { path, method = 'GET', body } = payload;
 
-      // ★ 重複預約防護（server 端）
+      // ★ 重複預約防護（server 端 fallback）
       if (path === 'bookings' && method === 'POST' && body) {
         const bookings = Array.isArray(body) ? body : [body];
         for (const booking of bookings) {
@@ -147,14 +268,13 @@ export default async function handler(req, res) {
             const newStart = timeToMins(booking.booking_time);
             const newEnd = newStart + duration;
 
-            // 查同一日同一技師嘅預約
             const checkUrl = `${SB_URL}/rest/v1/bookings?booking_date=eq.${booking.booking_date}&technician_label=eq.${encodeURIComponent(booking.technician_label)}&status=neq.cancelled&select=booking_time,duration_minutes`;
             const checkR = await fetch(checkUrl, {
               headers: { apikey: ANON_KEY, Authorization: `Bearer ${SERVICE_ROLE_KEY}` },
             });
             const existing = await checkR.json();
 
-            const hasOverlap = (existing || []).some(b => {
+            const hasOverlap = (existing || []).some((b) => {
               const bStart = timeToMins(b.booking_time);
               const bEnd = bStart + (b.duration_minutes || 60);
               return newStart < bEnd && newEnd > bStart;
