@@ -1,6 +1,9 @@
 const SB_URL = 'https://vqyfbwnkdpncwvdonbcz.supabase.co';
 const ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZxeWZid25rZHBuY3d2ZG9uYmN6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY2MDk1MTksImV4cCI6MjA5MjE4NTUxOX0.hMHq_HcpnjiF-4zwSznyMpMx5Ooao5hDhaMi4aXME3M';
 
+// ✅ 貼你喺 Supabase Dashboard 複製嘅 service_role key 喺度
+const SERVICE_ROLE_KEY = '貼你嘅_SERVICE_ROLE_KEY_喺呢度';
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -37,7 +40,6 @@ export default async function handler(req, res) {
       const { email, redirectUrl } = payload;
       if (!email) throw new Error('請輸入 Email');
 
-      // redirect_to 作為 query parameter 傳送
       let url = `${SB_URL}/auth/v1/recover`;
       if (redirectUrl) {
         url += `?redirect_to=${encodeURIComponent(redirectUrl)}`;
@@ -98,7 +100,6 @@ export default async function handler(req, res) {
         throw new Error('新密碼至少要 6 個字元');
       }
 
-      // 先用舊密碼登入驗證
       const loginR = await fetch(`${SB_URL}/auth/v1/token?grant_type=password`, {
         method: 'POST',
         headers: {
@@ -112,7 +113,6 @@ export default async function handler(req, res) {
         throw new Error('舊密碼錯誤');
       }
 
-      // 用 session token 更新密碼
       const updateR = await fetch(`${SB_URL}/auth/v1/user`, {
         method: 'PUT',
         headers: {
@@ -134,14 +134,17 @@ export default async function handler(req, res) {
     // 🗄️ DB PROXY（資料庫操作）
     // ═══════════════════════════════════════
     if (action === 'db') {
-      if (secret !== 'jlab1014') {
+      // ✅ Bug 1 修正：對齊前端嘅 '$jlab1014'
+      if (secret !== '$jlab1014') {
         return res.status(401).json({ error: 'Unauthorized' });
       }
 
       const { path, method = 'GET', body } = payload;
+
+      // ✅ Bug 2 修正：用 SERVICE_ROLE_KEY bypass RLS
       const headers = {
         apikey: ANON_KEY,
-        Authorization: `Bearer ${ANON_KEY}`,
+        Authorization: `Bearer ${SERVICE_ROLE_KEY}`,
         'Content-Type': 'application/json',
       };
 
