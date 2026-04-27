@@ -1,317 +1,310 @@
 // pages/api/admin.js
+import { createClient } from '@supabase/supabase-js';
 
-const SB_URL = process.env.SUPABASE_URL || 'https://vqyfbwnkdpncwvdonbcz.supabase.co';
-const ANON_KEY = process.env.SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZxeWZid25rZHBuY3d2ZG9uYmN6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY2MDk1MTksImV4cCI6MjA5MjE4NTUxOX0.hMHq_HcpnjiF-4zwSznyMpMx5Ooao5hDhaMi4aXME3M';
-const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZxeWZid25rZHBuY3d2ZG9uYmN6Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NjYwOTUxOSwiZXhwIjoyMDkyMTg1NTE5fQ.Hnjtc-LY653Ftpp9JvIaEJzFg7xwgoJLFIs5ezRwlN0';
+/* ═══ Supabase service-role client ═══ */
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
+);
 
-function timeToMins(t) {
-  if (!t) return 0;
-  const [h, m] = t.split(':').map(Number);
-  return h * 60 + m;
+const SB_URL = process.env.SUPABASE_URL;
+const SB_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+/* ═══ Rate Limiting（防暴力破解）═══ */
+const loginAttempts = new Map();
+
+function checkRateLimit(ip) {
+  const now = Date.now();
+  const rec = loginAttempts.get(ip) || { count: 0, first: now };
+  if (now - rec.first > 15 * 60 * 1000) {
+    loginAttempts.set(ip, { count: 1, first: now });
+    return true;
+  }
+  if (rec.count >= 10) return false;
+  rec.count++;
+  loginAttempts.set(ip, rec);
+  return true;
 }
 
+/* ═══ Token 驗證 ═══ */
 async function verifyToken(req) {
-  const authHeader = req.headers['authorization'];
-  if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
-  const token = authHeader.replace('Bearer ', '');
+  const h = req.headers.authorization || req.headers.Authorization || '';
+  if (!h.startsWith('Bearer ')) return null;
+  const token = h.slice(7);
+  if (!token) return null;
   try {
-    const r = await fetch(`${SB_URL}/auth/v1/user`, {
-      headers: { apikey: ANON_KEY, Authorization: `Bearer ${token}` },
-    });
-    if (!r.ok) return null;
-    return await r.json();
-  } catch (_) {
+    const { data: { user }, error } = await supabase.auth.getUser(token);
+    if (error || !user) return null;
+    return user;
+  } catch {
     return null;
   }
 }
 
-/* ═══ 用 service_role 去 call Supabase RPC ═══ */
-async function callRPC(fnName, params) {
-  const r = await fetch(`${SB_URL}/rest/v1/rpc/${fnName}`, {
-    method: 'POST',
-    headers: {
-      apikey: ANON_KEY,
-      Authorization: `Bearer ${SERVICE_ROLE_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(params),
-  });
-  const data = await r.json();
-  if (!r.ok) throw new Error(data.message || data.error || JSON.stringify(data));
-  return data;
-}
+/* ═══ Supabase REST Proxy 白名單 ═══ */
+const ALLOWED_TABLES = [
+  'bookings', 'services', 'service_addons', 'staff',
+  'timeslot_config', 'notification_templates', 'frontend_settings',
+  'customers', 'admin_logs', 'admin_users', 'reminder_logs',
+];
 
+/* ═══ Main Handler ═══ */
 export default async function handler(req, res) {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
-  }
+  /* CORS */
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  if (req.method === 'OPTIONS') return res.status(200).end();
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  const { action, payload } = req.body;
+  const { action, payload = {} } = req.body || {};
+  if (!action) return res.status(400).json({ error: 'Missing action' });
 
   try {
-    // ══════════════════════════════════════
-    // 1) login — 唔需要 token
-    // ══════════════════════════════════════
+    /* ────────────────────────────────────────────────────────────
+       LOGIN（唔需要 token）
+    ──────────────────────────────────────────────────────────── */
     if (action === 'login') {
+      const ip = (req.headers['x-forwarded-for'] || req.socket?.remoteAddress || 'unknown').split(',')[0].trim();
+      if (!checkRateLimit(ip)) {
+        return res.status(429).json({ error: '嘗試次數過多，請15分鐘後再試' });
+      }
+
       const { email, password } = payload;
-      const r = await fetch(`${SB_URL}/auth/v1/token?grant_type=password`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', apikey: ANON_KEY },
-        body: JSON.stringify({ email, password }),
-      });
-      const data = await r.json();
-      if (!r.ok) throw new Error(data.error_description || data.msg || '帳號或密碼錯誤');
-      return res.json({
-        success: true,
-        access_token: data.access_token,
-        user: data.user,
-        session: data,
+      if (!email || !password) return res.status(400).json({ error: '請輸入 email 同密碼' });
+
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) return res.status(401).json({ error: error.message });
+
+      // 查角色
+      const { data: adminUser } = await supabase
+        .from('admin_users')
+        .select('*')
+        .eq('email', email)
+        .single();
+
+      return res.status(200).json({
+        token: data.session.access_token,
+        email: data.user.email,
+        role: adminUser?.role || 'staff',
+        staffId: adminUser?.staff_id || null,
       });
     }
 
-    // ══════════════════════════════════════
-    // 2) recover — 唔需要 token
-    // ══════════════════════════════════════
-    if (action === 'recover') {
-      const { email, redirectUrl } = payload;
-      if (!email) throw new Error('請輸入 Email');
-      let url = `${SB_URL}/auth/v1/recover`;
-      if (redirectUrl) url += `?redirect_to=${encodeURIComponent(redirectUrl)}`;
-      const r = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', apikey: ANON_KEY },
-        body: JSON.stringify({ email }),
-      });
-      if (!r.ok) {
-        const data = await r.json();
-        throw new Error(data.error_description || data.msg || '發送失敗');
-      }
-      return res.json({ success: true });
-    }
-
-    // ══════════════════════════════════════
-    // 3) reset-via-token — 用 recovery token
-    // ══════════════════════════════════════
-    if (action === 'reset-via-token') {
-      const { token, newPassword } = payload;
-      if (!token) throw new Error('無效的重設連結');
-      if (!newPassword || newPassword.length < 6) throw new Error('密碼至少要 6 個字元');
-      const r = await fetch(`${SB_URL}/auth/v1/user`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', apikey: ANON_KEY, Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ password: newPassword }),
-      });
-      if (!r.ok) {
-        const data = await r.json();
-        throw new Error(data.error_description || data.msg || '重設密碼失敗，連結可能已過期');
-      }
-      return res.json({ success: true });
-    }
-
-    // ══════════════════════════════════════
-    // 4) 以下所有操作需要驗證 token
-    // ══════════════════════════════════════
+    /* ────────────────────────────────────────────────────────────
+       以下所有 action 都需要有效 token
+    ──────────────────────────────────────────────────────────── */
     const user = await verifyToken(req);
-    if (!user) {
-      return res.status(401).json({ error: 'Token 無效或已過期' });
-    }
+    if (!user) return res.status(401).json({ error: '認證已過期，請重新登入' });
 
-    // ═══ verify ═══
-    if (action === 'verify') {
-      return res.json({ success: true, user: user.email });
-    }
-
-    // ═══ change-password ═══
+    /* ── 改密碼 ── */
     if (action === 'change-password') {
-      const { oldPassword, newPassword } = payload;
-      const email = user.email;
-      if (!oldPassword || !newPassword) throw new Error('請填寫所有欄位');
-      if (newPassword.length < 6) throw new Error('新密碼至少要 6 個字元');
-
-      const loginR = await fetch(`${SB_URL}/auth/v1/token?grant_type=password`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', apikey: ANON_KEY },
-        body: JSON.stringify({ email, password: oldPassword }),
-      });
-      if (!loginR.ok) throw new Error('舊密碼錯誤');
-      const loginData = await loginR.json();
-
-      const updateR = await fetch(`${SB_URL}/auth/v1/user`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', apikey: ANON_KEY, Authorization: `Bearer ${loginData.access_token}` },
-        body: JSON.stringify({ password: newPassword }),
-      });
-      if (!updateR.ok) {
-        const data = await updateR.json();
-        throw new Error(data.error_description || data.msg || '更新密碼失敗');
+      const { newPassword } = payload;
+      if (!newPassword || newPassword.length < 6) {
+        return res.status(400).json({ error: '密碼最少 6 位' });
       }
-      return res.json({ success: true });
+      const { error } = await supabase.auth.admin.updateUserById(user.id, {
+        password: newPassword,
+      });
+      if (error) return res.status(500).json({ error: error.message });
+      return res.status(200).json({ success: true });
     }
 
-    // ══════════════════════════════════════
-    // 5) check-conflict — 衝突檢測（用 DB function）
-    // ══════════════════════════════════════
+    /* ── 衝突檢測 ── */
     if (action === 'check-conflict') {
       const { date, time, duration, technician, excludeId } = payload;
-      if (!date || !time || !technician) {
-        return res.status(400).json({ error: '缺少必要參數' });
-      }
-      const result = await callRPC('check_booking_conflict', {
+      const { data, error } = await supabase.rpc('check_booking_conflict', {
         p_date: date,
         p_start_time: time,
         p_duration: duration || 60,
         p_technician: technician,
         p_exclude_id: excludeId || null,
+        p_buffer: payload.buffer || 15,
       });
-      return res.json({ hasConflict: result });
+      if (error) return res.status(500).json({ error: error.message });
+      return res.status(200).json({ hasConflict: data });
     }
 
-    // ══════════════════════════════════════
-    // 6) create-booking-safe — 防撞單建立預約
-    // ══════════════════════════════════════
+    /* ── 安全建立預約 ── */
     if (action === 'create-booking-safe') {
-      const {
-        date, time, duration, technician,
-        customerName, customerPhone, serviceName,
-        variantLabel, addonNames, totalPrice, notes, staffId,
-      } = payload;
-      if (!date || !time || !technician || !customerName) {
-        return res.status(400).json({ error: '缺少必要參數' });
-      }
-      const result = await callRPC('create_booking_safe', {
-        p_date: date,
-        p_time: time,
-        p_duration: duration || 60,
-        p_technician: technician,
-        p_customer_name: customerName,
-        p_customer_phone: customerPhone || '',
-        p_service_name: serviceName || '',
-        p_variant_label: variantLabel || null,
-        p_addon_names: addonNames || [],
-        p_total_price: totalPrice || 0,
-        p_notes: notes || '',
-        p_staff_id: staffId || null,
+      const { data, error } = await supabase.rpc('create_booking_safe', {
+        p_date: payload.date,
+        p_time: payload.time,
+        p_duration: payload.duration || 60,
+        p_technician: payload.technician,
+        p_customer_name: payload.customerName,
+        p_customer_phone: payload.customerPhone,
+        p_service_name: payload.serviceName,
+        p_variant_label: payload.variantLabel || null,
+        p_addon_names: payload.addonNames || [],
+        p_total_price: payload.totalPrice || 0,
+        p_notes: payload.notes || '',
+        p_staff_id: payload.staffId || null,
       });
-      if (result && result.success === false) {
-        return res.status(409).json({ error: result.error || '此時段已被預約' });
-      }
-      return res.json(result);
+      if (error) return res.status(500).json({ error: error.message });
+      if (!data.success) return res.status(409).json({ error: data.error });
+      return res.status(200).json(data);
     }
 
-    // ══════════════════════════════════════
-    // 7) bookings-paginated — 分頁載入預約
-    // ══════════════════════════════════════
+    /* ── 分頁查詢預約 ── */
     if (action === 'bookings-paginated') {
-      const {
-        page = 1,
-        pageSize = 50,
-        dateFrom,
-        dateTo,
-        status,
-        technician,
-        search,
-      } = payload;
+      const page = payload.page || 1;
+      const pageSize = Math.min(payload.pageSize || 50, 200);
       const offset = (page - 1) * pageSize;
 
-      // 構建 query string
-      let qs = `order=booking_date.desc,booking_time.desc&offset=${offset}&limit=${pageSize}`;
-      if (dateFrom) qs += `&booking_date=gte.${dateFrom}`;
-      if (dateTo) qs += `&booking_date=lte.${dateTo}`;
-      if (status && status !== 'all') qs += `&status=eq.${status}`;
-      if (technician && technician !== 'all') qs += `&technician_label=eq.${encodeURIComponent(technician)}`;
-      if (search) qs += `&or=(customer_name.ilike.%25${encodeURIComponent(search)}%25,customer_phone.ilike.%25${encodeURIComponent(search)}%25)`;
+      let query = supabase
+        .from('bookings')
+        .select('*', { count: 'exact' })
+        .order('booking_date', { ascending: false })
+        .order('booking_time', { ascending: false })
+        .range(offset, offset + pageSize - 1);
 
-      const r = await fetch(`${SB_URL}/rest/v1/bookings?${qs}`, {
-        headers: {
-          apikey: ANON_KEY,
-          Authorization: `Bearer ${SERVICE_ROLE_KEY}`,
-          'Content-Type': 'application/json',
-          Prefer: 'count=exact',
-        },
-      });
-
-      if (!r.ok) {
-        const text = await r.text();
-        throw new Error(`${r.status}: ${text}`);
+      if (payload.dateFrom) query = query.gte('booking_date', payload.dateFrom);
+      if (payload.dateTo) query = query.lte('booking_date', payload.dateTo);
+      if (payload.status) query = query.eq('status', payload.status);
+      if (payload.technician) query = query.eq('technician_label', payload.technician);
+      if (payload.search) {
+        query = query.or(
+          `customer_name.ilike.%${payload.search}%,customer_phone.ilike.%${payload.search}%`
+        );
       }
 
-      const data = await r.json();
-      // Supabase 喺 content-range header 返回 total count
-      const contentRange = r.headers.get('content-range');
-      let total = data.length;
-      if (contentRange) {
-        const match = contentRange.match(/\/(\d+)/);
-        if (match) total = parseInt(match[1], 10);
-      }
-
-      return res.json({
-        bookings: data,
-        total,
+      const { data, error, count } = await query;
+      if (error) return res.status(500).json({ error: error.message });
+      return res.status(200).json({
+        bookings: data || [],
+        total: count || 0,
         page,
         pageSize,
-        totalPages: Math.ceil(total / pageSize),
+        totalPages: Math.ceil((count || 0) / pageSize),
       });
     }
 
-    // ══════════════════════════════════════
-    // 8) db — 所有資料庫操作
-    // ══════════════════════════════════════
-    if (action === 'db') {
-      const { path, method = 'GET', body } = payload;
+    /* ── 操作日誌 ── */
+    if (action === 'log-action') {
+      await supabase.from('admin_logs').insert([{
+        action: payload.text,
+        details: payload.text,
+        admin_email: user.email,
+      }]);
+      return res.status(200).json({ success: true });
+    }
 
-      // ★ 重複預約防護（server 端 fallback）
-      if (path === 'bookings' && method === 'POST' && body) {
-        const bookings = Array.isArray(body) ? body : [body];
-        for (const booking of bookings) {
-          if (booking.booking_date && booking.booking_time && booking.technician_label) {
-            const duration = booking.duration_minutes || 60;
-            const newStart = timeToMins(booking.booking_time);
-            const newEnd = newStart + duration;
+    if (action === 'load-logs') {
+      const { data } = await supabase
+        .from('admin_logs')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(50);
+      return res.status(200).json(data || []);
+    }
 
-            const checkUrl = `${SB_URL}/rest/v1/bookings?booking_date=eq.${booking.booking_date}&technician_label=eq.${encodeURIComponent(booking.technician_label)}&status=neq.cancelled&select=booking_time,duration_minutes`;
-            const checkR = await fetch(checkUrl, {
-              headers: { apikey: ANON_KEY, Authorization: `Bearer ${SERVICE_ROLE_KEY}` },
-            });
-            const existing = await checkR.json();
+    /* ── 客戶 ── */
+    if (action === 'load-customers') {
+      const { data } = await supabase
+        .from('customers')
+        .select('*')
+        .order('last_visit_date', { ascending: false, nullsFirst: false })
+        .limit(payload.limit || 200);
+      return res.status(200).json(data || []);
+    }
 
-            const hasOverlap = (existing || []).some((b) => {
-              const bStart = timeToMins(b.booking_time);
-              const bEnd = bStart + (b.duration_minutes || 60);
-              return newStart < bEnd && newEnd > bStart;
-            });
+    if (action === 'update-customer') {
+      const { id, updates } = payload;
+      const { data, error } = await supabase
+        .from('customers')
+        .update(updates)
+        .eq('id', id)
+        .select()
+        .single();
+      if (error) return res.status(500).json({ error: error.message });
+      return res.status(200).json(data);
+    }
 
-            if (hasOverlap) {
-              return res.status(409).json({ error: '呢個時段同其他預約重疊，請揀其他時間' });
-            }
-          }
-        }
+    if (action === 'customer-bookings') {
+      const { phone } = payload;
+      const { data } = await supabase
+        .from('bookings')
+        .select('*')
+        .eq('customer_phone', phone)
+        .order('booking_date', { ascending: false })
+        .limit(50);
+      return res.status(200).json(data || []);
+    }
+
+    /* ── 提醒（生成 WhatsApp 連結）── */
+    if (action === 'generate-reminders') {
+      const targetDate = payload.date; // YYYY-MM-DD
+      if (!targetDate) return res.status(400).json({ error: 'Missing date' });
+
+      const { data: bookings } = await supabase
+        .from('bookings')
+        .select('*')
+        .eq('booking_date', targetDate)
+        .in('status', ['confirmed', 'pending']);
+
+      const reminders = (bookings || [])
+        .filter(b => b.customer_phone)
+        .map(b => {
+          const phone = b.customer_phone.replace(/[^0-9]/g, '');
+          const fullPhone = phone.length <= 8 ? '852' + phone : phone;
+          const msg = `${b.customer_name} 你好！提醒你 ${b.booking_date} ${b.booking_time} 有預約（${b.service_name || ''}）。如需更改請提前聯絡我哋 🙏`;
+          return {
+            bookingId: b.id,
+            name: b.customer_name,
+            phone: fullPhone,
+            message: msg,
+            waLink: `https://wa.me/${fullPhone}?text=${encodeURIComponent(msg)}`,
+          };
+        });
+
+      return res.status(200).json({ reminders, count: reminders.length });
+    }
+
+    /* ────────────────────────────────────────────────────────────
+       Supabase REST Proxy（取代前端直接用 service key）
+    ──────────────────────────────────────────────────────────── */
+    if (action === 'sb-proxy') {
+      const { method = 'GET', path, body } = payload;
+      if (!path) return res.status(400).json({ error: 'Missing path' });
+
+      const table = path.split('?')[0].split('/')[0];
+      if (!ALLOWED_TABLES.includes(table)) {
+        return res.status(403).json({ error: `Table "${table}" not allowed` });
       }
 
+      const url = `${SB_URL}/rest/v1/${path}`;
       const headers = {
-        apikey: ANON_KEY,
-        Authorization: `Bearer ${SERVICE_ROLE_KEY}`,
+        apikey: SB_KEY,
+        Authorization: `Bearer ${SB_KEY}`,
         'Content-Type': 'application/json',
       };
       if (method === 'POST') headers['Prefer'] = 'return=representation';
       if (method === 'PATCH') headers['Prefer'] = 'return=representation';
 
-      const opts = { method, headers };
-      if (body && (method === 'POST' || method === 'PATCH')) {
-        opts.body = JSON.stringify(body);
+      const fetchOpts = { method, headers };
+      if (body && (method === 'POST' || method === 'PATCH' || method === 'PUT')) {
+        fetchOpts.body = JSON.stringify(body);
       }
 
-      const r = await fetch(`${SB_URL}/rest/v1/${path}`, opts);
-      if (!r.ok) {
-        const text = await r.text();
-        throw new Error(`${r.status}: ${text}`);
+      const response = await fetch(url, fetchOpts);
+
+      if (response.status === 204) {
+        return res.status(200).json({ success: true });
       }
-      if (method === 'DELETE') return res.json({ success: true });
-      const data = await r.json();
-      return res.json(data);
+
+      const responseData = await response.json().catch(() => null);
+      if (!response.ok) {
+        return res.status(response.status).json(responseData || { error: 'Supabase error' });
+      }
+      return res.status(200).json(responseData);
     }
 
+    /* ── 未知 action ── */
     return res.status(400).json({ error: `Unknown action: ${action}` });
+
   } catch (err) {
-    return res.status(400).json({ error: err.message });
+    console.error('API error:', err);
+    return res.status(500).json({ error: err.message || 'Internal server error' });
   }
 }
