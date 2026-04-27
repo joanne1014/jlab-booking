@@ -1,16 +1,45 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 
+let authToken = null; // 登入成功後儲存
+
 const apiCall = async (action, payload = {}) => {
+  const headers = { 'Content-Type': 'application/json' };
+
+  // login 同 recover-password 唔需要 token
+  // 其他所有操作都要帶 token
+  if (authToken && action !== 'login' && action !== 'recover-password') {
+    headers['Authorization'] = `Bearer ${authToken}`;
+  }
+
   const res = await fetch('/api/admin', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-admin-secret': '$jlab1014' },
+    headers,
+    body: JSON.stringify({ action, payload })
+  });
+
+  // 如果 401 = token 過期，自動登出
+  if (res.status === 401 && action !== 'login' && action !== 'recover-password') {
+    authToken = null;
+    sessionStorage.removeItem('jlab_token');
+    setAuth(false);
+    showToast('⚠️ 登入已過期，請重新登入');
+    throw new Error('登入已過期');
+  }
+
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'API error');
+  return data;
+};
+  
+  const res = await fetch('/api/admin', {
+    method: 'POST',
+    headers,
     body: JSON.stringify({ action, payload })
   });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || 'API error');
   return data;
-};
-const sbGet = async (p) => apiCall('db', { path: p });
+};async (p) => apiCall('db', { path: p });
 const sbPost = async (t, d) => apiCall('db', { path: t, method: 'POST', body: d });
 const sbDel = async (p) => apiCall('db', { path: p, method: 'DELETE' });
 const sbPatch = async (p, d) => apiCall('db', { path: p, method: 'PATCH', body: d });
@@ -32,6 +61,8 @@ const sDesc = { fontSize: 13, color: '#999', marginBottom: 16 };
 const font = "'Noto Serif TC', serif";
 const toTimeStr = (mins) => `${String(Math.floor(mins/60)).padStart(2,'0')}:${String(mins%60).padStart(2,'0')}`;
 const toMins = (t) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
+
+let authToken = null;
 
 export default function Admin() {
   const [auth, setAuth] = useState(false);
@@ -162,6 +193,27 @@ export default function Admin() {
     } catch (err) { setResetPwError(err.message || '重設失敗'); }
     setResetPwLoading(false);
   };
+useEffect(() => {
+  const saved = sessionStorage.getItem('jlab_token');
+  if (saved) {
+    authToken = saved;
+    // 用一個簡單嘅 API call 驗證 token 係咪仲有效
+    apiCall('verify')
+      .then(() => {
+        setAuth(true);
+        fetchBookings();
+        fetchBlocked();
+        fetchStaff();
+        fetchServices();
+        fetchAddons();
+      })
+      .catch(() => {
+        // token 已過期，清除
+        authToken = null;
+        sessionStorage.removeItem('jlab_token');
+      });
+  }
+}, []);
 
   const logChange = (text) => {
     const id = Date.now();
@@ -519,19 +571,29 @@ export default function Admin() {
   const removeBlocked = async (id) => { try { await sbDel(`blocked_dates?id=eq.${id}`); setBlocked(prev => prev.filter(b => b.id !== id)); } catch (e) { console.error(e); } };
 
   const handleLogin = async (e) => {
-    e.preventDefault(); setLoginError(''); setLoginLoading(true);
-    try { await apiCall('login', { email: loginEmail, password: pw }); setAuth(true); fetchBookings(); fetchBlocked(); fetchStaff(); fetchServices(); fetchAddons(); } catch (err) { setLoginError(err.message || '帳號或密碼錯誤'); }
-    setLoginLoading(false);
-  };
-  const handleChangePw = async () => {
-    setCpError(''); setCpMsg('');
-    if (!cpOld || !cpNew || !cpConfirm) { setCpError('請填寫所有欄位'); return; }
-    if (cpNew.length < 6) { setCpError('新密碼至少要 6 個字元'); return; }
-    if (cpNew !== cpConfirm) { setCpError('兩次輸入嘅新密碼唔一樣'); return; }
-    setCpLoading(true);
-    try { await apiCall('change-password', { email: loginEmail, oldPassword: cpOld, newPassword: cpNew }); setCpMsg('✅ 密碼已更新！'); setCpOld(''); setCpNew(''); setCpConfirm(''); setTimeout(() => { setShowChangePw(false); setCpMsg(''); }, 2000); } catch (err) { setCpError(err.message || '更新失敗'); }
-    setCpLoading(false);
-  };
+  e.preventDefault();
+  setLoginError('');
+  setLoginLoading(true);
+  try {
+    const result = await apiCall('login', { email: loginEmail, password: pw });
+
+    // ═══ 重點：儲存 token ═══
+    if (result.access_token) {
+      authToken = result.access_token;
+      sessionStorage.setItem('jlab_token', authToken);
+    }
+
+    setAuth(true);
+    fetchBookings();
+    fetchBlocked();
+    fetchStaff();
+    fetchServices();
+    fetchAddons();
+  } catch (err) {
+    setLoginError(err.message || '帳號或密碼錯誤');
+  }
+  setLoginLoading(false);
+};
 
   /* ═══ RENDER ═══ */
 
@@ -718,7 +780,12 @@ export default function Admin() {
         <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
           <button onClick={() => setShowHistory(true)} style={headerBtn}>🔍 {!isMobile && '查看歷史紀錄'}</button>
           <button onClick={() => { setShowChangePw(true); setCpOld(''); setCpNew(''); setCpConfirm(''); setCpMsg(''); setCpError(''); }} style={headerBtn}>🔑{!isMobile && ' 密碼'}</button>
-          <button onClick={() => setAuth(false)} style={headerBtn}>登出</button>
+         <button onClick={() => {
+  setAuth(false);
+  authToken = null;
+  sessionStorage.removeItem('jlab_token');
+  showToast('已登出');
+}} style={headerBtn}>登出</button>
         </div>
       </div>
 
