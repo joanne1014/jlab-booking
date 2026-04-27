@@ -3,10 +3,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 const apiCall = async (action, payload = {}) => {
   const res = await fetch('/api/admin', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-admin-secret': '$jlab1014'
-    },
+    headers: { 'Content-Type': 'application/json', 'x-admin-secret': '$jlab1014' },
     body: JSON.stringify({ action, payload })
   });
   const data = await res.json();
@@ -50,8 +47,6 @@ export default function Admin() {
   const [cpMsg, setCpMsg] = useState('');
   const [cpError, setCpError] = useState('');
   const [cpLoading, setCpLoading] = useState(false);
-
-  /* ✅ 新增：Recovery token 相關 state */
   const [recoveryToken, setRecoveryToken] = useState('');
   const [showResetForm, setShowResetForm] = useState(false);
   const [resetNewPw, setResetNewPw] = useState('');
@@ -120,16 +115,28 @@ export default function Admin() {
   const [newBR, setNewBR] = useState('');
   const [showHistory, setShowHistory] = useState(false);
 
+  /* ═══ 前台管理 state ═══ */
+  const [svcList, setSvcList] = useState([]);
+  const [svcAddons, setSvcAddons] = useState([]);
+  const [svcLoading, setSvcLoading] = useState(false);
+  const [svcSubTab, setSvcSubTab] = useState('services');
+  const [editSvc, setEditSvc] = useState(null);
+  const [editSvcForm, setEditSvcForm] = useState({});
+  const [editSvcVariants, setEditSvcVariants] = useState([]);
+  const [editAddon, setEditAddon] = useState(null);
+  const [editAddonForm, setEditAddonForm] = useState({});
+
   const todayStr = new Date().toISOString().split('T')[0];
   const bookingCountRef = useRef(0);
   const showToast = (m) => { setToast(m); setTimeout(() => setToast(''), 3000); };
   const toDS = (y, m, d) => `${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
   const navBtn = { padding: '8px 16px', background: '#f5f0eb', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 16, color: '#5c4a3a', fontFamily: font };
   const smallBtn = (bg, co, bd) => ({ padding: '6px 14px', borderRadius: 6, border: bd ? `1px solid ${bd}` : 'none', background: bg, color: co, cursor: 'pointer', fontSize: 12, fontFamily: font });
+  /* ═══ 統一按鈕 style ═══ */
+  const headerBtn = { padding: '8px 16px', background: 'transparent', border: '1px solid #ccc', borderRadius: 6, cursor: 'pointer', color: '#666', fontFamily: font, fontSize: 13, height: 38, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', whiteSpace: 'nowrap' };
 
   useEffect(() => { const h = () => setIsMobile(window.innerWidth < 768); h(); window.addEventListener('resize', h); return () => window.removeEventListener('resize', h); }, []);
 
-  /* ✅ 新增：頁面載入時檢查 URL 有冇 recovery token */
   useEffect(() => {
     const hash = window.location.hash.substring(1);
     if (!hash) return;
@@ -139,13 +146,11 @@ export default function Admin() {
     if (accessToken && type === 'recovery') {
       setRecoveryToken(accessToken);
       setShowResetForm(true);
-      // 清除 URL 嘅 hash，唔好顯示 token
       window.history.replaceState(null, '', window.location.pathname + window.location.search);
     }
   }, []);
 
-  /* ✅ 新增：用 recovery token 設定新密碼 */
-    const handleResetNewPw = async () => {
+  const handleResetNewPw = async () => {
     setResetPwError('');
     if (!resetNewPw || resetNewPw.length < 6) { setResetPwError('新密碼至少要 6 個字元'); return; }
     if (resetNewPw !== resetConfirmPw) { setResetPwError('兩次密碼不一致'); return; }
@@ -153,13 +158,8 @@ export default function Admin() {
     try {
       await apiCall('reset-via-token', { token: recoveryToken, newPassword: resetNewPw });
       alert('✅ 密碼已重設，請重新登入');
-      setShowResetForm(false);
-      setRecoveryToken('');
-      setResetNewPw('');
-      setResetConfirmPw('');
-    } catch (err) {
-      setResetPwError(err.message || '重設失敗');
-    }
+      setShowResetForm(false); setRecoveryToken(''); setResetNewPw(''); setResetConfirmPw('');
+    } catch (err) { setResetPwError(err.message || '重設失敗'); }
     setResetPwLoading(false);
   };
 
@@ -188,7 +188,7 @@ export default function Admin() {
   }, [allBookings, filterDateFrom, filterDateTo, filterStatus, filterTech, searchTerm]);
 
   const nextMonthStr = useMemo(() => { const d = new Date(); d.setMonth(d.getMonth() + 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; }, []);
-  const nextMonthLabel = useMemo(() => { const d = new Date(); d.setMonth(d.getMonth() + 1); return `${d.getMonth() + 1}月預約`; }, []);
+  const nextMonthLabel = useMemo(() => { const d = new Date(); d.setMonth(d.getMonth() + 1); return `${d.getMonth() + 1}月`; }, []);
 
   const stats = useMemo(() => {
     const today = todayStr; const monthPre = new Date().toISOString().slice(0, 7);
@@ -295,185 +295,184 @@ export default function Admin() {
   const statusColor = (s) => s === 'confirmed' ? '#4CAF50' : s === 'cancelled' ? '#f44336' : s === 'completed' ? '#2196F3' : '#FF9800';
   const statusText = (s) => s === 'confirmed' ? '已確認' : s === 'cancelled' ? '已取消' : s === 'completed' ? '已完成' : '待確認';
   const waLink = (phone) => { if (!phone) return null; const c = phone.replace(/[^0-9]/g, ''); return `https://wa.me/${c.length <= 8 ? '852' + c : c}`; };
-// ═══ WhatsApp 通知模板 + 發送 ═══
-// ═══════════════════════════════════════════
-// WhatsApp 通知模板（從 DB 載入）
-// ═══════════════════════════════════════════
 
-const [msgTemplates, setMsgTemplates] = useState([]);
-const [showTemplateEditor, setShowTemplateEditor] = useState(false);
-
-// 載入模板
-useEffect(() => {
-  if (auth) {
-    sbGet('notification_templates?order=id')
-      .then(data => { if (data) setMsgTemplates(data); })
-      .catch(e => console.error('載入模板失敗', e));
-  }
-}, [auth]);
-
-// 將模板入面嘅 {variable} 替換成真實值
-const fillTemplate = (templateKey, booking, extras = {}) => {
-  const tpl = msgTemplates.find(t => t.key === templateKey);
-  if (!tpl) return '';
-  const vars = {
-    customer_name: booking.customer_name || '',
-    booking_date: booking.booking_date || '',
-    booking_time: booking.booking_time || '',
-    service_name: booking.service_name || '未指定',
-    technician_label: booking.technician_label || '待定',
-    total_price: booking.total_price || '—',
-    old_date: extras.oldDate || '',
-    old_time: extras.oldTime || '',
+  /* ═══ WhatsApp 通知模板 ═══ */
+  const [msgTemplates, setMsgTemplates] = useState([]);
+  useEffect(() => {
+    if (auth) { sbGet('notification_templates?order=id').then(data => { if (data) setMsgTemplates(data); }).catch(e => console.error('載入模板失敗', e)); }
+  }, [auth]);
+  const fillTemplate = (templateKey, booking, extras = {}) => {
+    const tpl = msgTemplates.find(t => t.key === templateKey);
+    if (!tpl) return '';
+    const vars = { customer_name: booking.customer_name || '', booking_date: booking.booking_date || '', booking_time: booking.booking_time || '', service_name: booking.service_name || '未指定', technician_label: booking.technician_label || '待定', total_price: booking.total_price || '—', old_date: extras.oldDate || '', old_time: extras.oldTime || '' };
+    return tpl.content.replace(/\{(\w+)\}/g, (_, key) => vars[key] ?? '');
   };
-  return tpl.content.replace(/\{(\w+)\}/g, (_, key) => vars[key] ?? '');
-};
-
-// 發送 WhatsApp
-const sendWhatsApp = (phone, message) => {
-  if (!phone) { showToast('⚠️ 呢個客人冇留電話號碼'); return; }
-  const cleaned = phone.replace(/[^0-9]/g, '');
-  const num = cleaned.length <= 8 ? '852' + cleaned : cleaned;
-  window.open(`https://wa.me/${num}?text=${encodeURIComponent(message)}`, '_blank');
-};
-
-// 儲存模板到 DB
-const saveTemplate = async (id, newContent) => {
-  try {
-    await sbPatch(`notification_templates?id=eq.${id}`, {
-      content: newContent,
-      updated_at: new Date().toISOString()
-    });
-    setMsgTemplates(prev => prev.map(t => t.id === id ? { ...t, content: newContent } : t));
-    showToast('✅ 模板已儲存');
-  } catch (e) {
-    showToast('❌ 儲存失敗');
-  }
-};
-  const startResched = () => {
-    if (!selectedBooking) return;
-    setReschedMode(true);
-    setReschedDate(selectedBooking.booking_date);
-    setReschedTime(selectedBooking.booking_time?.slice(0, 5) || '');
-    setReschedTech(selectedBooking.technician_label || '');
-    loadReschedSlots(selectedBooking.booking_date);
+  const sendWhatsApp = (phone, message) => {
+    if (!phone) { showToast('⚠️ 呢個客人冇留電話號碼'); return; }
+    const cleaned = phone.replace(/[^0-9]/g, '');
+    const num = cleaned.length <= 8 ? '852' + cleaned : cleaned;
+    window.open(`https://wa.me/${num}?text=${encodeURIComponent(message)}`, '_blank');
   };
-  const loadReschedSlots = async (date) => {
+  const saveTemplate = async (id, newContent) => {
+    try { await sbPatch(`notification_templates?id=eq.${id}`, { content: newContent, updated_at: new Date().toISOString() }); setMsgTemplates(prev => prev.map(t => t.id === id ? { ...t, content: newContent } : t)); showToast('✅ 模板已儲存'); } catch (e) { showToast('❌ 儲存失敗'); }
+  };
+
+  /* ═══ 前台管理 functions ═══ */
+  const fetchServices = async () => {
+    setSvcLoading(true);
+    try { const data = await sbGet('services?order=sort_order,created_at'); setSvcList(data || []); } catch (e) { console.error(e); }
+    setSvcLoading(false);
+  };
+  const fetchAddons = async () => {
+    try { const data = await sbGet('service_addons?order=sort_order,created_at'); setSvcAddons(data || []); } catch (e) { console.error(e); }
+  };
+  const openEditSvc = async (svc) => {
+    const form = svc ? { ...svc } : { name: '', description: '', base_price: 0, duration_minutes: 60, image_url: '', category: '', is_active: true, sort_order: svcList.length };
+    setEditSvcForm(form);
+    if (svc?.id) {
+      try { const v = await sbGet(`service_variants?service_id=eq.${svc.id}&order=sort_order`); setEditSvcVariants(v || []); } catch (_) { setEditSvcVariants([]); }
+    } else { setEditSvcVariants([]); }
+    setEditSvc(svc || 'new');
+  };
+  const saveSvc = async () => {
+    const f = editSvcForm;
+    if (!f.name?.trim()) return showToast('❌ 請輸入服務名稱');
     try {
-      const data = await sbGet(`enabled_timeslots?slot_date=eq.${date}&order=slot_time`);
-      const map = {};
-      (data || []).forEach(s => { const sid = s.staff_id; if (!map[sid]) map[sid] = new Set(); map[sid].add(s.slot_time?.slice(0, 5)); });
-      setReschedSlots(map);
-    } catch (e) { setReschedSlots({}); }
+      if (f.id) {
+        const { id, created_at, ...rest } = f;
+        await sbPatch(`services?id=eq.${id}`, rest);
+        setSvcList(prev => prev.map(s => s.id === id ? { ...s, ...rest } : s));
+      } else {
+        const data = await sbPost('services', [f]);
+        if (data?.length) setSvcList(prev => [...prev, ...data]);
+      }
+      // save variants
+      if (f.id) {
+        const existIds = editSvcVariants.filter(v => v.id).map(v => v.id);
+        // delete removed
+        const origIds = (await sbGet(`service_variants?service_id=eq.${f.id}&select=id`) || []).map(v => v.id);
+        const toDelete = origIds.filter(id => !existIds.includes(id));
+        for (const did of toDelete) await sbDel(`service_variants?id=eq.${did}`);
+        // upsert variants
+        for (const v of editSvcVariants) {
+          if (v.id) { const { id, created_at, ...rest } = v; await sbPatch(`service_variants?id=eq.${id}`, rest); }
+          else { await sbPost('service_variants', [{ ...v, service_id: f.id }]); }
+        }
+      }
+      setEditSvc(null);
+      showToast('✅ 已儲存服務');
+      fetchServices();
+    } catch (e) { showToast('❌ 儲存失敗：' + e.message); }
   };
+  const deleteSvc = async (id) => {
+    if (!window.confirm('確定刪除此服務？相關嘅選項變體都會一併刪除。')) return;
+    try {
+      await sbDel(`service_variants?service_id=eq.${id}`);
+      await sbDel(`services?id=eq.${id}`);
+      setSvcList(prev => prev.filter(s => s.id !== id));
+      showToast('✅ 已刪除');
+    } catch (e) { showToast('❌ 刪除失敗'); }
+  };
+  const toggleSvcActive = async (svc) => {
+    try {
+      await sbPatch(`services?id=eq.${svc.id}`, { is_active: !svc.is_active });
+      setSvcList(prev => prev.map(s => s.id === svc.id ? { ...s, is_active: !svc.is_active } : s));
+      showToast(svc.is_active ? '已下架' : '已上架');
+    } catch (e) { showToast('❌ 更新失敗'); }
+  };
+  const openEditAddon = (addon) => {
+    setEditAddonForm(addon ? { ...addon } : { name: '', price: 0, description: '', is_active: true, sort_order: svcAddons.length });
+    setEditAddon(addon || 'new');
+  };
+  const saveAddon = async () => {
+    const f = editAddonForm;
+    if (!f.name?.trim()) return showToast('❌ 請輸入附加項目名稱');
+    try {
+      if (f.id) { const { id, created_at, ...rest } = f; await sbPatch(`service_addons?id=eq.${id}`, rest); setSvcAddons(prev => prev.map(a => a.id === id ? { ...a, ...rest } : a)); }
+      else { const data = await sbPost('service_addons', [f]); if (data?.length) setSvcAddons(prev => [...prev, ...data]); }
+      setEditAddon(null); showToast('✅ 已儲存');
+    } catch (e) { showToast('❌ 儲存失敗'); }
+  };
+  const deleteAddon = async (id) => {
+    if (!window.confirm('確定刪除此附加項目？')) return;
+    try { await sbDel(`service_addons?id=eq.${id}`); setSvcAddons(prev => prev.filter(a => a.id !== id)); showToast('✅ 已刪除'); } catch (e) { showToast('❌ 刪除失敗'); }
+  };
+  const toggleAddonActive = async (addon) => {
+    try { await sbPatch(`service_addons?id=eq.${addon.id}`, { is_active: !addon.is_active }); setSvcAddons(prev => prev.map(a => a.id === addon.id ? { ...a, is_active: !addon.is_active } : a)); } catch (e) { showToast('❌ 更新失敗'); }
+  };
+  const moveSvc = async (idx, dir) => {
+    const arr = [...svcList];
+    const ni = idx + dir;
+    if (ni < 0 || ni >= arr.length) return;
+    [arr[idx], arr[ni]] = [arr[ni], arr[idx]];
+    arr.forEach((s, i) => s.sort_order = i);
+    setSvcList(arr);
+    try { for (const s of arr) await sbPatch(`services?id=eq.${s.id}`, { sort_order: s.sort_order }); } catch (_) {}
+  };
+
+  /* ═══ Booking actions ═══ */
+  const startResched = () => { if (!selectedBooking) return; setReschedMode(true); setReschedDate(selectedBooking.booking_date); setReschedTime(selectedBooking.booking_time?.slice(0, 5) || ''); setReschedTech(selectedBooking.technician_label || ''); loadReschedSlots(selectedBooking.booking_date); };
+  const loadReschedSlots = async (date) => { try { const data = await sbGet(`enabled_timeslots?slot_date=eq.${date}&order=slot_time`); const map = {}; (data || []).forEach(s => { const sid = s.staff_id; if (!map[sid]) map[sid] = new Set(); map[sid].add(s.slot_time?.slice(0, 5)); }); setReschedSlots(map); } catch (e) { setReschedSlots({}); } };
   const handleReschedDateChange = (date) => { setReschedDate(date); setReschedTime(''); loadReschedSlots(date); };
-const saveResched = async () => {
-  if (!selectedBooking || !reschedDate || !reschedTime) return showToast('❌ 請選擇日期同時間');
-  if (isTimeConflict) return showToast('❌ 此時段已有其他預約，請選擇其他時間');
-  setReschedLoading(true);
-  try {
-    // 記住舊時間（通知用）
-    const oldDate = selectedBooking.booking_date;
-    const oldTime = selectedBooking.booking_time;
-
-    const updates = { booking_date: reschedDate, booking_time: reschedTime };
-    if (reschedTech) updates.technician_label = reschedTech;
-    await sbPatch(`bookings?id=eq.${selectedBooking.id}`, updates);
-
-    const oldInfo = `${oldDate} ${oldTime}`;
-    const updatedBooking = { ...selectedBooking, ...updates };
-
-    setAllBookings(prev => prev.map(b => b.id === selectedBooking.id ? updatedBooking : b));
-    setSelectedBooking(updatedBooking);
-    setReschedMode(false);
-    logChange(`✏️ 改期 ${selectedBooking.customer_name}：${oldInfo} → ${reschedDate} ${reschedTime}`);
-    showToast('✅ 已更改預約時間');
-
-    // ═══ 問要唔要 WhatsApp 通知客人 ═══
-    const ask = window.confirm('📲 要唔要 WhatsApp 通知客人改期？');
-    if (ask) {
-      const msg = fillTemplate('rescheduled', updatedBooking, { oldDate, oldTime });
-      sendWhatsApp(selectedBooking.customer_phone, msg);
-    }
-
-  } catch (e) { showToast('❌ 更改失敗'); }
-  setReschedLoading(false);
-};
+  const saveResched = async () => {
+    if (!selectedBooking || !reschedDate || !reschedTime) return showToast('❌ 請選擇日期同時間');
+    if (isTimeConflict) return showToast('❌ 此時段已有其他預約');
+    setReschedLoading(true);
+    try {
+      const oldDate = selectedBooking.booking_date; const oldTime = selectedBooking.booking_time;
+      const updates = { booking_date: reschedDate, booking_time: reschedTime };
+      if (reschedTech) updates.technician_label = reschedTech;
+      await sbPatch(`bookings?id=eq.${selectedBooking.id}`, updates);
+      const updatedBooking = { ...selectedBooking, ...updates };
+      setAllBookings(prev => prev.map(b => b.id === selectedBooking.id ? updatedBooking : b));
+      setSelectedBooking(updatedBooking); setReschedMode(false);
+      logChange(`✏️ 改期 ${selectedBooking.customer_name}：${oldDate} ${oldTime} → ${reschedDate} ${reschedTime}`);
+      showToast('✅ 已更改預約時間');
+      const ask = window.confirm('📲 要唔要 WhatsApp 通知客人改期？');
+      if (ask) { const msg = fillTemplate('rescheduled', updatedBooking, { oldDate, oldTime }); sendWhatsApp(selectedBooking.customer_phone, msg); }
+    } catch (e) { showToast('❌ 更改失敗'); }
+    setReschedLoading(false);
+  };
   const updateStatus = async (id, s) => {
     const b = allBookings.find(x => x.id === id);
-    try {
-      await sbPatch(`bookings?id=eq.${id}`, { status: s });
-      setAllBookings(prev => prev.map(x => x.id === id ? { ...x, status: s } : x));
-      logChange(`${statusText(s)} — ${b?.customer_name} ${b?.booking_date} ${b?.booking_time}`);
-      showToast(`✅ 狀態已更新為「${statusText(s)}」`);
-    } catch (e) { showToast('❌ 更新失敗'); }
+    try { await sbPatch(`bookings?id=eq.${id}`, { status: s }); setAllBookings(prev => prev.map(x => x.id === id ? { ...x, status: s } : x)); logChange(`${statusText(s)} — ${b?.customer_name} ${b?.booking_date} ${b?.booking_time}`); showToast(`✅ 狀態已更新為「${statusText(s)}」`); } catch (e) { showToast('❌ 更新失敗'); }
   };
   const deleteBooking = async (id) => {
     if (!window.confirm('確定要刪除？')) return;
     const b = allBookings.find(x => x.id === id);
-    try {
-      await sbDel(`bookings?id=eq.${id}`);
-      setAllBookings(prev => prev.filter(x => x.id !== id));
-      logChange(`🗑️ 已刪除 — ${b?.customer_name} ${b?.booking_date} ${b?.booking_time}`);
-      showToast('✅ 已刪除');
-    } catch (e) { console.error(e); }
+    try { await sbDel(`bookings?id=eq.${id}`); setAllBookings(prev => prev.filter(x => x.id !== id)); logChange(`🗑️ 已刪除 — ${b?.customer_name} ${b?.booking_date} ${b?.booking_time}`); showToast('✅ 已刪除'); } catch (e) { console.error(e); }
   };
- const modalUpdate = async (s) => {
+  const modalUpdate = async (s) => {
     if (!selectedBooking) return;
     try {
       await sbPatch(`bookings?id=eq.${selectedBooking.id}`, { status: s });
       const updated = { ...selectedBooking, status: s };
       setAllBookings(prev => prev.map(b => b.id === selectedBooking.id ? updated : b));
       setSelectedBooking(updated);
-     logChange(`${statusText(s)} — ${selectedBooking.customer_name} ${selectedBooking.booking_date} ${selectedBooking.booking_time}`);
+      logChange(`${statusText(s)} — ${selectedBooking.customer_name} ${selectedBooking.booking_date} ${selectedBooking.booking_time}`);
       showToast(`✅ 狀態已更新為「${statusText(s)}」`);
-
-      // ═══ WhatsApp 通知 ═══
       if (s === 'confirmed' || s === 'cancelled') {
         const ask = window.confirm(`📲 要唔要 WhatsApp 通知 ${selectedBooking.customer_name}？`);
-        if (ask) {
-          const msg = fillTemplate(s, updated);
-          sendWhatsApp(selectedBooking.customer_phone, msg);
-        }
+        if (ask) { const msg = fillTemplate(s, updated); sendWhatsApp(selectedBooking.customer_phone, msg); }
       }
     } catch (e) { showToast('❌ 更新失敗'); }
   };
   const modalDelete = async () => {
     if (!selectedBooking || !window.confirm('確定要刪除？')) return;
-    try {
-      logChange(`🗑️ 已刪除 — ${selectedBooking.customer_name} ${selectedBooking.booking_date} ${selectedBooking.booking_time}`);
-      await sbDel(`bookings?id=eq.${selectedBooking.id}`);
-      setAllBookings(prev => prev.filter(b => b.id !== selectedBooking.id));
-      closeBooking();
-      showToast('✅ 已刪除');
-    } catch (e) { console.error(e); }
+    try { logChange(`🗑️ 已刪除 — ${selectedBooking.customer_name} ${selectedBooking.booking_date} ${selectedBooking.booking_time}`); await sbDel(`bookings?id=eq.${selectedBooking.id}`); setAllBookings(prev => prev.filter(b => b.id !== selectedBooking.id)); closeBooking(); showToast('✅ 已刪除'); } catch (e) { console.error(e); }
   };
-
   const confirmAllPending = async () => {
     const pend = allBookings.filter(b => b.status === 'pending' && b.booking_date >= todayStr);
     if (!pend.length) return showToast('❌ 沒有待確認嘅預約');
     if (!window.confirm(`確定確認全部 ${pend.length} 個待確認預約？`)) return;
-    try {
-      const ids = pend.map(b => b.id);
-      await sbPatch(`bookings?id=in.(${ids.join(',')})`, { status: 'confirmed' });
-      setAllBookings(prev => prev.map(b => ids.includes(b.id) ? { ...b, status: 'confirmed' } : b));
-      logChange(`✅ 批量確認 ${pend.length} 個待確認預約`);
-      showToast(`✅ 已確認 ${pend.length} 個預約`);
-    } catch (e) { showToast('❌ 確認失敗'); }
+    try { const ids = pend.map(b => b.id); await sbPatch(`bookings?id=in.(${ids.join(',')})`, { status: 'confirmed' }); setAllBookings(prev => prev.map(b => ids.includes(b.id) ? { ...b, status: 'confirmed' } : b)); logChange(`✅ 批量確認 ${pend.length} 個預約`); showToast(`✅ 已確認 ${pend.length} 個預約`); } catch (e) { showToast('❌ 確認失敗'); }
   };
   const confirmDayPending = async () => {
     const pend = dayBks.filter(b => b.status === 'pending');
     if (!pend.length) return;
     if (!window.confirm(`確定確認 ${schedDate} 共 ${pend.length} 個待確認預約？`)) return;
-    try {
-      const ids = pend.map(b => b.id);
-      await sbPatch(`bookings?id=in.(${ids.join(',')})`, { status: 'confirmed' });
-      setAllBookings(prev => prev.map(b => ids.includes(b.id) ? { ...b, status: 'confirmed' } : b));
-      logChange(`✅ 批量確認 ${schedDate} 共 ${pend.length} 個預約`);
-      showToast(`✅ 已確認 ${pend.length} 個預約`);
-    } catch (e) { showToast('❌ 確認失敗'); }
+    try { const ids = pend.map(b => b.id); await sbPatch(`bookings?id=in.(${ids.join(',')})`, { status: 'confirmed' }); setAllBookings(prev => prev.map(b => ids.includes(b.id) ? { ...b, status: 'confirmed' } : b)); logChange(`✅ 批量確認 ${schedDate} 共 ${pend.length} 個預約`); showToast(`✅ 已確認 ${pend.length} 個預約`); } catch (e) { showToast('❌ 確認失敗'); }
   };
-
   const setQuickDate = (type) => {
     const today = todayStr;
     if (type === 'today') { setFilterDateFrom(today); setFilterDateTo(today); }
@@ -485,8 +484,8 @@ const saveResched = async () => {
   const clearFilters = () => { setSearchTerm(''); setFilterDateFrom(''); setFilterDateTo(''); setFilterStatus('all'); setFilterTech('all'); };
   const hasFilters = searchTerm || filterDateFrom || filterDateTo || filterStatus !== 'all' || filterTech !== 'all';
 
-const fetchStaff = async () => { try { const data = await sbGet('staff?order=sort_order,created_at'); setStaffList(data || []); if (data && data.length > 0) setActiveStaff(prev => { if (prev && data.find(s => s.id === prev.id)) return prev; return data[0]; }); } catch (e) { console.error(e); } };
-const addStaff = async () => { const name = newStaffName.trim(); if (!name) return; try { const data = await sbPost('staff', [{ name, sort_order: staffList.length, is_active: true }]); if (data && data.length > 0) { setStaffList(prev => [...prev, ...data]); if (!activeStaff) setActiveStaff(data[0]); } setNewStaffName(''); setShowAddStaff(false); showToast('✅ 已新增員工'); } catch (e) { showToast('❌ 新增失敗'); } };
+  const fetchStaff = async () => { try { const data = await sbGet('staff?order=sort_order,created_at'); setStaffList(data || []); if (data && data.length > 0) setActiveStaff(prev => { if (prev && data.find(s => s.id === prev.id)) return prev; return data[0]; }); } catch (e) { console.error(e); } };
+  const addStaff = async () => { const name = newStaffName.trim(); if (!name) return; try { const data = await sbPost('staff', [{ name, sort_order: staffList.length, is_active: true }]); if (data && data.length > 0) { setStaffList(prev => [...prev, ...data]); if (!activeStaff) setActiveStaff(data[0]); } setNewStaffName(''); setShowAddStaff(false); showToast('✅ 已新增員工'); } catch (e) { showToast('❌ 新增失敗'); } };
   const saveStaffName = async () => { if (!editStaffId || !editStaffName.trim()) return; try { await sbPatch(`staff?id=eq.${editStaffId}`, { name: editStaffName.trim() }); const n = editStaffName.trim(); setStaffList(prev => prev.map(s => s.id === editStaffId ? { ...s, name: n } : s)); if (activeStaff?.id === editStaffId) setActiveStaff(prev => ({ ...prev, name: n })); setEditStaffId(null); showToast('✅ 已更新名稱'); } catch (e) { showToast('❌ 更新失敗'); } };
   const removeStaff = async (id) => { if (staffList.length <= 1) return showToast('❌ 至少要保留一個員工'); const s = staffList.find(x => x.id === id); if (!window.confirm(`確定刪除「${s?.name}」？`)) return; try { await sbDel(`staff?id=eq.${id}`); const rest = staffList.filter(x => x.id !== id); setStaffList(rest); if (activeStaff?.id === id) { setActiveStaff(rest[0] || null); setPending({}); } showToast('✅ 已刪除員工'); } catch (e) { showToast('❌ 刪除失敗'); } };
   const switchStaff = (s) => { if (activeStaff?.id === s.id) return; if (pendingCount > 0 && !window.confirm(`你有 ${pendingCount} 個未同步嘅變更，切換會清除，繼續？`)) return; setPending({}); setActiveStaff(s); setSelDates(new Set()); };
@@ -519,53 +518,33 @@ const addStaff = async () => { const name = newStaffName.trim(); if (!name) retu
   const addBlocked = async () => { if (!newBD) return; try { const d = await sbPost('blocked_dates', { date: newBD, reason: newBR }); setBlocked(prev => [...prev, ...d].sort((a, b) => a.date.localeCompare(b.date))); setNewBD(''); setNewBR(''); } catch (e) { console.error(e); } };
   const removeBlocked = async (id) => { try { await sbDel(`blocked_dates?id=eq.${id}`); setBlocked(prev => prev.filter(b => b.id !== id)); } catch (e) { console.error(e); } };
 
-    const handleLogin = async (e) => {
-    e.preventDefault();
-    setLoginError('');
-    setLoginLoading(true);
-    try {
-      await apiCall('login', { email: loginEmail, password: pw });
-      setAuth(true);
-      fetchBookings();
-      fetchBlocked();
-      fetchStaff();
-    } catch (err) {
-      setLoginError(err.message || '帳號或密碼錯誤');
-    }
+  const handleLogin = async (e) => {
+    e.preventDefault(); setLoginError(''); setLoginLoading(true);
+    try { await apiCall('login', { email: loginEmail, password: pw }); setAuth(true); fetchBookings(); fetchBlocked(); fetchStaff(); fetchServices(); fetchAddons(); } catch (err) { setLoginError(err.message || '帳號或密碼錯誤'); }
     setLoginLoading(false);
   };
-
   const handleChangePw = async () => {
     setCpError(''); setCpMsg('');
     if (!cpOld || !cpNew || !cpConfirm) { setCpError('請填寫所有欄位'); return; }
     if (cpNew.length < 6) { setCpError('新密碼至少要 6 個字元'); return; }
     if (cpNew !== cpConfirm) { setCpError('兩次輸入嘅新密碼唔一樣'); return; }
     setCpLoading(true);
-    try {
-      await apiCall('change-password', { email: loginEmail, oldPassword: cpOld, newPassword: cpNew });
-      setCpMsg('✅ 密碼已更新！');
-      setCpOld(''); setCpNew(''); setCpConfirm('');
-      setTimeout(() => { setShowChangePw(false); setCpMsg(''); }, 2000);
-    } catch (err) {
-      setCpError(err.message || '更新失敗');
-    }
+    try { await apiCall('change-password', { email: loginEmail, oldPassword: cpOld, newPassword: cpNew }); setCpMsg('✅ 密碼已更新！'); setCpOld(''); setCpNew(''); setCpConfirm(''); setTimeout(() => { setShowChangePw(false); setCpMsg(''); }, 2000); } catch (err) { setCpError(err.message || '更新失敗'); }
     setCpLoading(false);
   };
 
-  /* ═══════ RENDER ═══════ */
+  /* ═══ RENDER ═══ */
 
-  /* ✅ 新增：Recovery 重設密碼表單 */
   if (!auth && showResetForm) return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(135deg,#f5f0eb,#e8e0d8)', fontFamily: font }}>
       <div style={{ background: '#fff', padding: '60px 40px', borderRadius: 16, boxShadow: '0 10px 40px rgba(0,0,0,0.1)', textAlign: 'center', maxWidth: 400, width: '90%' }}>
         <h1 style={{ fontSize: 24, color: '#5c4a3a', marginBottom: 8 }}>J.LAB</h1>
         <p style={{ color: '#FF9800', fontSize: 16, marginBottom: 30, fontWeight: 600 }}>🔑 重設密碼</p>
-        <p style={{ color: '#999', fontSize: 13, marginBottom: 24 }}>請輸入你嘅新密碼</p>
         {resetPwError && <div style={{ padding: '10px 16px', background: '#FFEBEE', color: '#c62828', borderRadius: 8, fontSize: 14, marginBottom: 16 }}>❌ {resetPwError}</div>}
         <input type="password" placeholder="新密碼（至少 6 個字元）" value={resetNewPw} onChange={e => { setResetNewPw(e.target.value); setResetPwError(''); }} style={{ width: '100%', padding: '14px 16px', border: '1px solid #ddd', borderRadius: 8, fontSize: 16, marginBottom: 12, boxSizing: 'border-box', textAlign: 'center' }} />
         <input type="password" placeholder="確認新密碼" value={resetConfirmPw} onChange={e => { setResetConfirmPw(e.target.value); setResetPwError(''); }} onKeyDown={e => e.key === 'Enter' && handleResetNewPw()} style={{ width: '100%', padding: '14px 16px', border: '1px solid #ddd', borderRadius: 8, fontSize: 16, marginBottom: 20, boxSizing: 'border-box', textAlign: 'center' }} />
         <button onClick={handleResetNewPw} disabled={resetPwLoading} style={{ width: '100%', padding: 14, background: resetPwLoading ? '#a89888' : '#FF9800', color: '#fff', border: 'none', borderRadius: 8, fontSize: 16, cursor: resetPwLoading ? 'not-allowed' : 'pointer', fontFamily: font, fontWeight: 600 }}>{resetPwLoading ? '處理中...' : '確認重設密碼'}</button>
-        <button type="button" onClick={() => { setShowResetForm(false); setRecoveryToken(''); setResetPwError(''); setResetNewPw(''); setResetConfirmPw(''); }} style={{ background: 'none', border: 'none', color: '#999', fontSize: 13, marginTop: 16, cursor: 'pointer', textDecoration: 'underline', fontFamily: font }}>返回登入</button>
+        <button type="button" onClick={() => { setShowResetForm(false); setRecoveryToken(''); }} style={{ background: 'none', border: 'none', color: '#999', fontSize: 13, marginTop: 16, cursor: 'pointer', textDecoration: 'underline', fontFamily: font }}>返回登入</button>
       </div>
     </div>
   );
@@ -580,21 +559,11 @@ const addStaff = async () => { const name = newStaffName.trim(); if (!name) retu
         <input type="email" placeholder="管理員 Email" value={loginEmail} onChange={e => { setLoginEmail(e.target.value); setResetMsg(''); }} style={{ width: '100%', padding: '14px 16px', border: '1px solid #ddd', borderRadius: 8, fontSize: 16, marginBottom: 12, boxSizing: 'border-box', textAlign: 'center' }} />
         <input type="password" placeholder="密碼" value={pw} onChange={e => setPw(e.target.value)} style={{ width: '100%', padding: '14px 16px', border: '1px solid #ddd', borderRadius: 8, fontSize: 16, marginBottom: 20, boxSizing: 'border-box', textAlign: 'center' }} />
         <button type="submit" disabled={loginLoading} style={{ width: '100%', padding: 14, background: loginLoading ? '#a89888' : '#5c4a3a', color: '#fff', border: 'none', borderRadius: 8, fontSize: 16, cursor: loginLoading ? 'not-allowed' : 'pointer' }}>{loginLoading ? '登入中...' : '登入'}</button>
-        {/* ✅ 忘記密碼：發送重設連結到 Email，redirect_to 指向當前頁面 */}
         <button type="button" onClick={async () => {
-          if (!loginEmail) { setLoginError('請先輸入 Email'); setResetMsg(''); return; }
-          setLoginError('');
-          setResetMsg('');
-          try {
-            const redirectUrl = window.location.origin + window.location.pathname;
-            await apiCall('recover', { email: loginEmail, redirectUrl });
-            setResetMsg('重設密碼連結已發送到你嘅 Email，請查收信箱（包括垃圾郵件）。撳 Email 入面嘅連結會返嚟呢度設定新密碼。');
-          } catch (err) {
-            setLoginError('發送失敗：' + (err.message || '請稍後再試'));
-          }
-        }} style={{ background: 'none', border: 'none', color: '#999', fontSize: 13, marginTop: 16, cursor: 'pointer', textDecoration: 'underline', fontFamily: font }}>
-          忘記密碼？
-        </button>
+          if (!loginEmail) { setLoginError('請先輸入 Email'); return; }
+          setLoginError(''); setResetMsg('');
+          try { await apiCall('recover', { email: loginEmail, redirectUrl: window.location.origin + window.location.pathname }); setResetMsg('重設密碼連結已發送到你嘅 Email，請查收。'); } catch (err) { setLoginError('發送失敗：' + (err.message || '請稍後再試')); }
+        }} style={{ background: 'none', border: 'none', color: '#999', fontSize: 13, marginTop: 16, cursor: 'pointer', textDecoration: 'underline', fontFamily: font }}>忘記密碼？</button>
       </form>
     </div>
   );
@@ -606,7 +575,8 @@ const addStaff = async () => { const name = newStaffName.trim(); if (!name) retu
       {toast && <div style={{ position: 'fixed', top: 20, left: '50%', transform: 'translateX(-50%)', background: '#5c4a3a', color: '#fff', padding: '12px 28px', borderRadius: 8, fontSize: 14, zIndex: 9999, boxShadow: '0 4px 20px rgba(0,0,0,0.2)' }}>{toast}</div>}
       {batchLoading && <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.3)', zIndex: 999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><div style={{ background: '#fff', padding: '30px 40px', borderRadius: 12, textAlign: 'center' }}><div style={{ fontSize: 24, marginBottom: 10 }}>⏳</div><div style={{ fontSize: 14, color: '#5c4a3a' }}>處理中...</div></div></div>}
 
-    {selectedBooking && (
+      {/* ═══ 預約詳情 Modal ═══ */}
+      {selectedBooking && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }} onClick={closeBooking}>
           <div style={{ background: '#fff', borderRadius: 16, padding: 28, maxWidth: 480, width: '100%', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }} onClick={e => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
@@ -622,124 +592,190 @@ const addStaff = async () => { const name = newStaffName.trim(); if (!name) retu
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}><span style={{ fontSize: 18 }}>💰</span><div style={{ fontSize: 22, fontWeight: 700 }}>${selectedBooking.total_price}</div></div>
               {(selectedBooking.notes || selectedBooking.remarks || selectedBooking.customer_notes) && <div style={{ padding: '10px 14px', background: '#FFF8E1', borderRadius: 8, fontSize: 13, color: '#F57F17' }}>📝 {selectedBooking.notes || selectedBooking.remarks || selectedBooking.customer_notes}</div>}
             </div>
-            {reschedMode ? (
+            {reschedMode && (
               <div style={{ marginTop: 20, padding: 16, background: '#FFF3E0', borderRadius: 10, border: '1px solid #FFB74D' }}>
                 <div style={{ fontSize: 14, fontWeight: 700, color: '#E65100', marginBottom: 12 }}>✏️ 更改預約時間</div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                    <span style={{ fontSize: 13, color: '#5c4a3a', minWidth: 45 }}>日期：</span>
-                    <input type="date" value={reschedDate} onChange={e => handleReschedDateChange(e.target.value)} style={{ padding: '8px 12px', border: '1px solid #ddd', borderRadius: 6, fontSize: 14, flex: 1 }} />
-                  </div>
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                    <span style={{ fontSize: 13, color: '#5c4a3a', minWidth: 45 }}>技師：</span>
-                    <select value={reschedTech} onChange={e => { setReschedTech(e.target.value); setReschedTime(''); }} style={{ padding: '8px 12px', border: '1px solid #ddd', borderRadius: 6, fontSize: 14, flex: 1, fontFamily: font }}>
-                      <option value="">選擇技師</option>
-                      {staffList.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
-                    </select>
-                  </div>
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                    <span style={{ fontSize: 13, color: '#5c4a3a', minWidth: 45 }}>時間：</span>
-                    {reschedAvailTimes.length > 0 ? (
-                      <select value={reschedTime} onChange={e => setReschedTime(e.target.value)} style={{ padding: '8px 12px', border: '1px solid #ddd', borderRadius: 6, fontSize: 14, flex: 1, fontFamily: font }}>
-                        <option value="">選擇時間</option>
-                        {reschedAvailTimes.map(t => <option key={t} value={t}>{t}{allBookings.some(b => b.booking_date === reschedDate && b.booking_time?.slice(0,5) === t && b.technician_label === reschedTech && b.status !== 'cancelled' && b.id !== selectedBooking.id) ? ' ⚠️ 已有預約' : ''}</option>)}
-                      </select>
-                    ) : (
-                      <div style={{ fontSize: 12, color: '#999', flex: 1 }}>{reschedTech ? '此技師當日未有開放時段' : '請先選擇技師'}</div>
-                    )}
-                  </div>
-                  {isTimeConflict && <div style={{ padding: '8px 12px', background: '#FFEBEE', borderRadius: 6, fontSize: 12, color: '#c62828' }}>⚠️ 此時段已有其他預約，建議選擇其他時間</div>}
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}><span style={{ fontSize: 13, color: '#5c4a3a', minWidth: 45 }}>日期：</span><input type="date" value={reschedDate} onChange={e => handleReschedDateChange(e.target.value)} style={{ padding: '8px 12px', border: '1px solid #ddd', borderRadius: 6, fontSize: 14, flex: 1 }} /></div>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}><span style={{ fontSize: 13, color: '#5c4a3a', minWidth: 45 }}>技師：</span><select value={reschedTech} onChange={e => { setReschedTech(e.target.value); setReschedTime(''); }} style={{ padding: '8px 12px', border: '1px solid #ddd', borderRadius: 6, fontSize: 14, flex: 1, fontFamily: font }}><option value="">選擇技師</option>{staffList.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}</select></div>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}><span style={{ fontSize: 13, color: '#5c4a3a', minWidth: 45 }}>時間：</span>{reschedAvailTimes.length > 0 ? (<select value={reschedTime} onChange={e => setReschedTime(e.target.value)} style={{ padding: '8px 12px', border: '1px solid #ddd', borderRadius: 6, fontSize: 14, flex: 1, fontFamily: font }}><option value="">選擇時間</option>{reschedAvailTimes.map(t => <option key={t} value={t}>{t}{allBookings.some(b => b.booking_date === reschedDate && b.booking_time?.slice(0,5) === t && b.technician_label === reschedTech && b.status !== 'cancelled' && b.id !== selectedBooking.id) ? ' ⚠️' : ''}</option>)}</select>) : (<div style={{ fontSize: 12, color: '#999', flex: 1 }}>{reschedTech ? '此技師當日未有開放時段' : '請先選擇技師'}</div>)}</div>
+                  {isTimeConflict && <div style={{ padding: '8px 12px', background: '#FFEBEE', borderRadius: 6, fontSize: 12, color: '#c62828' }}>⚠️ 此時段已有其他預約</div>}
                 </div>
                 <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
                   <button onClick={saveResched} disabled={!reschedDate || !reschedTime || reschedLoading} style={{ padding: '10px 20px', borderRadius: 8, border: 'none', background: reschedDate && reschedTime ? '#FF9800' : '#ddd', color: '#fff', cursor: reschedDate && reschedTime ? 'pointer' : 'not-allowed', fontSize: 14, fontFamily: font, fontWeight: 600 }}>{reschedLoading ? '處理中...' : '✅ 確認改期'}</button>
                   <button onClick={() => setReschedMode(false)} style={{ padding: '10px 16px', borderRadius: 8, border: '1px solid #ccc', background: '#fff', color: '#666', cursor: 'pointer', fontSize: 14, fontFamily: font }}>取消</button>
                 </div>
               </div>
-            ) : null}
+            )}
             <div style={{ display: 'flex', gap: 8, marginTop: 20, paddingTop: 20, borderTop: '1px solid #f0ebe3', flexWrap: 'wrap' }}>
               {selectedBooking.status === 'pending' && <button onClick={() => modalUpdate('confirmed')} style={{ padding: '10px 20px', borderRadius: 8, border: 'none', background: '#4CAF50', color: '#fff', cursor: 'pointer', fontSize: 14, fontFamily: font, fontWeight: 600 }}>✅ 確認預約</button>}
               {(selectedBooking.status === 'pending' || selectedBooking.status === 'confirmed') && <button onClick={() => modalUpdate('completed')} style={{ padding: '10px 20px', borderRadius: 8, border: 'none', background: '#2196F3', color: '#fff', cursor: 'pointer', fontSize: 14, fontFamily: font, fontWeight: 600 }}>✔️ 完成</button>}
               {selectedBooking.status !== 'cancelled' && selectedBooking.status !== 'completed' && <button onClick={() => modalUpdate('cancelled')} style={{ padding: '10px 20px', borderRadius: 8, border: '1px solid #ef9a9a', background: '#ffebee', color: '#c62828', cursor: 'pointer', fontSize: 14, fontFamily: font }}>❌ 取消</button>}
               {!reschedMode && selectedBooking.status !== 'cancelled' && <button onClick={startResched} style={{ padding: '10px 16px', borderRadius: 8, border: '1px solid #FFB74D', background: '#FFF3E0', color: '#E65100', cursor: 'pointer', fontSize: 14, fontFamily: font }}>✏️ 改期</button>}
-{selectedBooking.customer_phone && (
-  <button onClick={() => {
-    const msg = fillTemplate('reminder', selectedBooking);
-    if (msg) {
-      sendWhatsApp(selectedBooking.customer_phone, msg);
-    } else {
-      sendWhatsApp(selectedBooking.customer_phone,
-`${selectedBooking.customer_name} 你好！關於你 ${selectedBooking.booking_date} ${selectedBooking.booking_time} 嘅預約，如有任何疑問歡迎聯絡我哋。\n— J.LAB`
-      );
-    }
-  }} style={{ padding: '10px 16px', borderRadius: 8, border: '1px solid #25D366', background: '#E8F5E9', color: '#25D366', cursor: 'pointer', fontSize: 14, fontFamily: font, fontWeight: 600 }}>
-    📲 通知客人
-  </button>
-)}
-<div style={{ flex: 1 }} />
-<button onClick={modalDelete} style={{ padding: '10px 16px', borderRadius: 8, border: '1px solid #ddd', background: '#fafafa', color: '#999', cursor: 'pointer', fontSize: 14, fontFamily: font }}>🗑️</button>
+              {selectedBooking.customer_phone && <button onClick={() => { const msg = fillTemplate('reminder', selectedBooking); sendWhatsApp(selectedBooking.customer_phone, msg || `${selectedBooking.customer_name} 你好！關於你 ${selectedBooking.booking_date} ${selectedBooking.booking_time} 嘅預約，如有任何疑問歡迎聯絡我哋。\n— J.LAB`); }} style={{ padding: '10px 16px', borderRadius: 8, border: '1px solid #25D366', background: '#E8F5E9', color: '#25D366', cursor: 'pointer', fontSize: 14, fontFamily: font, fontWeight: 600 }}>📲 通知客人</button>}
+              <div style={{ flex: 1 }} />
+              <button onClick={modalDelete} style={{ padding: '10px 16px', borderRadius: 8, border: '1px solid #ddd', background: '#fafafa', color: '#999', cursor: 'pointer', fontSize: 14, fontFamily: font }}>🗑️</button>
             </div>
           </div>
         </div>
       )}
 
-      <div style={{ background: '#fff', padding: '20px 30px', boxShadow: '0 2px 10px rgba(0,0,0,0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div><h1 style={{ fontSize: 20, color: '#5c4a3a', margin: 0 }}>J.LAB 管理後台</h1><p style={{ color: '#999', fontSize: 12, margin: '4px 0 0', letterSpacing: 1 }}>ADMIN DASHBOARD</p></div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-     <button onClick={() => setShowHistory(true)} style={{ padding: '8px 20px', background: 'transparent', border: '1px solid #ccc', borderRadius: 6, cursor: 'pointer', color: '#666', fontFamily: font, fontSize: 13 }}>📋</button>
-        <button onClick={() => { setShowChangePw(true); setCpOld(''); setCpNew(''); setCpConfirm(''); setCpMsg(''); setCpError(''); }} style={{ padding: '8px 20px', background: 'transparent', border: '1px solid #ccc', borderRadius: 6, cursor: 'pointer', color: '#666', fontFamily: font, fontSize: 13 }}>🔑</button>
-          <button onClick={() => setAuth(false)} style={{ padding: '8px 20px', background: 'transparent', border: '1px solid #ccc', borderRadius: 6, cursor: 'pointer', color: '#666', fontFamily: font }}>登出</button>
+      {/* ═══ 服務編輯 Modal ═══ */}
+      {editSvc && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }} onClick={() => setEditSvc(null)}>
+          <div style={{ background: '#fff', borderRadius: 16, padding: 28, maxWidth: 560, width: '100%', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <h3 style={{ margin: 0, color: '#5c4a3a', fontSize: 18 }}>{editSvcForm.id ? '✏️ 編輯服務' : '➕ 新增服務'}</h3>
+              <button onClick={() => setEditSvc(null)} style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: '#999' }}>✕</button>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div>
+                <label style={{ fontSize: 13, color: '#5c4a3a', fontWeight: 600, marginBottom: 4, display: 'block' }}>服務名稱 *</label>
+                <input value={editSvcForm.name || ''} onChange={e => setEditSvcForm(p => ({ ...p, name: e.target.value }))} placeholder="例：凝膠美甲" style={{ width: '100%', padding: '10px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, boxSizing: 'border-box', fontFamily: font }} />
+              </div>
+              <div>
+                <label style={{ fontSize: 13, color: '#5c4a3a', fontWeight: 600, marginBottom: 4, display: 'block' }}>描述</label>
+                <textarea value={editSvcForm.description || ''} onChange={e => setEditSvcForm(p => ({ ...p, description: e.target.value }))} placeholder="服務簡介..." rows={2} style={{ width: '100%', padding: '10px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, boxSizing: 'border-box', fontFamily: font, resize: 'vertical' }} />
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div>
+                  <label style={{ fontSize: 13, color: '#5c4a3a', fontWeight: 600, marginBottom: 4, display: 'block' }}>基本價格 ($)</label>
+                  <input type="number" value={editSvcForm.base_price || 0} onChange={e => setEditSvcForm(p => ({ ...p, base_price: +e.target.value }))} style={{ width: '100%', padding: '10px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, boxSizing: 'border-box' }} />
+                </div>
+                <div>
+                  <label style={{ fontSize: 13, color: '#5c4a3a', fontWeight: 600, marginBottom: 4, display: 'block' }}>時長（分鐘）</label>
+                  <input type="number" value={editSvcForm.duration_minutes || 60} onChange={e => setEditSvcForm(p => ({ ...p, duration_minutes: +e.target.value }))} style={{ width: '100%', padding: '10px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, boxSizing: 'border-box' }} />
+                </div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div>
+                  <label style={{ fontSize: 13, color: '#5c4a3a', fontWeight: 600, marginBottom: 4, display: 'block' }}>分類</label>
+                  <input value={editSvcForm.category || ''} onChange={e => setEditSvcForm(p => ({ ...p, category: e.target.value }))} placeholder="例：美甲" style={{ width: '100%', padding: '10px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, boxSizing: 'border-box', fontFamily: font }} />
+                </div>
+                <div>
+                  <label style={{ fontSize: 13, color: '#5c4a3a', fontWeight: 600, marginBottom: 4, display: 'block' }}>圖片 URL</label>
+                  <input value={editSvcForm.image_url || ''} onChange={e => setEditSvcForm(p => ({ ...p, image_url: e.target.value }))} placeholder="https://..." style={{ width: '100%', padding: '10px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, boxSizing: 'border-box' }} />
+                </div>
+              </div>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}>
+                <input type="checkbox" checked={editSvcForm.is_active !== false} onChange={e => setEditSvcForm(p => ({ ...p, is_active: e.target.checked }))} />
+                <span style={{ fontSize: 13, color: '#5c4a3a' }}>上架中（客人可見）</span>
+              </label>
+
+              {/* 變體管理 */}
+              <div style={{ borderTop: '1px solid #eee', paddingTop: 16, marginTop: 4 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                  <span style={{ fontSize: 14, fontWeight: 600, color: '#5c4a3a' }}>📋 服務選項 / 變體</span>
+                  <button onClick={() => setEditSvcVariants(prev => [...prev, { label: '', price: 0, is_active: true, sort_order: prev.length }])} style={{ padding: '4px 12px', borderRadius: 6, border: '1px dashed #b8956a', background: 'transparent', color: '#b8956a', cursor: 'pointer', fontSize: 12, fontFamily: font }}>+ 新增選項</button>
+                </div>
+                {editSvcVariants.length === 0 ? (
+                  <div style={{ padding: '16px', textAlign: 'center', color: '#ccc', fontSize: 13 }}>未有選項 — 可直接使用基本價格</div>
+                ) : editSvcVariants.map((v, vi) => (
+                  <div key={vi} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8, padding: '8px 12px', background: '#faf6f0', borderRadius: 8 }}>
+                    <input value={v.label} onChange={e => { const a = [...editSvcVariants]; a[vi] = { ...a[vi], label: e.target.value }; setEditSvcVariants(a); }} placeholder="選項名稱" style={{ flex: 2, padding: '8px 10px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13, fontFamily: font }} />
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 2, flex: 1 }}>
+                      <span style={{ fontSize: 13, color: '#999' }}>$</span>
+                      <input type="number" value={v.price || 0} onChange={e => { const a = [...editSvcVariants]; a[vi] = { ...a[vi], price: +e.target.value }; setEditSvcVariants(a); }} style={{ width: '100%', padding: '8px 6px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13 }} />
+                    </div>
+                    <button onClick={() => setEditSvcVariants(prev => prev.filter((_, i) => i !== vi))} style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #ffcdd2', background: '#ffebee', color: '#c62828', cursor: 'pointer', fontSize: 12, fontFamily: font }}>✕</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 10, marginTop: 24, justifyContent: 'flex-end' }}>
+              <button onClick={() => setEditSvc(null)} style={{ padding: '10px 20px', borderRadius: 8, border: '1px solid #ccc', background: '#fff', color: '#666', cursor: 'pointer', fontSize: 14, fontFamily: font }}>取消</button>
+              <button onClick={saveSvc} style={{ padding: '10px 28px', borderRadius: 8, border: 'none', background: '#5c4a3a', color: '#fff', cursor: 'pointer', fontSize: 14, fontFamily: font, fontWeight: 600 }}>💾 儲存</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ 附加項目編輯 Modal ═══ */}
+      {editAddon && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }} onClick={() => setEditAddon(null)}>
+          <div style={{ background: '#fff', borderRadius: 16, padding: 28, maxWidth: 400, width: '100%', boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <h3 style={{ margin: 0, color: '#5c4a3a', fontSize: 18 }}>{editAddonForm.id ? '✏️ 編輯附加項目' : '➕ 新增附加項目'}</h3>
+              <button onClick={() => setEditAddon(null)} style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: '#999' }}>✕</button>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div><label style={{ fontSize: 13, color: '#5c4a3a', fontWeight: 600, marginBottom: 4, display: 'block' }}>名稱 *</label><input value={editAddonForm.name || ''} onChange={e => setEditAddonForm(p => ({ ...p, name: e.target.value }))} placeholder="例：卸甲" style={{ width: '100%', padding: '10px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, boxSizing: 'border-box', fontFamily: font }} /></div>
+              <div><label style={{ fontSize: 13, color: '#5c4a3a', fontWeight: 600, marginBottom: 4, display: 'block' }}>價格 ($)</label><input type="number" value={editAddonForm.price || 0} onChange={e => setEditAddonForm(p => ({ ...p, price: +e.target.value }))} style={{ width: '100%', padding: '10px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, boxSizing: 'border-box' }} /></div>
+              <div><label style={{ fontSize: 13, color: '#5c4a3a', fontWeight: 600, marginBottom: 4, display: 'block' }}>描述</label><input value={editAddonForm.description || ''} onChange={e => setEditAddonForm(p => ({ ...p, description: e.target.value }))} placeholder="簡短說明..." style={{ width: '100%', padding: '10px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, boxSizing: 'border-box', fontFamily: font }} /></div>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}><input type="checkbox" checked={editAddonForm.is_active !== false} onChange={e => setEditAddonForm(p => ({ ...p, is_active: e.target.checked }))} /><span style={{ fontSize: 13 }}>啟用中</span></label>
+            </div>
+            <div style={{ display: 'flex', gap: 10, marginTop: 24, justifyContent: 'flex-end' }}>
+              <button onClick={() => setEditAddon(null)} style={{ padding: '10px 20px', borderRadius: 8, border: '1px solid #ccc', background: '#fff', color: '#666', cursor: 'pointer', fontSize: 14, fontFamily: font }}>取消</button>
+              <button onClick={saveAddon} style={{ padding: '10px 28px', borderRadius: 8, border: 'none', background: '#5c4a3a', color: '#fff', cursor: 'pointer', fontSize: 14, fontFamily: font, fontWeight: 600 }}>💾 儲存</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ HEADER — 修正：按鍵統一大細 ═══ */}
+      <div style={{ background: '#fff', padding: isMobile ? '16px 16px' : '20px 30px', boxShadow: '0 2px 10px rgba(0,0,0,0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+        <div><h1 style={{ fontSize: isMobile ? 17 : 20, color: '#5c4a3a', margin: 0 }}>J.LAB 管理後台</h1><p style={{ color: '#999', fontSize: 11, margin: '4px 0 0', letterSpacing: 1 }}>ADMIN DASHBOARD</p></div>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+          <button onClick={() => setShowHistory(true)} style={headerBtn}>🔍 {!isMobile && '查看歷史紀錄'}</button>
+          <button onClick={() => { setShowChangePw(true); setCpOld(''); setCpNew(''); setCpConfirm(''); setCpMsg(''); setCpError(''); }} style={headerBtn}>🔑{!isMobile && ' 密碼'}</button>
+          <button onClick={() => setAuth(false)} style={headerBtn}>登出</button>
         </div>
       </div>
-{showHistory && (
-  <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.4)', zIndex: 9999, display: 'flex', justifyContent: 'center', alignItems: 'center' }} onClick={() => setShowHistory(false)}>
-    <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 16, padding: 24, width: '90%', maxWidth: 500, maxHeight: '70vh', overflow: 'hidden', display: 'flex', flexDirection: 'column', fontFamily: font }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <h3 style={{ margin: 0, fontSize: 18, color: '#3e2f1c' }}>📋 操作歷史記錄</h3>
-        <button onClick={() => setShowHistory(false)} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#999' }}>✕</button>
-      </div>
-      <div style={{ overflowY: 'auto', flex: 1 }}>
-        {changeLog.length === 0 ? (
-          <p style={{ color: '#999', textAlign: 'center', padding: 40 }}>暫無操作記錄</p>
-        ) : (
-          changeLog.map((log, i) => (
-            <div key={log.id || i} style={{ padding: '12px 16px', marginBottom: 8, background: '#faf8f5', borderRadius: 10, borderLeft: '3px solid #b8956a' }}>
-              <div style={{ fontSize: 11, color: '#999', marginBottom: 4 }}>{log.ts}</div>
-              <div style={{ fontSize: 14, color: '#3e2f1c' }}>{log.text}</div>
-            </div>
-          ))
-        )}
-      </div>
-      {changeLog.length > 0 && (
-        <button onClick={() => { if(confirm('確定清除所有記錄？')) { setChangeLog([]); } }} style={{ marginTop: 12, padding: '8px 0', background: 'none', border: '1px solid #ddd', borderRadius: 8, color: '#999', fontSize: 12, cursor: 'pointer', fontFamily: font }}>🗑 清除全部記錄</button>
-      )}
-    </div>
-  </div>
-)}
 
-{showChangePw && (
-  <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }} onClick={() => setShowChangePw(false)}>
-    <div style={{ background: '#fff', borderRadius: 16, padding: 32, maxWidth: 400, width: '100%', boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }} onClick={e => e.stopPropagation()}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-        <h3 style={{ margin: 0, color: '#5c4a3a', fontSize: 18 }}>🔑 更改密碼</h3>
-        <button onClick={() => setShowChangePw(false)} style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: '#999' }}>✕</button>
-      </div>
-      {cpMsg && <div style={{ padding: '12px 16px', background: '#E8F5E9', color: '#2e7d32', borderRadius: 8, fontSize: 14, marginBottom: 16, textAlign: 'center', fontWeight: 600 }}>{cpMsg}</div>}
-      {cpError && <div style={{ padding: '12px 16px', background: '#FFEBEE', color: '#c62828', borderRadius: 8, fontSize: 14, marginBottom: 16 }}>❌ {cpError}</div>}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <div><label style={{ fontSize: 13, color: '#5c4a3a', fontWeight: 600, marginBottom: 4, display: 'block' }}>舊密碼</label><input type="password" value={cpOld} onChange={e => setCpOld(e.target.value)} placeholder="輸入目前嘅密碼" style={{ width: '100%', padding: '12px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, boxSizing: 'border-box', fontFamily: font }} /></div>
-        <div><label style={{ fontSize: 13, color: '#5c4a3a', fontWeight: 600, marginBottom: 4, display: 'block' }}>新密碼</label><input type="password" value={cpNew} onChange={e => setCpNew(e.target.value)} placeholder="至少 6 個字元" style={{ width: '100%', padding: '12px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, boxSizing: 'border-box', fontFamily: font }} /></div>
-        <div><label style={{ fontSize: 13, color: '#5c4a3a', fontWeight: 600, marginBottom: 4, display: 'block' }}>確認新密碼</label><input type="password" value={cpConfirm} onChange={e => setCpConfirm(e.target.value)} placeholder="再輸入一次新密碼" style={{ width: '100%', padding: '12px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, boxSizing: 'border-box', fontFamily: font }} /></div>
-      </div>
-      <button onClick={handleChangePw} disabled={cpLoading} style={{ width: '100%', padding: 14, background: cpLoading ? '#a89888' : '#5c4a3a', color: '#fff', border: 'none', borderRadius: 8, fontSize: 15, cursor: cpLoading ? 'not-allowed' : 'pointer', fontFamily: font, fontWeight: 600, marginTop: 20 }}>{cpLoading ? '處理中...' : '確認更改'}</button>
-    </div>
-  </div>
-)}
-      <div style={{ background: '#fff', borderTop: '1px solid #f0ebe3', padding: '0 30px', display: 'flex', gap: 0, boxShadow: '0 2px 10px rgba(0,0,0,0.03)', overflowX: 'auto' }}>
-    {[{ key: 'bookings', label: `📋 預約管理${stats.pending > 0 ? ` (${stats.pending})` : ''}` }, { key: 'timeslots', label: '🕐 時段管理' }, { key: 'templates', label: '📝 訊息模板' }].map(t => (
-          <button key={t.key} onClick={() => setTab(t.key)} style={{ padding: '14px 24px', background: 'none', border: 'none', borderBottom: tab === t.key ? '2px solid #5c4a3a' : '2px solid transparent', fontSize: 14, color: tab === t.key ? '#5c4a3a' : '#999', fontWeight: tab === t.key ? 600 : 400, cursor: 'pointer', fontFamily: font, whiteSpace: 'nowrap' }}>{t.label}</button>
+      {/* ═══ 歷史記錄 Modal ═══ */}
+      {showHistory && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 9999, display: 'flex', justifyContent: 'center', alignItems: 'center' }} onClick={() => setShowHistory(false)}>
+          <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 16, padding: 24, width: '90%', maxWidth: 500, maxHeight: '70vh', overflow: 'hidden', display: 'flex', flexDirection: 'column', fontFamily: font }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <h3 style={{ margin: 0, fontSize: 18, color: '#3e2f1c' }}>📋 操作歷史記錄</h3>
+              <button onClick={() => setShowHistory(false)} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#999' }}>✕</button>
+            </div>
+            <div style={{ overflowY: 'auto', flex: 1 }}>
+              {changeLog.length === 0 ? <p style={{ color: '#999', textAlign: 'center', padding: 40 }}>暫無操作記錄</p> : changeLog.map((log, i) => (
+                <div key={log.id || i} style={{ padding: '12px 16px', marginBottom: 8, background: '#faf8f5', borderRadius: 10, borderLeft: '3px solid #b8956a' }}>
+                  <div style={{ fontSize: 11, color: '#999', marginBottom: 4 }}>{log.ts}</div>
+                  <div style={{ fontSize: 14, color: '#3e2f1c' }}>{log.text}</div>
+                </div>
+              ))}
+            </div>
+            {changeLog.length > 0 && <button onClick={() => { if(window.confirm('確定清除所有記錄？')) setChangeLog([]); }} style={{ marginTop: 12, padding: '8px 0', background: 'none', border: '1px solid #ddd', borderRadius: 8, color: '#999', fontSize: 12, cursor: 'pointer', fontFamily: font }}>🗑 清除全部記錄</button>}
+          </div>
+        </div>
+      )}
+
+      {/* ═══ 更改密碼 Modal ═══ */}
+      {showChangePw && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }} onClick={() => setShowChangePw(false)}>
+          <div style={{ background: '#fff', borderRadius: 16, padding: 32, maxWidth: 400, width: '100%', boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }} onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+              <h3 style={{ margin: 0, color: '#5c4a3a', fontSize: 18 }}>🔑 更改密碼</h3>
+              <button onClick={() => setShowChangePw(false)} style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: '#999' }}>✕</button>
+            </div>
+            {cpMsg && <div style={{ padding: '12px 16px', background: '#E8F5E9', color: '#2e7d32', borderRadius: 8, fontSize: 14, marginBottom: 16, textAlign: 'center', fontWeight: 600 }}>{cpMsg}</div>}
+            {cpError && <div style={{ padding: '12px 16px', background: '#FFEBEE', color: '#c62828', borderRadius: 8, fontSize: 14, marginBottom: 16 }}>❌ {cpError}</div>}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div><label style={{ fontSize: 13, color: '#5c4a3a', fontWeight: 600, marginBottom: 4, display: 'block' }}>舊密碼</label><input type="password" value={cpOld} onChange={e => setCpOld(e.target.value)} style={{ width: '100%', padding: '12px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, boxSizing: 'border-box', fontFamily: font }} /></div>
+              <div><label style={{ fontSize: 13, color: '#5c4a3a', fontWeight: 600, marginBottom: 4, display: 'block' }}>新密碼</label><input type="password" value={cpNew} onChange={e => setCpNew(e.target.value)} style={{ width: '100%', padding: '12px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, boxSizing: 'border-box', fontFamily: font }} /></div>
+              <div><label style={{ fontSize: 13, color: '#5c4a3a', fontWeight: 600, marginBottom: 4, display: 'block' }}>確認新密碼</label><input type="password" value={cpConfirm} onChange={e => setCpConfirm(e.target.value)} style={{ width: '100%', padding: '12px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, boxSizing: 'border-box', fontFamily: font }} /></div>
+            </div>
+            <button onClick={handleChangePw} disabled={cpLoading} style={{ width: '100%', padding: 14, background: cpLoading ? '#a89888' : '#5c4a3a', color: '#fff', border: 'none', borderRadius: 8, fontSize: 15, cursor: cpLoading ? 'not-allowed' : 'pointer', fontFamily: font, fontWeight: 600, marginTop: 20 }}>{cpLoading ? '處理中...' : '確認更改'}</button>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ TABS ═══ */}
+      <div style={{ background: '#fff', borderTop: '1px solid #f0ebe3', padding: '0 16px', display: 'flex', gap: 0, boxShadow: '0 2px 10px rgba(0,0,0,0.03)', overflowX: 'auto' }}>
+        {[
+          { key: 'bookings', label: `📋 預約${stats.pending > 0 ? ` (${stats.pending})` : ''}` },
+          { key: 'timeslots', label: '🕐 時段' },
+          { key: 'frontend', label: '🎨 前台管理' },
+          { key: 'templates', label: '📝 訊息模板' },
+        ].map(t => (
+          <button key={t.key} onClick={() => setTab(t.key)} style={{ padding: '14px 18px', background: 'none', border: 'none', borderBottom: tab === t.key ? '2px solid #5c4a3a' : '2px solid transparent', fontSize: 13, color: tab === t.key ? '#5c4a3a' : '#999', fontWeight: tab === t.key ? 600 : 400, cursor: 'pointer', fontFamily: font, whiteSpace: 'nowrap' }}>{t.label}</button>
         ))}
       </div>
 
+      {/* ═══ 待同步橫條 ═══ */}
       {pendingCount > 0 && tab === 'timeslots' && (
         <div style={{ position: 'sticky', top: 0, zIndex: 100, background: 'linear-gradient(135deg, #FFF3E0, #FFE0B2)', borderBottom: '2px solid #FFB74D' }}>
           <div style={{ padding: '14px 30px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
@@ -749,7 +785,7 @@ const addStaff = async () => { const name = newStaffName.trim(); if (!name) retu
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
               <button onClick={() => { setPending({}); showToast('已清除'); setShowPendingList(false); }} style={{ padding: '8px 16px', background: '#fff', border: '1px solid #ccc', borderRadius: 6, cursor: 'pointer', fontSize: 13, color: '#666', fontFamily: font }}>取消全部</button>
-              <button onClick={syncPending} style={{ padding: '8px 24px', background: '#4CAF50', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 14, fontWeight: 600, fontFamily: font, boxShadow: '0 2px 8px rgba(76,175,80,0.3)' }}>✅ 確認同步到前台</button>
+              <button onClick={syncPending} style={{ padding: '8px 24px', background: '#4CAF50', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 14, fontWeight: 600, fontFamily: font }}>✅ 確認同步到前台</button>
             </div>
           </div>
           {showPendingList && (
@@ -767,34 +803,39 @@ const addStaff = async () => { const name = newStaffName.trim(); if (!name) retu
         </div>
       )}
 
-      <div style={{ maxWidth: 1200, margin: '0 auto', padding: '30px 20px' }}>
+      <div style={{ maxWidth: 1200, margin: '0 auto', padding: '20px 16px' }}>
 
+        {/* ═══════════════════════════════════════ */}
+        {/* ═══ TAB: 預約管理 ═══ */}
+        {/* ═══════════════════════════════════════ */}
         {tab === 'bookings' && (<>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 12, marginBottom: 24 }}>
+          {/* ═══ 緊湊版統計列 ═══ */}
+          <div style={{ display: 'flex', gap: 8, marginBottom: 16, overflowX: 'auto', paddingBottom: 4 }}>
             {[
-              { label: '今日預約', value: stats.today, sub: `💰 $${stats.todayRev}`, color: '#FF9800' },
-              { label: '本月預約', value: stats.month, sub: `💰 $${stats.monthRev}`, color: '#2196F3' },
-              { label: nextMonthLabel, value: stats.nextMonth, sub: `💰 $${stats.nextMonthRev}`, color: '#9C27B0' },
+              { label: '今日', value: stats.today, sub: `$${stats.todayRev}`, color: '#FF9800' },
+              { label: '本月', value: stats.month, sub: `$${stats.monthRev}`, color: '#2196F3' },
+              { label: nextMonthLabel, value: stats.nextMonth, sub: `$${stats.nextMonthRev}`, color: '#9C27B0' },
               { label: '待處理', value: stats.pending, sub: null, color: stats.pending > 0 ? '#f44336' : '#999', action: stats.pending > 0 },
-              { label: '總預約數', value: stats.total, sub: null, color: '#5c4a3a' },
+              { label: '總數', value: stats.total, sub: null, color: '#5c4a3a' },
             ].map((s, i) => (
-              <div key={i} style={{ background: '#fff', padding: '18px 16px', borderRadius: 12, textAlign: 'center', boxShadow: '0 2px 10px rgba(0,0,0,0.05)', borderLeft: `4px solid ${s.color}` }}>
-                <p style={{ color: '#999', fontSize: 12, margin: '0 0 6px' }}>{s.label}</p>
-                <p style={{ fontSize: 28, fontWeight: 'bold', color: s.color, margin: 0 }}>{s.value}</p>
-                {s.sub && <p style={{ fontSize: 12, color: '#999', margin: '4px 0 0' }}>{s.sub}</p>}
-                {s.action && <button onClick={confirmAllPending} style={{ marginTop: 8, padding: '4px 12px', borderRadius: 4, border: 'none', background: '#4CAF50', color: '#fff', cursor: 'pointer', fontSize: 11, fontFamily: font, fontWeight: 600 }}>✅ 一鍵全確認</button>}
-              </div>))}
+              <div key={i} style={{ background: '#fff', padding: '10px 14px', borderRadius: 10, textAlign: 'center', boxShadow: '0 1px 6px rgba(0,0,0,0.04)', borderLeft: `3px solid ${s.color}`, flex: '1 0 90px', minWidth: 90 }}>
+                <p style={{ color: '#999', fontSize: 11, margin: '0 0 2px' }}>{s.label}</p>
+                <p style={{ fontSize: 22, fontWeight: 'bold', color: s.color, margin: 0, lineHeight: 1.2 }}>{s.value}</p>
+                {s.sub && <p style={{ fontSize: 11, color: '#bbb', margin: '2px 0 0' }}>💰{s.sub}</p>}
+                {s.action && <button onClick={confirmAllPending} style={{ marginTop: 4, padding: '3px 10px', borderRadius: 4, border: 'none', background: '#4CAF50', color: '#fff', cursor: 'pointer', fontSize: 10, fontFamily: font, fontWeight: 600 }}>✅ 全確認</button>}
+              </div>
+            ))}
           </div>
 
           <div style={{ display: 'flex', gap: 0, marginBottom: 16 }}>
             {[['list', '📋 列表模式'], ['schedule', '📅 月曆日程']].map(([k, l]) => (
-              <button key={k} onClick={() => setViewMode(k)} style={{ padding: '12px 24px', border: 'none', cursor: 'pointer', fontSize: 14, fontFamily: font, fontWeight: viewMode === k ? 700 : 400, background: viewMode === k ? '#5c4a3a' : '#fff', color: viewMode === k ? '#fff' : '#5c4a3a', borderRadius: k === 'list' ? '10px 0 0 10px' : '0 10px 10px 0', boxShadow: viewMode === k ? '0 2px 8px rgba(92,74,58,0.3)' : '0 2px 10px rgba(0,0,0,0.05)' }}>{l}</button>
+              <button key={k} onClick={() => setViewMode(k)} style={{ padding: '10px 20px', border: 'none', cursor: 'pointer', fontSize: 13, fontFamily: font, fontWeight: viewMode === k ? 700 : 400, background: viewMode === k ? '#5c4a3a' : '#fff', color: viewMode === k ? '#fff' : '#5c4a3a', borderRadius: k === 'list' ? '10px 0 0 10px' : '0 10px 10px 0', boxShadow: viewMode === k ? '0 2px 8px rgba(92,74,58,0.3)' : '0 2px 10px rgba(0,0,0,0.05)' }}>{l}</button>
             ))}
           </div>
 
           {viewMode === 'list' && (<>
-            <div style={{ background: '#fff', padding: '16px 20px', borderRadius: 12, marginBottom: 16, boxShadow: '0 2px 10px rgba(0,0,0,0.05)' }}>
-              <div style={{ marginBottom: 12 }}><input type="text" placeholder="🔍 搜尋客人名稱或電話..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} style={{ width: '100%', padding: '10px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, boxSizing: 'border-box', fontFamily: font }} /></div>
+            <div style={{ background: '#fff', padding: '14px 16px', borderRadius: 12, marginBottom: 14, boxShadow: '0 2px 10px rgba(0,0,0,0.05)' }}>
+              <div style={{ marginBottom: 10 }}><input type="text" placeholder="🔍 搜尋客人名稱或電話..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} style={{ width: '100%', padding: '10px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, boxSizing: 'border-box', fontFamily: font }} /></div>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
                 <span style={{ color: '#5c4a3a', fontWeight: 600, fontSize: 13 }}>日期：</span>
                 <input type="date" value={filterDateFrom} onChange={e => setFilterDateFrom(e.target.value)} style={{ padding: '6px 10px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13 }} />
@@ -811,16 +852,16 @@ const addStaff = async () => { const name = newStaffName.trim(); if (!name) retu
                 <select value={filterTech} onChange={e => setFilterTech(e.target.value)} style={{ padding: '6px 10px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13, fontFamily: font }}><option value="all">全部技師</option>{techList.map(t => <option key={t} value={t}>{t}</option>)}</select>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: '#999', cursor: 'pointer' }}><input type="checkbox" checked={autoRefresh} onChange={e => setAutoRefresh(e.target.checked)} /> 自動刷新</label>
                 <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
-                  {hasFilters && <button onClick={clearFilters} style={{ padding: '6px 14px', background: '#f5f0eb', border: 'none', borderRadius: 6, cursor: 'pointer', color: '#999', fontSize: 12, fontFamily: font }}>✕ 清除篩選</button>}
+                  {hasFilters && <button onClick={clearFilters} style={{ padding: '6px 14px', background: '#f5f0eb', border: 'none', borderRadius: 6, cursor: 'pointer', color: '#999', fontSize: 12, fontFamily: font }}>✕ 清除</button>}
                   <button onClick={fetchBookings} style={{ padding: '6px 14px', background: '#5c4a3a', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontFamily: font }}>🔄 刷新</button>
                 </div>
               </div>
             </div>
-            {hasFilters && <div style={{ padding: '10px 16px', marginBottom: 12, borderRadius: 8, background: '#FFF8E1', border: '1px solid #FFE082', fontSize: 13, color: '#F57F17' }}>🔍 篩選結果：{filteredBookings.length} / {allBookings.length} 筆</div>}
+            {hasFilters && <div style={{ padding: '8px 14px', marginBottom: 12, borderRadius: 8, background: '#FFF8E1', border: '1px solid #FFE082', fontSize: 13, color: '#F57F17' }}>🔍 篩選結果：{filteredBookings.length} / {allBookings.length} 筆</div>}
             <div style={{ background: '#fff', borderRadius: 12, overflow: 'hidden', boxShadow: '0 2px 10px rgba(0,0,0,0.05)' }}>
-              <div style={{ padding: '16px 20px', borderBottom: '1px solid #eee', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <h2 style={{ margin: 0, color: '#5c4a3a', fontSize: 17 }}>預約列表 ({filteredBookings.length})</h2>
-                {autoRefresh && <span style={{ fontSize: 11, color: '#999' }}>🔄 每 30 秒自動刷新</span>}
+              <div style={{ padding: '14px 16px', borderBottom: '1px solid #eee', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <h2 style={{ margin: 0, color: '#5c4a3a', fontSize: 16 }}>預約列表 ({filteredBookings.length})</h2>
+                {autoRefresh && <span style={{ fontSize: 11, color: '#999' }}>🔄 30秒刷新</span>}
               </div>
               {bkLoading ? <p style={{ padding: 40, textAlign: 'center', color: '#999' }}>載入中...</p> : filteredBookings.length === 0 ? <p style={{ padding: 40, textAlign: 'center', color: '#999' }}>{hasFilters ? '搵唔到符合條件嘅預約' : '暫無預約'}</p> : isMobile ? (
                 <div style={{ padding: '12px 16px' }}>{filteredBookings.map(b => (
@@ -834,9 +875,7 @@ const addStaff = async () => { const name = newStaffName.trim(); if (!name) retu
                       <span style={{ fontSize: 13, color: '#5c4a3a' }}>{b.service_name}</span>
                       <span style={{ fontSize: 17, fontWeight: 700, color: '#5c4a3a' }}>${b.total_price}</span>
                     </div>
-                    {b.status === 'pending' && <div style={{ marginTop: 8, display: 'flex', gap: 6 }}>
-                      <button onClick={e => { e.stopPropagation(); updateStatus(b.id, 'confirmed'); }} style={{ padding: '6px 16px', borderRadius: 6, border: 'none', background: '#4CAF50', color: '#fff', cursor: 'pointer', fontSize: 12, fontFamily: font, fontWeight: 600 }}>✅ 快速確認</button>
-                    </div>}
+                    {b.status === 'pending' && <div style={{ marginTop: 8, display: 'flex', gap: 6 }}><button onClick={e => { e.stopPropagation(); updateStatus(b.id, 'confirmed'); }} style={{ padding: '6px 16px', borderRadius: 6, border: 'none', background: '#4CAF50', color: '#fff', cursor: 'pointer', fontSize: 12, fontFamily: font, fontWeight: 600 }}>✅ 快速確認</button></div>}
                   </div>
                 ))}</div>
               ) : (
@@ -878,12 +917,11 @@ const addStaff = async () => { const name = newStaffName.trim(); if (!name) retu
               </div>
               <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
                 <button onClick={schedToToday} style={{ padding: '6px 16px', borderRadius: 6, border: '1px solid #d0c8bc', background: '#faf6f0', color: '#5c4a3a', cursor: 'pointer', fontSize: 13, fontFamily: font, fontWeight: 600 }}>📍 今日</button>
-                <button onClick={() => { setSchedRefreshKey(k => k + 1); showToast('🔄 已刷新'); }} style={{ padding: '6px 16px', borderRadius: 6, border: '1px solid #d0c8bc', background: '#faf6f0', color: '#5c4a3a', cursor: 'pointer', fontSize: 13, fontFamily: font }}>🔄 刷新</button>
+                <button onClick={() => { setSchedRefreshKey(k => k + 1); showToast('🔄 已刷新'); }} style={{ padding: '6px 16px', borderRadius: 6, border: '1px solid #d0c8bc', background: '#faf6f0', color: '#5c4a3a', cursor: 'pointer', fontSize: 13, fontFamily: font }}>🔄</button>
                 <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: '#999', cursor: 'pointer', marginLeft: 'auto' }}><input type="checkbox" checked={showCancelled} onChange={e => setShowCancelled(e.target.checked)} /> 顯示已取消</label>
               </div>
               <div style={{ display: 'flex', gap: 16, marginBottom: 12, fontSize: 12, color: '#999', flexWrap: 'wrap' }}>
-                {staffList.map(s => <span key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 4 }}><span style={{ width: 10, height: 10, borderRadius: '50%', background: '#4CAF50', display: 'inline-block', boxShadow: '0 0 0 1px #ccc' }} />{s.name}</span>)}
-                <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><span style={{ width: 10, height: 10, borderRadius: '50%', background: '#ddd', display: 'inline-block', boxShadow: '0 0 0 1px #ccc' }} />未開放</span>
+                {staffList.map(s => <span key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 4 }}><span style={{ width: 10, height: 10, borderRadius: '50%', background: '#4CAF50', display: 'inline-block' }} />{s.name}</span>)}
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 4 }}>
                 {DAYS.map((d, i) => <div key={`h${i}`} style={{ padding: '10px 0', textAlign: 'center', fontSize: 13, fontWeight: 600, color: i === 0 || i === 6 ? '#c62828' : '#5c4a3a', background: '#f9f6f3', borderRadius: 6 }}>{d}</div>)}
@@ -892,14 +930,15 @@ const addStaff = async () => { const name = newStaffName.trim(); if (!name) retu
                   const ds = toDS(schedYear, schedMonth, day); const isSel = ds === schedDate; const isToday = ds === todayStr;
                   const bk = monthBkStats[ds]; const avail = monthAvail[ds]; const isPast = ds < todayStr; const dow = new Date(ds + 'T00:00:00').getDay();
                   return (
-                    <div key={`d${i}`} onClick={() => setSchedDate(ds)} style={{ minHeight: isMobile ? 52 : 90, padding: isMobile ? '4px 3px' : '6px 8px', borderRadius: 8, cursor: 'pointer', border: isSel ? '3px solid #FF9800' : '1px solid #e8e0d8', background: isSel ? '#FFF8E1' : isToday ? '#FFFDE7' : isPast ? '#fafafa' : '#fff', transition: 'all 0.15s', display: 'flex', flexDirection: 'column', gap: isMobile ? 1 : 3, opacity: isPast ? 0.6 : 1 }}>
+                    <div key={`d${i}`} onClick={() => setSchedDate(ds)} style={{ minHeight: isMobile ? 52 : 90, padding: isMobile ? '4px 3px' : '6px 8px', borderRadius: 8, cursor: 'pointer', border: isSel ? '3px solid #FF9800' : '1px solid #e8e0d8', background: isSel ? '#FFF8E1' : isToday ? '#FFFDE7' : isPast ? '#fafafa' : '#fff', display: 'flex', flexDirection: 'column', gap: isMobile ? 1 : 3, opacity: isPast ? 0.6 : 1 }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <span style={{ fontWeight: isToday || isSel ? 700 : 500, fontSize: isMobile ? 13 : 15, color: isToday ? '#FF9800' : (dow === 0 || dow === 6) ? '#c62828' : '#5c4a3a' }}>{day}</span>
                         {bk?.pending > 0 && <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#FF9800' }} />}
                       </div>
                       {staffList.length > 0 && <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>{staffList.map(s => <span key={s.id} title={s.name} style={{ width: isMobile ? 6 : 8, height: isMobile ? 6 : 8, borderRadius: '50%', background: avail?.[s.id] === 'available' ? '#4CAF50' : '#ddd' }} />)}</div>}
-                      {bk && bk.total > 0 ? <div style={{ fontSize: isMobile ? 10 : 12, fontWeight: 600, color: '#5c4a3a', lineHeight: 1.3 }}>{bk.total} 個預約{!isMobile && <div style={{ fontWeight: 400, color: '#999', fontSize: 11 }}>${bk.revenue}</div>}</div> : (!isPast && avail && Object.values(avail).some(s => s === 'available')) ? <div style={{ fontSize: isMobile ? 9 : 11, color: '#a5d6a7' }}>{isMobile ? '✓' : '可預約'}</div> : null}
-                </div>);
+                      {bk && bk.total > 0 ? <div style={{ fontSize: isMobile ? 10 : 12, fontWeight: 600, color: '#5c4a3a', lineHeight: 1.3 }}>{bk.total} 預約{!isMobile && <div style={{ fontWeight: 400, color: '#999', fontSize: 11 }}>${bk.revenue}</div>}</div> : null}
+                    </div>
+                  );
                 })}
               </div>
             </div>
@@ -915,18 +954,15 @@ const addStaff = async () => { const name = newStaffName.trim(); if (!name) retu
                   <button onClick={() => loadDaySlots(schedDate)} style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid #d0c8bc', background: '#faf6f0', color: '#5c4a3a', cursor: 'pointer', fontSize: 12, fontFamily: font }}>🔄</button>
                 </div>
               </div>
-              <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', padding: '12px 16px', background: '#f9f6f3', borderRadius: 8, fontSize: 14, marginBottom: 16 }}>
-                <span>📊 預約 <b style={{ color: '#5c4a3a', fontSize: 18 }}>{dayStats.total}</b></span>
-                <span>💰 收入 <b style={{ color: '#5c4a3a', fontSize: 18 }}>${dayStats.revenue}</b></span>
-                {dayStats.pending > 0 && <span style={{ color: '#FF9800' }}>⏳ 待確認 <b>{dayStats.pending}</b></span>}
-                {dayStats.confirmed > 0 && <span style={{ color: '#4CAF50' }}>✅ 已確認 <b>{dayStats.confirmed}</b></span>}
-                {dayStats.completed > 0 && <span style={{ color: '#2196F3' }}>✔️ 已完成 <b>{dayStats.completed}</b></span>}
+              <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', padding: '10px 14px', background: '#f9f6f3', borderRadius: 8, fontSize: 13, marginBottom: 16 }}>
+                <span>📊 <b>{dayStats.total}</b></span><span>💰 <b>${dayStats.revenue}</b></span>
+                {dayStats.pending > 0 && <span style={{ color: '#FF9800' }}>⏳ {dayStats.pending}</span>}
+                {dayStats.confirmed > 0 && <span style={{ color: '#4CAF50' }}>✅ {dayStats.confirmed}</span>}
+                {dayStats.completed > 0 && <span style={{ color: '#2196F3' }}>✔️ {dayStats.completed}</span>}
               </div>
               {dayLoading ? <p style={{ textAlign: 'center', color: '#999', padding: 30 }}>載入中...</p> :
                timetableTimes.length === 0 && dayBks.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '40px 20px', color: '#999' }}><div style={{ fontSize: 40, marginBottom: 10 }}>📭</div><div style={{ fontSize: 14 }}>此日未有開放時段或預約</div><div style={{ fontSize: 12, marginTop: 6 }}>請到「🕐 時段管理」設定員工開放時段</div></div>
-              ) : timetableStaff.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: 30, color: '#999' }}>未有員工</div>
+                <div style={{ textAlign: 'center', padding: '40px 20px', color: '#999' }}><div style={{ fontSize: 40, marginBottom: 10 }}>📭</div><div style={{ fontSize: 14 }}>此日未有開放時段或預約</div></div>
               ) : (
                 <div style={{ overflowX: 'auto', border: '1px solid #e8e0d8', borderRadius: 10 }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: timetableStaff.length * 160 + 80 }}>
@@ -949,68 +985,65 @@ const addStaff = async () => { const name = newStaffName.trim(); if (!name) retu
                             return (
                               <td key={s.name} style={{ padding: '3px 5px', borderLeft: '1px solid #f0ebe3', verticalAlign: 'top', height: 52, background: bks.length > 0 ? 'transparent' : hasSlot ? '#f0faf0' : (ti % 2 === 0 ? '#fafafa' : '#f5f5f5') }}>
                                 {bks.length > 0 ? bks.map(b => (
-                                  <div key={b.id} onClick={() => openBooking(b)} style={{ padding: '5px 8px', borderRadius: 6, marginBottom: 2, cursor: 'pointer', borderLeft: `4px solid ${statusColor(b.status)}`, background: rowBg(b.status), fontSize: 12, lineHeight: 1.4 }} onMouseEnter={e => e.currentTarget.style.boxShadow = '0 2px 12px rgba(0,0,0,0.12)'} onMouseLeave={e => e.currentTarget.style.boxShadow = 'none'}>
+                                  <div key={b.id} onClick={() => openBooking(b)} style={{ padding: '5px 8px', borderRadius: 6, marginBottom: 2, cursor: 'pointer', borderLeft: `4px solid ${statusColor(b.status)}`, background: rowBg(b.status), fontSize: 12, lineHeight: 1.4 }}>
                                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                                       <span style={{ fontWeight: 700, color: '#5c4a3a', fontSize: 13 }}>{b.customer_name}</span>
-                                      {b.status === 'pending' && <button onClick={e => { e.stopPropagation(); updateStatus(b.id, 'confirmed'); }} style={{ padding: '2px 8px', borderRadius: 4, border: 'none', background: '#4CAF50', color: '#fff', cursor: 'pointer', fontSize: 10, fontFamily: font, fontWeight: 600 }}>✅</button>}
+                                      {b.status === 'pending' && <button onClick={e => { e.stopPropagation(); updateStatus(b.id, 'confirmed'); }} style={{ padding: '2px 8px', borderRadius: 4, border: 'none', background: '#4CAF50', color: '#fff', cursor: 'pointer', fontSize: 10, fontFamily: font }}>✅</button>}
                                     </div>
                                     <div style={{ color: '#888', marginTop: 1 }}>{b.service_name}</div>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 2 }}>
-                                      <span style={{ color: statusColor(b.status), fontWeight: 600, fontSize: 11 }}>{statusText(b.status)}</span>
-                                      <span style={{ fontWeight: 700, color: '#5c4a3a' }}>${b.total_price}</span>
-                                    </div>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 2 }}><span style={{ color: statusColor(b.status), fontWeight: 600, fontSize: 11 }}>{statusText(b.status)}</span><span style={{ fontWeight: 700, color: '#5c4a3a' }}>${b.total_price}</span></div>
                                   </div>
                                 )) : hasSlot ? <div style={{ color: '#c8e6c9', fontSize: 11, textAlign: 'center', paddingTop: 16 }}>空</div> : null}
-                              </td>);
+                              </td>
+                            );
                           })}
-                        </tr>);
+                        </tr>
+                      );
                     })}</tbody>
                   </table>
                 </div>
               )}
-              <div style={{ marginTop: 10, fontSize: 11, color: '#999', display: 'flex', justifyContent: 'space-between' }}>
-                <span>💡 點擊預約卡片查看詳情 / 改期</span>
-                <span>🟢 可預約　⬜ 未開放</span>
-              </div>
             </div>
           </>)}
         </>)}
 
+        {/* ═══════════════════════════════════════ */}
+        {/* ═══ TAB: 時段管理 ═══ */}
+        {/* ═══════════════════════════════════════ */}
         {tab === 'timeslots' && (<>
-          <div style={{ ...card, background: '#e8f5e9', border: '1px solid #a5d6a7' }}>
-            <div style={{ fontSize: 14, color: '#2e7d32', lineHeight: 2 }}>💡 <b>使用流程：</b>選擇員工 → 月曆選日期 → 套用模板 → 按「<b>確認同步到前台</b>」<br />🔒 每個員工有獨立嘅時間表。同步後日程表月曆會即時更新。</div>
+          <div style={{ ...card, background: '#e8f5e9', border: '1px solid #a5d6a7', padding: 16 }}>
+            <div style={{ fontSize: 13, color: '#2e7d32', lineHeight: 2 }}>💡 <b>流程：</b>選員工 → 月曆選日期 → 套用模板 → 按「確認同步到前台」</div>
           </div>
           <div style={card}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}><div style={sTitle}>👤 員工時間表</div><span style={{ fontSize: 12, color: '#999' }}>每個員工有獨立嘅時段設定</span></div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}><div style={sTitle}>👤 員工時間表</div></div>
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginBottom: 16 }}>
               {staffList.map(s => <button key={s.id} onClick={() => switchStaff(s)} style={{ padding: '10px 20px', borderRadius: 10, cursor: 'pointer', fontSize: 14, fontFamily: font, fontWeight: activeStaff?.id === s.id ? 700 : 400, border: activeStaff?.id === s.id ? '2px solid #5c4a3a' : '2px solid #d0c8bc', background: activeStaff?.id === s.id ? '#5c4a3a' : '#fff', color: activeStaff?.id === s.id ? '#fff' : '#5c4a3a' }}>{s.name}{activeStaff?.id === s.id && ' ✓'}</button>)}
-              {!showAddStaff ? <button onClick={() => setShowAddStaff(true)} style={{ padding: '10px 20px', borderRadius: 10, cursor: 'pointer', fontSize: 14, fontFamily: font, border: '2px dashed #c0b8aa', background: 'transparent', color: '#999' }}>＋ 新增員工</button> : (
+              {!showAddStaff ? <button onClick={() => setShowAddStaff(true)} style={{ padding: '10px 20px', borderRadius: 10, cursor: 'pointer', fontSize: 14, fontFamily: font, border: '2px dashed #c0b8aa', background: 'transparent', color: '#999' }}>＋ 新增</button> : (
                 <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                  <input type="text" placeholder="輸入名稱..." value={newStaffName} onChange={e => setNewStaffName(e.target.value)} onKeyDown={e => e.key === 'Enter' && addStaff()} autoFocus style={{ padding: '8px 14px', border: '2px solid #5c4a3a', borderRadius: 8, fontSize: 14, fontFamily: font, width: 140 }} />
-                  <button onClick={addStaff} style={{ padding: '8px 16px', borderRadius: 8, border: 'none', background: '#5c4a3a', color: '#fff', cursor: 'pointer', fontSize: 13, fontFamily: font, fontWeight: 600 }}>確定</button>
+                  <input type="text" placeholder="名稱..." value={newStaffName} onChange={e => setNewStaffName(e.target.value)} onKeyDown={e => e.key === 'Enter' && addStaff()} autoFocus style={{ padding: '8px 14px', border: '2px solid #5c4a3a', borderRadius: 8, fontSize: 14, fontFamily: font, width: 120 }} />
+                  <button onClick={addStaff} style={{ padding: '8px 16px', borderRadius: 8, border: 'none', background: '#5c4a3a', color: '#fff', cursor: 'pointer', fontSize: 13, fontFamily: font }}>確定</button>
                   <button onClick={() => { setShowAddStaff(false); setNewStaffName(''); }} style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid #ccc', background: '#fff', color: '#999', cursor: 'pointer', fontSize: 13, fontFamily: font }}>取消</button>
                 </div>
               )}
             </div>
             {activeStaff && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '12px 16px', background: '#f9f6f3', borderRadius: 8 }}>
-                <span style={{ fontSize: 13, color: '#999' }}>正在管理：</span>
+                <span style={{ fontSize: 13, color: '#999' }}>管理：</span>
                 {editStaffId === activeStaff.id ? (<>
                   <input type="text" value={editStaffName} onChange={e => setEditStaffName(e.target.value)} onKeyDown={e => e.key === 'Enter' && saveStaffName()} autoFocus style={{ padding: '6px 12px', border: '2px solid #5c4a3a', borderRadius: 6, fontSize: 14, fontFamily: font, width: 130 }} />
                   <button onClick={saveStaffName} style={smallBtn('#5c4a3a', '#fff')}>儲存</button><button onClick={() => setEditStaffId(null)} style={smallBtn('#fff', '#999', '#ccc')}>取消</button>
                 </>) : (<>
                   <span style={{ fontSize: 16, fontWeight: 700, color: '#5c4a3a' }}>{activeStaff.name}</span>
                   <button onClick={() => { setEditStaffId(activeStaff.id); setEditStaffName(activeStaff.name); }} style={smallBtn('#fff', '#5c4a3a', '#d0c8bc')}>✏️ 改名</button>
-                  {staffList.length > 1 && <button onClick={() => removeStaff(activeStaff.id)} style={smallBtn('#ffebee', '#c62828', '#ffcdd2')}>🗑️ 刪除</button>}
+                  {staffList.length > 1 && <button onClick={() => removeStaff(activeStaff.id)} style={smallBtn('#ffebee', '#c62828', '#ffcdd2')}>🗑️</button>}
                 </>)}
               </div>
             )}
-            {staffList.length === 0 && <div style={{ textAlign: 'center', padding: 30, color: '#999' }}>未有員工，請先新增一個。</div>}
           </div>
           {activeStaff && (<>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 20 }}>
               <div style={card}>
-                <div style={sTitle}>📅 選擇日期</div><div style={sDesc}>點日期查看「{activeStaff.name}」嘅時段，可多選後套用模板</div>
+                <div style={sTitle}>📅 選擇日期</div><div style={sDesc}>點日期查看「{activeStaff.name}」嘅時段</div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}><button onClick={prevCal} style={navBtn}>◀</button><span style={{ fontSize: 17, fontWeight: 600, color: '#5c4a3a' }}>{calYear}年 {calMonth + 1}月</span><button onClick={nextCal} style={navBtn}>▶</button></div>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7,1fr)', gap: 4 }}>
                   {DAYS.map((d, i) => <button key={`h${i}`} onClick={() => toggleWeekdayCol(i)} style={{ padding: '10px 0', borderRadius: 8, border: 'none', cursor: 'pointer', background: isColAllSel(i) ? '#5c4a3a' : '#f0ebe3', color: isColAllSel(i) ? '#fff' : '#5c4a3a', fontSize: 13, fontWeight: 600, fontFamily: font }}>{d}</button>)}
@@ -1022,9 +1055,9 @@ const addStaff = async () => { const name = newStaffName.trim(); if (!name) retu
                 </div>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 16 }}>
                   {[['平日', d => d >= 1 && d <= 5], ['週末', d => d === 0 || d === 6], ['全月', () => true]].map(([l, fn]) => <button key={l} onClick={() => selectByFilter(fn)} style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid #d0c8bc', background: '#faf6f0', color: '#5c4a3a', cursor: 'pointer', fontSize: 12, fontFamily: font }}>{l}</button>)}
-                  <button onClick={() => setSelDates(new Set())} style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid #d0c8bc', background: '#faf6f0', color: '#999', cursor: 'pointer', fontSize: 12, fontFamily: font }}>清除選擇</button>
+                  <button onClick={() => setSelDates(new Set())} style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid #d0c8bc', background: '#faf6f0', color: '#999', cursor: 'pointer', fontSize: 12, fontFamily: font }}>清除</button>
                 </div>
-                {selDates.size > 0 && <div style={{ marginTop: 14, padding: '10px 14px', background: '#f0ebe3', borderRadius: 8, fontSize: 13, color: '#5c4a3a' }}>已選 <b>{selDates.size}</b> 日</div>}
+                {selDates.size > 0 && <div style={{ marginTop: 14, padding: '8px 14px', background: '#f0ebe3', borderRadius: 8, fontSize: 13, color: '#5c4a3a' }}>已選 <b>{selDates.size}</b> 日</div>}
               </div>
               <div style={card}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 6 }}>
@@ -1045,9 +1078,8 @@ const addStaff = async () => { const name = newStaffName.trim(); if (!name) retu
                   </div>
                 </div>
                 <div style={{ padding: '8px 12px', borderRadius: 6, marginBottom: 12, fontSize: 12, background: isInPending ? '#FFF3E0' : dbStatus === 'available' ? '#e8f5e9' : '#f5f5f5', color: isInPending ? '#E65100' : dbStatus === 'available' ? '#2e7d32' : '#999', border: `1px solid ${isInPending ? '#FFB74D' : dbStatus === 'available' ? '#a5d6a7' : '#e0e0e0'}` }}>
-                  {isInPending ? `⏳ 未同步 — ${displayTimes.size}/${gridTimes.length} 時段開放` : dbStatus === 'available' ? `✅ 已同步 — ${displayTimes.size} 時段` : '🔒 未開放'}
+                  {isInPending ? `⏳ 未同步 — ${displayTimes.size}/${gridTimes.length} 時段` : dbStatus === 'available' ? `✅ 已同步 — ${displayTimes.size} 時段` : '🔒 未開放'}
                 </div>
-                {extraDbTimes.length > 0 && <div style={{ padding: '8px 12px', borderRadius: 6, marginBottom: 12, fontSize: 12, background: '#FFF8E1', border: '1px solid #FFE082', color: '#F57F17' }}>⚠️ {extraDbTimes.length} 個時段唔喺範圍內</div>}
                 {gridLoading ? <p style={{ textAlign: 'center', color: '#999', padding: 30 }}>載入中...</p> : (
                   <div style={{ display: 'grid', gridTemplateColumns: `repeat(auto-fill, minmax(${gridInterval >= 60 ? '80px' : '68px'}, 1fr))`, gap: 5, maxHeight: 480, overflowY: 'auto' }}>
                     {gridTimes.map(t => { const isOn = displayTimes.has(t); return <button key={t} onClick={() => toggleTime(t)} style={{ padding: '10px 4px', borderRadius: 6, border: `2px solid ${isOn ? '#5c4a3a' : '#e0d8cc'}`, background: isOn ? '#5c4a3a' : '#faf6f0', color: isOn ? '#fff' : '#c0b8aa', fontSize: 13, fontWeight: 500, cursor: 'pointer', fontFamily: font }}>{t}</button>; })}
@@ -1088,37 +1120,122 @@ const addStaff = async () => { const name = newStaffName.trim(); if (!name) retu
           </>)}
         </>)}
 
-{tab === 'blocked' && (
-          <div style={card}>
-            <h2 style={{ margin: '0 0 20px', color: '#5c4a3a', fontSize: 18 }}>封鎖日期</h2>
-            <p style={{ fontSize: 13, color: '#999', marginBottom: 20 }}>封鎖特定日期，該日將無法被預約。</p>
-            <div style={{ display: 'flex', gap: 10, marginBottom: 24, paddingBottom: 24, borderBottom: '1px solid #f0ebe3', flexWrap: 'wrap' }}>
-              <input type="date" value={newBD} onChange={e => setNewBD(e.target.value)} style={{ padding: '10px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, flex: '1 1 150px' }} />
-              <input type="text" placeholder="原因（可選）" value={newBR} onChange={e => setNewBR(e.target.value)} style={{ padding: '10px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, flex: '2 1 200px', fontFamily: font }} />
-              <button onClick={addBlocked} style={{ padding: '10px 20px', background: '#c62828', color: '#fff', border: 'none', borderRadius: 8, fontSize: 14, cursor: 'pointer', fontFamily: font }}>封鎖</button>
-            </div>
-            {blocked.length === 0 ? <p style={{ textAlign: 'center', color: '#999', padding: 30 }}>未有封鎖日期</p> : (
-              <div>{blocked.map(b => (
-                <div key={b.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px', borderRadius: 8, background: '#faf6f0', marginBottom: 8 }}>
-                  <div><span style={{ fontWeight: 500, fontSize: 14 }}>{b.date}</span>{b.reason && <span style={{ color: '#999', fontSize: 13, marginLeft: 12 }}>— {b.reason}</span>}</div>
-                  <button onClick={() => removeBlocked(b.id)} style={smallBtn('#ffebee', '#c62828', '#ffcdd2')}>刪除</button>
-                </div>))}</div>
-            )}
+        {/* ═══════════════════════════════════════ */}
+        {/* ═══ TAB: 前台管理（新增） ═══ */}
+        {/* ═══════════════════════════════════════ */}
+        {tab === 'frontend' && (<>
+          <div style={{ ...card, background: '#e8f5e9', border: '1px solid #a5d6a7', padding: 16 }}>
+            <div style={{ fontSize: 13, color: '#2e7d32', lineHeight: 1.8 }}>🎨 <b>前台管理：</b>喺呢度編輯客人睇到嘅服務項目、價錢、附加項目等。修改即時生效到前台預約頁面。</div>
           </div>
-        )}
 
+          <div style={{ display: 'flex', gap: 0, marginBottom: 20 }}>
+            {[['services', '🎨 服務項目'], ['addons', '➕ 附加項目']].map(([k, l]) => (
+              <button key={k} onClick={() => setSvcSubTab(k)} style={{ padding: '10px 24px', border: 'none', cursor: 'pointer', fontSize: 13, fontFamily: font, fontWeight: svcSubTab === k ? 700 : 400, background: svcSubTab === k ? '#5c4a3a' : '#fff', color: svcSubTab === k ? '#fff' : '#5c4a3a', borderRadius: k === 'services' ? '10px 0 0 10px' : '0 10px 10px 0', boxShadow: '0 2px 8px rgba(0,0,0,0.05)' }}>{l}</button>
+            ))}
+          </div>
+
+          {/* ── 服務項目 ── */}
+          {svcSubTab === 'services' && (
+            <div style={card}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                <h2 style={{ margin: 0, color: '#5c4a3a', fontSize: 17 }}>🎨 服務項目 ({svcList.length})</h2>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={fetchServices} style={{ padding: '8px 14px', borderRadius: 8, border: '1px solid #d0c8bc', background: '#faf6f0', color: '#5c4a3a', cursor: 'pointer', fontSize: 13, fontFamily: font }}>🔄 刷新</button>
+                  <button onClick={() => openEditSvc(null)} style={{ padding: '8px 20px', borderRadius: 8, border: 'none', background: '#5c4a3a', color: '#fff', cursor: 'pointer', fontSize: 13, fontFamily: font, fontWeight: 600 }}>➕ 新增服務</button>
+                </div>
+              </div>
+
+              {svcLoading ? <p style={{ textAlign: 'center', color: '#999', padding: 30 }}>載入中...</p> : svcList.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '40px 20px', color: '#999' }}>
+                  <div style={{ fontSize: 40, marginBottom: 10 }}>🎨</div>
+                  <div style={{ fontSize: 14 }}>未有服務項目</div>
+                  <div style={{ fontSize: 12, marginTop: 6 }}>撳「➕ 新增服務」開始設定</div>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {svcList.map((svc, idx) => (
+                    <div key={svc.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', background: svc.is_active ? '#fff' : '#fafafa', borderRadius: 10, border: `1px solid ${svc.is_active ? '#e8e0d8' : '#eee'}`, opacity: svc.is_active ? 1 : 0.6 }}>
+                      {/* 排序箭頭 */}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                        <button onClick={() => moveSvc(idx, -1)} disabled={idx === 0} style={{ padding: '2px 6px', border: 'none', background: 'transparent', cursor: idx === 0 ? 'default' : 'pointer', fontSize: 10, color: idx === 0 ? '#ddd' : '#999' }}>▲</button>
+                        <button onClick={() => moveSvc(idx, 1)} disabled={idx === svcList.length - 1} style={{ padding: '2px 6px', border: 'none', background: 'transparent', cursor: idx === svcList.length - 1 ? 'default' : 'pointer', fontSize: 10, color: idx === svcList.length - 1 ? '#ddd' : '#999' }}>▼</button>
+                      </div>
+                      {/* 圖片 */}
+                      {svc.image_url && <img src={svc.image_url} alt="" style={{ width: 48, height: 48, borderRadius: 8, objectFit: 'cover', border: '1px solid #eee' }} />}
+                      {/* 資訊 */}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                          <span style={{ fontWeight: 700, fontSize: 15, color: '#5c4a3a' }}>{svc.name}</span>
+                          {svc.category && <span style={{ padding: '2px 8px', background: '#f0ebe3', borderRadius: 4, fontSize: 11, color: '#999' }}>{svc.category}</span>}
+                          {!svc.is_active && <span style={{ padding: '2px 8px', background: '#ffebee', borderRadius: 4, fontSize: 11, color: '#c62828' }}>已下架</span>}
+                        </div>
+                        {svc.description && <div style={{ fontSize: 12, color: '#999', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{svc.description}</div>}
+                        <div style={{ display: 'flex', gap: 12, marginTop: 4, fontSize: 13 }}>
+                          <span style={{ fontWeight: 700, color: '#5c4a3a' }}>${svc.base_price}</span>
+                          {svc.duration_minutes && <span style={{ color: '#999' }}>⏱ {svc.duration_minutes}分鐘</span>}
+                        </div>
+                      </div>
+                      {/* 操作 */}
+                      <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                        <button onClick={() => toggleSvcActive(svc)} style={smallBtn(svc.is_active ? '#FFF3E0' : '#E8F5E9', svc.is_active ? '#E65100' : '#2e7d32', svc.is_active ? '#FFB74D' : '#a5d6a7')}>{svc.is_active ? '下架' : '上架'}</button>
+                        <button onClick={() => openEditSvc(svc)} style={smallBtn('#fff', '#5c4a3a', '#d0c8bc')}>✏️ 編輯</button>
+                        <button onClick={() => deleteSvc(svc.id)} style={smallBtn('#ffebee', '#c62828', '#ffcdd2')}>🗑️</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── 附加項目 ── */}
+          {svcSubTab === 'addons' && (
+            <div style={card}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+                <h2 style={{ margin: 0, color: '#5c4a3a', fontSize: 17 }}>➕ 附加項目 ({svcAddons.length})</h2>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={fetchAddons} style={{ padding: '8px 14px', borderRadius: 8, border: '1px solid #d0c8bc', background: '#faf6f0', color: '#5c4a3a', cursor: 'pointer', fontSize: 13, fontFamily: font }}>🔄</button>
+                  <button onClick={() => openEditAddon(null)} style={{ padding: '8px 20px', borderRadius: 8, border: 'none', background: '#5c4a3a', color: '#fff', cursor: 'pointer', fontSize: 13, fontFamily: font, fontWeight: 600 }}>➕ 新增</button>
+                </div>
+              </div>
+              {svcAddons.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '40px 20px', color: '#999' }}>
+                  <div style={{ fontSize: 40, marginBottom: 10 }}>➕</div>
+                  <div style={{ fontSize: 14 }}>未有附加項目</div>
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {svcAddons.map(addon => (
+                    <div key={addon.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', background: addon.is_active ? '#fff' : '#fafafa', borderRadius: 10, border: '1px solid #e8e0d8', opacity: addon.is_active ? 1 : 0.6 }}>
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span style={{ fontWeight: 600, fontSize: 14, color: '#5c4a3a' }}>{addon.name}</span>
+                          <span style={{ fontWeight: 700, color: '#5c4a3a', fontSize: 14 }}>+${addon.price}</span>
+                          {!addon.is_active && <span style={{ padding: '2px 8px', background: '#ffebee', borderRadius: 4, fontSize: 11, color: '#c62828' }}>停用</span>}
+                        </div>
+                        {addon.description && <div style={{ fontSize: 12, color: '#999', marginTop: 2 }}>{addon.description}</div>}
+                      </div>
+                      <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                        <button onClick={() => toggleAddonActive(addon)} style={smallBtn(addon.is_active ? '#FFF3E0' : '#E8F5E9', addon.is_active ? '#E65100' : '#2e7d32', addon.is_active ? '#FFB74D' : '#a5d6a7')}>{addon.is_active ? '停用' : '啟用'}</button>
+                        <button onClick={() => openEditAddon(addon)} style={smallBtn('#fff', '#5c4a3a', '#d0c8bc')}>✏️</button>
+                        <button onClick={() => deleteAddon(addon.id)} style={smallBtn('#ffebee', '#c62828', '#ffcdd2')}>🗑️</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </>)}
+
+        {/* ═══════════════════════════════════════ */}
+        {/* ═══ TAB: 訊息模板 ═══ */}
+        {/* ═══════════════════════════════════════ */}
         {tab === 'templates' && (
-          <div style={{
-            background: '#fff', borderRadius: 14, padding: 20,
-            margin: '0 auto', maxWidth: 800,
-            boxShadow: '0 2px 12px rgba(0,0,0,0.08)'
-          }}>
+          <div style={{ background: '#fff', borderRadius: 14, padding: 20, margin: '0 auto', maxWidth: 800, boxShadow: '0 2px 12px rgba(0,0,0,0.08)' }}>
             <h3 style={{ margin: '0 0 16px', color: '#5c4a3a', fontSize: 18 }}>📝 WhatsApp 訊息模板</h3>
-            <div style={{
-              background: '#fff8e1', borderRadius: 10, padding: 12,
-              marginBottom: 16, fontSize: 13
-            }}>
-              <strong>📌 可用變數（會自動替換成客人資料）：</strong><br/>
+            <div style={{ background: '#fff8e1', borderRadius: 10, padding: 12, marginBottom: 16, fontSize: 13 }}>
+              <strong>📌 可用變數：</strong><br/>
               <code>{'{customer_name}'}</code> 客人名 &nbsp;
               <code>{'{booking_date}'}</code> 日期 &nbsp;
               <code>{'{booking_time}'}</code> 時間 &nbsp;
@@ -1128,37 +1245,12 @@ const addStaff = async () => { const name = newStaffName.trim(); if (!name) retu
               <code>{'{old_date}'}</code> 原日期 &nbsp;
               <code>{'{old_time}'}</code> 原時間
             </div>
-
-            {msgTemplates.length === 0 ? (
-              <p style={{ textAlign: 'center', color: '#999', padding: 30 }}>載入中... 或未有模板</p>
-            ) : msgTemplates.map(tpl => (
-              <div key={tpl.id} style={{
-                marginBottom: 16, padding: 16, background: '#fafafa',
-                borderRadius: 10, border: '1px solid #eee'
-              }}>
+            {msgTemplates.length === 0 ? <p style={{ textAlign: 'center', color: '#999', padding: 30 }}>載入中...</p> : msgTemplates.map(tpl => (
+              <div key={tpl.id} style={{ marginBottom: 16, padding: 16, background: '#fafafa', borderRadius: 10, border: '1px solid #eee' }}>
                 <div style={{ fontWeight: 600, marginBottom: 8, color: '#5c4a3a' }}>{tpl.label}</div>
-                <textarea
-                  value={tpl.content}
-                  onChange={e => setMsgTemplates(prev =>
-                    prev.map(t => t.id === tpl.id ? { ...t, content: e.target.value } : t)
-                  )}
-                  style={{
-                    width: '100%', minHeight: 120, padding: 10,
-                    borderRadius: 8, border: '1px solid #ddd',
-                    fontFamily: 'inherit', fontSize: 14, resize: 'vertical',
-                    boxSizing: 'border-box'
-                  }}
-                />
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8 }}>
-                  <span style={{ fontSize: 12, color: '#999' }}>用 {'\\n'} 代表換行</span>
-                  <button
-                    onClick={() => saveTemplate(tpl.id, tpl.content)}
-                    style={{
-                      padding: '6px 20px', borderRadius: 8, border: 'none',
-                      background: '#4CAF50', color: '#fff', cursor: 'pointer',
-                      fontWeight: 600, fontFamily: font
-                    }}
-                  >💾 儲存</button>
+                <textarea value={tpl.content} onChange={e => setMsgTemplates(prev => prev.map(t => t.id === tpl.id ? { ...t, content: e.target.value } : t))} style={{ width: '100%', minHeight: 120, padding: 10, borderRadius: 8, border: '1px solid #ddd', fontFamily: 'inherit', fontSize: 14, resize: 'vertical', boxSizing: 'border-box' }} />
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+                  <button onClick={() => saveTemplate(tpl.id, tpl.content)} style={{ padding: '6px 20px', borderRadius: 8, border: 'none', background: '#4CAF50', color: '#fff', cursor: 'pointer', fontWeight: 600, fontFamily: font }}>💾 儲存</button>
                 </div>
               </div>
             ))}
