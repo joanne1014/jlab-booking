@@ -4,13 +4,12 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 let authToken = null;
 let onAuthExpired = null;
 
-// ✅ FIX #1: 統一免 token 嘅 actions
 const NO_AUTH_ACTIONS = ['login', 'recover', 'reset-via-token', 'recover-password'];
 
 const apiCall = async (action, payload = {}) => {
   const headers = { 'Content-Type': 'application/json' };
 
-  // ✅ FIX #1: 用 array check 取代硬寫兩個 action
+
   if (authToken && !NO_AUTH_ACTIONS.includes(action)) {
     headers['Authorization'] = `Bearer ${authToken}`;
   }
@@ -21,7 +20,6 @@ const apiCall = async (action, payload = {}) => {
     body: JSON.stringify({ action, payload })
   });
 
-  // ✅ FIX #1: 401 handler 同步更新
   if (res.status === 401 && !NO_AUTH_ACTIONS.includes(action)) {
     authToken = null;
     try { sessionStorage.removeItem('jlab_token'); } catch (_) {}
@@ -34,7 +32,6 @@ const apiCall = async (action, payload = {}) => {
   return data;
 };
 
-// ✅ FIX #2: 刪除殘留 code，正確宣告 sbGet
 const sbGet = async (p) => apiCall('db', { path: p });
 const sbPost = async (t, d) => apiCall('db', { path: t, method: 'POST', body: d });
 const sbDel = async (p) => apiCall('db', { path: p, method: 'DELETE' });
@@ -151,7 +148,6 @@ export default function Admin() {
   const [editAddon, setEditAddon] = useState(null);
   const [editAddonForm, setEditAddonForm] = useState({});
 
-  // ✅ FIX #3: todayStr 改做 state，過咗 12 點會自動更新
   const [todayStr, setTodayStr] = useState(() => new Date().toISOString().split('T')[0]);
   const bookingCountRef = useRef(0);
   const showToast = (m) => { setToast(m); setTimeout(() => setToast(''), 3000); };
@@ -165,7 +161,6 @@ export default function Admin() {
     return () => { onAuthExpired = null; };
   }, []);
 
-  // ✅ FIX #3: 每分鐘檢查日期有冇跨日
   useEffect(() => {
     const id = setInterval(() => {
       setTodayStr(new Date().toISOString().split('T')[0]);
@@ -415,7 +410,6 @@ export default function Admin() {
     setEditSvc(svc || 'new');
   };
 
-  // ✅ FIX #5: 修正 saveSvc — 新增服務時 variants 都會儲存
   const saveSvc = async () => {
     const f = editSvcForm;
     if (!f.name?.trim()) return showToast('❌ 請輸入服務名稱');
@@ -614,7 +608,7 @@ export default function Admin() {
   useEffect(() => { if (!auth || !autoRefresh) return; const id = setInterval(async () => { try { const data = await sbGet('bookings?order=booking_date.desc,booking_time.desc&limit=1000'); if (data && data.length > bookingCountRef.current && bookingCountRef.current > 0) showToast(`🔔 有 ${data.length - bookingCountRef.current} 個新預約！`); setAllBookings(data || []); } catch (_) {} }, 30000); return () => clearInterval(id); }, [auth, autoRefresh]);
 
   const fetchBlocked = async () => { try { setBlocked(await sbGet('blocked_dates?order=date') || []); } catch (e) { console.error(e); } };
-  // ✅ FIX #6: addBlocked 改用 array 傳入（同其他 sbPost 一致）
+
   const addBlocked = async () => { if (!newBD) return; try { const d = await sbPost('blocked_dates', [{ date: newBD, reason: newBR }]); setBlocked(prev => [...prev, ...d].sort((a, b) => a.date.localeCompare(b.date))); setNewBD(''); setNewBR(''); } catch (e) { console.error(e); } };
   const removeBlocked = async (id) => { try { await sbDel(`blocked_dates?id=eq.${id}`); setBlocked(prev => prev.filter(b => b.id !== id)); } catch (e) { console.error(e); } };
 
