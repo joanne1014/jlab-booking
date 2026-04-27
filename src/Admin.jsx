@@ -54,7 +54,10 @@ const sDesc = { fontSize: 13, color: '#999', marginBottom: 16 };
 const font = "'Noto Serif TC', serif";
 const toTimeStr = (mins) => `${String(Math.floor(mins/60)).padStart(2,'0')}:${String(mins%60).padStart(2,'0')}`;
 const toMins = (t) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
-
+const [bkPage, setBkPage] = useState(1);
+const [bkPageSize] = useState(50);
+const [bkTotal, setBkTotal] = useState(0);
+const [bkTotalPages, setBkTotalPages] = useState(1);
 export default function Admin() {
   const [auth, setAuth] = useState(false);
   const [pw, setPw] = useState('');
@@ -674,32 +677,32 @@ export default function Admin() {
   const syncPending = async () => { if (!activeStaff) return; const entries = Object.entries(pending); if (!entries.length) return; if (!window.confirm(`確定將「${activeStaff.name}」嘅 ${entries.length} 個日期同步到前台？`)) return; setBatchLoading(true); try { const dates = entries.map(([d]) => d); const sid = activeStaff.id; await sbDel(`date_availability?available_date=in.(${dates.join(',')})&staff_id=eq.${sid}`); await sbDel(`enabled_timeslots?slot_date=in.(${dates.join(',')})&staff_id=eq.${sid}`); try { await sbDel(`disabled_timeslots?slot_date=in.(${dates.join(',')})`); } catch (_) {} await sbPost('date_availability', entries.map(([d, times]) => ({ available_date: d, status: times.size > 0 ? 'available' : 'closed', staff_id: sid }))); const enabledRows = []; entries.forEach(([d, times]) => { [...times].forEach(t => { enabledRows.push({ slot_date: d, slot_time: t, staff_id: sid }); }); }); if (enabledRows.length > 0) { for (let i = 0; i < enabledRows.length; i += 500) await sbPost('enabled_timeslots', enabledRows.slice(i, i + 500)); } setPending({}); setSelDates(new Set()); setSchedRefreshKey(k => k + 1); showToast(`✅ 成功同步「${activeStaff.name}」嘅 ${dates.length} 個日期！`); loadActiveFromDB(activeDate); } catch (e) { console.error(e); showToast('❌ 同步失敗：' + e.message); } setBatchLoading(false); };
   const removePendingDate = (d) => { setPending(prev => { const n = { ...prev }; delete n[d]; return n; }); };
 
-  const fetchBookings = async () => { setBkLoading(true); try { const data = await sbGet('bookings?order=booking_date.desc,booking_time.desc&limit=1000'); setAllBookings(data || []); } catch (e) { console.error(e); } setBkLoading(false); };
-  useEffect(() => { bookingCountRef.current = allBookings.length; }, [allBookings.length]);
-  useEffect(() => { if (!auth || !autoRefresh) return; const id = setInterval(async () => { try { const data = await sbGet('bookings?order=booking_date.desc,booking_time.desc&limit=1000'); if (data && data.length > bookingCountRef.current && bookingCountRef.current > 0) showToast(`🔔 有 ${data.length - bookingCountRef.current} 個新預約！`); setAllBookings(data || []); } catch (_) {} }, 30000); return () => clearInterval(id); }, [auth, autoRefresh]);
-
-  const fetchBlocked = async () => { try { setBlocked(await sbGet('blocked_dates?order=date') || []); } catch (e) { console.error(e); } };
-  const addBlocked = async () => { if (!newBD) return; try { const d = await sbPost('blocked_dates', { date: newBD, reason: newBR }); setBlocked(prev => [...prev, ...d].sort((a, b) => a.date.localeCompare(b.date))); setNewBD(''); setNewBR(''); } catch (e) { console.error(e); } };
-  const removeBlocked = async (id) => { try { await sbDel(`blocked_dates?id=eq.${id}`); setBlocked(prev => prev.filter(b => b.id !== id)); } catch (e) { console.error(e); } };
-
-  const handleLogin = async (e) => {
-    e.preventDefault();
-    setLoginError('');
-    setLoginLoading(true);
+ const fetchBookings = async (page = 1) => {
+  setBkLoading(true);
+  try {
+    const data = await apiCall('bookings-paginated', {
+      page,
+      pageSize: bkPageSize,
+      dateFrom: filterDateFrom || undefined,
+      dateTo: filterDateTo || undefined,
+      status: filterStatus !== 'all' ? filterStatus : undefined,
+      technician: filterTech !== 'all' ? filterTech : undefined,
+      search: searchTerm ? searchTerm.trim() : undefined,
+    });
+    setAllBookings(data.bookings || []);
+    setBkTotal(data.total || 0);
+    setBkTotalPages(data.totalPages || 1);
+    setBkPage(page);
+  } catch (e) {
+    console.error('fetchBookings error:', e);
+    // fallback: 用舊方法
     try {
-      const result = await apiCall('login', { email: loginEmail, password: pw });
-      if (result.access_token) {
-        authToken = result.access_token;
-        sessionStorage.setItem('jlab_token', authToken);
-      }
-      setAuth(true);
-      fetchBookings(); fetchBlocked(); fetchStaff(); fetchServices(); fetchAddons();
-    } catch (err) {
-      setLoginError(err.message || '帳號或密碼錯誤');
-    }
-    setLoginLoading(false);
-  };
-
+      const fallback = await sbGet('bookings?order=booking_date.desc,booking_time.desc&limit=200');
+      setAllBookings(fallback || []);
+    } catch (_) {}
+  }
+  setBkLoading(false);
+};
   /* ═══ RENDER ═══ */
 
   if (!auth && showResetForm) return (
