@@ -399,7 +399,48 @@ export default async function handler(req, res) {
 
       return res.status(200).json({ reminders, count: reminders.length });
     }
+/* ★ 自動備份（每日一次，靜默執行） */
+    if (action === 'auto-backup') {
+      const today = new Date().toISOString().slice(0, 10);
 
+      const { data: existing } = await supabase
+        .from('backups')
+        .select('id')
+        .eq('backup_date', today)
+        .limit(1);
+
+      if (existing && existing.length > 0) {
+        return res.status(200).json({ skipped: true, message: '今日已備份' });
+      }
+
+      const backup = {};
+      const tablesToBackup = [
+        'staff', 'services', 'service_variants', 'service_addons',
+        'enabled_timeslots', 'date_availability', 'blocked_dates',
+        'customers', 'notification_templates'
+      ];
+
+      for (const t of tablesToBackup) {
+        try {
+          const { data } = await supabase.from(t).select('*').limit(10000);
+          backup[t] = data || [];
+        } catch {
+          backup[t] = [];
+        }
+      }
+
+      const { error: insertErr } = await supabase.from('backups').insert([{
+        backup_date: today,
+        data: backup,
+      }]);
+
+      if (insertErr) return res.status(500).json({ error: insertErr.message });
+
+      const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      await supabase.from('backups').delete().lt('backup_date', cutoff);
+
+      return res.status(200).json({ success: true, date: today });
+    }
     /* ★ 新增：健康檢查 */
     if (action === 'health') {
       const tables = {};
