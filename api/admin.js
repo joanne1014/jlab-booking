@@ -1,8 +1,6 @@
 const SB_URL = 'https://vqyfbwnkdpncwvdonbcz.supabase.co';
 const ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZxeWZid25rZHBuY3d2ZG9uYmN6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY2MDk1MTksImV4cCI6MjA5MjE4NTUxOX0.hMHq_HcpnjiF-4zwSznyMpMx5Ooao5hDhaMi4aXME3M';
-
-// ✅ 貼你喺 Supabase Dashboard 複製嘅 service_role key 喺度
-const SERVICE_ROLE_KEY = '貼你嘅_SERVICE_ROLE_KEY_喺呢度';
+const SERVICE_ROLE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZxeWZid25rZHBuY3d2ZG9uYmN6Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NjYwOTUxOSwiZXhwIjoyMDkyMTg1NTE5fQ.Hnjtc-LY653Ftpp9JvIaEJzFg7xwgoJLFIs5ezRwlN0';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -13,9 +11,6 @@ export default async function handler(req, res) {
   const { action, payload } = req.body;
 
   try {
-    // ═══════════════════════════════════════
-    // 🔐 LOGIN
-    // ═══════════════════════════════════════
     if (action === 'login') {
       const { email, password } = payload;
       const r = await fetch(`${SB_URL}/auth/v1/token?grant_type=password`, {
@@ -33,18 +28,13 @@ export default async function handler(req, res) {
       return res.json({ success: true, session: data });
     }
 
-    // ═══════════════════════════════════════
-    // 📧 RECOVER（發送重設密碼 Email）
-    // ═══════════════════════════════════════
     if (action === 'recover') {
       const { email, redirectUrl } = payload;
       if (!email) throw new Error('請輸入 Email');
-
       let url = `${SB_URL}/auth/v1/recover`;
       if (redirectUrl) {
         url += `?redirect_to=${encodeURIComponent(redirectUrl)}`;
       }
-
       const r = await fetch(url, {
         method: 'POST',
         headers: {
@@ -53,7 +43,6 @@ export default async function handler(req, res) {
         },
         body: JSON.stringify({ email }),
       });
-
       if (!r.ok) {
         const data = await r.json();
         throw new Error(data.error_description || data.msg || '發送失敗');
@@ -61,16 +50,12 @@ export default async function handler(req, res) {
       return res.json({ success: true });
     }
 
-    // ═══════════════════════════════════════
-    // 🔑 RESET VIA TOKEN（用 recovery token 重設密碼）
-    // ═══════════════════════════════════════
     if (action === 'reset-via-token') {
       const { token, newPassword } = payload;
       if (!token) throw new Error('無效的重設連結');
       if (!newPassword || newPassword.length < 6) {
         throw new Error('密碼至少要 6 個字元');
       }
-
       const r = await fetch(`${SB_URL}/auth/v1/user`, {
         method: 'PUT',
         headers: {
@@ -80,7 +65,6 @@ export default async function handler(req, res) {
         },
         body: JSON.stringify({ password: newPassword }),
       });
-
       if (!r.ok) {
         const data = await r.json();
         throw new Error(data.error_description || data.msg || '重設密碼失敗，連結可能已過期');
@@ -88,9 +72,6 @@ export default async function handler(req, res) {
       return res.json({ success: true });
     }
 
-    // ═══════════════════════════════════════
-    // 🔄 CHANGE PASSWORD（改密碼，需要舊密碼驗證）
-    // ═══════════════════════════════════════
     if (action === 'change-password') {
       const { email, oldPassword, newPassword } = payload;
       if (!email || !oldPassword || !newPassword) {
@@ -99,7 +80,6 @@ export default async function handler(req, res) {
       if (newPassword.length < 6) {
         throw new Error('新密碼至少要 6 個字元');
       }
-
       const loginR = await fetch(`${SB_URL}/auth/v1/token?grant_type=password`, {
         method: 'POST',
         headers: {
@@ -112,7 +92,6 @@ export default async function handler(req, res) {
       if (!loginR.ok) {
         throw new Error('舊密碼錯誤');
       }
-
       const updateR = await fetch(`${SB_URL}/auth/v1/user`, {
         method: 'PUT',
         headers: {
@@ -122,7 +101,6 @@ export default async function handler(req, res) {
         },
         body: JSON.stringify({ password: newPassword }),
       });
-
       if (!updateR.ok) {
         const data = await updateR.json();
         throw new Error(data.error_description || data.msg || '更新密碼失敗');
@@ -130,18 +108,13 @@ export default async function handler(req, res) {
       return res.json({ success: true });
     }
 
-    // ═══════════════════════════════════════
-    // 🗄️ DB PROXY（資料庫操作）
-    // ═══════════════════════════════════════
     if (action === 'db') {
-      // ✅ Bug 1 修正：對齊前端嘅 '$jlab1014'
       if (secret !== '$jlab1014') {
         return res.status(401).json({ error: 'Unauthorized' });
       }
 
       const { path, method = 'GET', body } = payload;
 
-      // ✅ Bug 2 修正：用 SERVICE_ROLE_KEY bypass RLS
       const headers = {
         apikey: ANON_KEY,
         Authorization: `Bearer ${SERVICE_ROLE_KEY}`,
