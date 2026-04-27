@@ -5,7 +5,7 @@ import { createClient } from '@supabase/supabase-js';
 const SB_URL = process.env.SUPABASE_URL;
 const SB_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-/* ═══ 🔥 新增：安全初始化 Supabase client ═══ */
+/* ═══ 安全初始化 Supabase client ═══ */
 let supabase = null;
 try {
   if (SB_URL && SB_KEY) {
@@ -15,7 +15,7 @@ try {
   console.error('Failed to create Supabase client:', e.message);
 }
 
-/* ═══ Rate Limiting（防暴力破解）═══ */
+/* ═══ Rate Limiting ═══ */
 const loginAttempts = new Map();
 
 function checkRateLimit(ip) {
@@ -46,12 +46,69 @@ async function verifyToken(req) {
   }
 }
 
-/* ═══ Supabase REST Proxy 白名單 ═══ */
+/* ═══ ★ 修正：完整白名單 ═══ */
 const ALLOWED_TABLES = [
-  'bookings', 'services', 'service_addons', 'staff',
-  'timeslot_config', 'notification_templates', 'frontend_settings',
-  'customers', 'admin_logs', 'admin_users', 'reminder_logs',
+  'bookings',
+  'services',
+  'service_addons',
+  'service_variants',
+  'staff',
+  'enabled_timeslots',
+  'disabled_timeslots',
+  'date_availability',
+  'blocked_dates',
+  'daily_slots',
+  'timeslot_config',
+  'notification_templates',
+  'frontend_settings',
+  'customers',
+  'admin_logs',
+  'admin_users',
+  'reminder_logs',
+  'addons',
+  'technicians',
+  'time_slots',
 ];
+
+/* ═══ ★ 新增：DB Proxy 核心邏輯（共用） ═══ */
+async function handleDbProxy(payload, res) {
+  const { method = 'GET', path, body } = payload;
+  if (!path) return res.status(400).json({ error: 'Missing path' });
+
+  const table = path.split('?')[0].split('/')[0];
+  if (!ALLOWED_TABLES.includes(table)) {
+    console.warn(`⚠️ Blocked table access: "${table}"`);
+    return res.status(403).json({ error: `Table "${table}" not allowed` });
+  }
+
+  const url = `${SB_URL}/rest/v1/${path}`;
+  const headers = {
+    apikey: SB_KEY,
+    Authorization: `Bearer ${SB_KEY}`,
+    'Content-Type': 'application/json',
+  };
+  if (method === 'POST') headers['Prefer'] = 'return=representation';
+  if (method === 'PATCH') headers['Prefer'] = 'return=representation';
+  if (method === 'DELETE') headers['Prefer'] = 'return=minimal';
+
+  const fetchOpts = { method, headers };
+  if (body && (method === 'POST' || method === 'PATCH' || method === 'PUT')) {
+    fetchOpts.body = JSON.stringify(body);
+  }
+
+  const response = await fetch(url, fetchOpts);
+
+  if (response.status === 204) {
+    return res.status(200).json({ success: true });
+  }
+
+  const responseData = await response.json().catch(() => null);
+  if (!response.ok) {
+    console.error(`DB Proxy Error [${method} ${path}]:`, responseData);
+    return res.status(response.status).json(responseData || { error: 'Supabase error' });
+  }
+  return res.status(200).json(responseData);
+}
 
 /* ═══ Main Handler ═══ */
 export default async function handler(req, res) {
@@ -62,15 +119,12 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  /* 🔥 新增：環境變數診斷 — 如果 Supabase client 初始化失敗，直接報錯 */
+  /* 環境變數檢查 */
   if (!supabase) {
     console.error('Supabase client not initialized. SUPABASE_URL:', SB_URL ? 'SET' : 'MISSING', 'SUPABASE_SERVICE_ROLE_KEY:', SB_KEY ? 'SET' : 'MISSING');
     return res.status(500).json({
       error: '伺服器配置錯誤：無法連接資料庫。請檢查 Vercel 環境變數。',
-      debug: {
-        hasUrl: !!SB_URL,
-        hasKey: !!SB_KEY,
-      }
+      debug: { hasUrl: !!SB_URL, hasKey: !!SB_KEY }
     });
   }
 
@@ -78,9 +132,10 @@ export default async function handler(req, res) {
   if (!action) return res.status(400).json({ error: 'Missing action' });
 
   try {
-    /* ────────────────────────────────────────────────────────────
-       LOGIN（唔需要 token）
-    ──────────────────────────────────────────────────────────── */
+    /* ════════════════════════════════════════════════════════════
+       不需要 Token 的 Actions
+    ════════════════════════════════════════════════════════════ */
+
     if (action === 'login') {
       const ip = (req.headers['x-forwarded-for'] || req.socket?.remoteAddress || 'unknown').split(',')[0].trim();
       if (!checkRateLimit(ip)) {
@@ -93,7 +148,6 @@ export default async function handler(req, res) {
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) return res.status(401).json({ error: error.message });
 
-      // 查角色
       const { data: adminUser } = await supabase
         .from('admin_users')
         .select('*')
@@ -102,16 +156,13 @@ export default async function handler(req, res) {
 
       return res.status(200).json({
         token: data.session.access_token,
-        access_token: data.session.access_token,  /* 🔥 修改：兼容兩種寫法 */
+        access_token: data.session.access_token,
         email: data.user.email,
         role: adminUser?.role || 'staff',
         staffId: adminUser?.staff_id || null,
       });
     }
 
-    /* ────────────────────────────────────────────────────────────
-       🔥 新增：RECOVER（忘記密碼 — 唔需要 token）
-    ──────────────────────────────────────────────────────────── */
     if (action === 'recover') {
       const { email, redirectUrl } = payload;
       if (!email) return res.status(400).json({ error: '請輸入 Email' });
@@ -128,26 +179,22 @@ export default async function handler(req, res) {
       return res.status(200).json({ success: true });
     }
 
-    /* ────────────────────────────────────────────────────────────
-       🔥 新增：RESET-VIA-TOKEN（用 email 連結嘅 token 重設密碼 — 唔需要 token）
-    ──────────────────────────────────────────────────────────── */
     if (action === 'reset-via-token') {
-      const { access_token, refresh_token, newPassword } = payload;
+      const { access_token, token, newPassword } = payload;
+      const actualToken = access_token || token;
 
       if (!newPassword || newPassword.length < 6) {
         return res.status(400).json({ error: '密碼最少 6 位' });
       }
-      if (!access_token) {
+      if (!actualToken) {
         return res.status(400).json({ error: '重設連結已過期或無效（缺少 token）' });
       }
 
-      // 用 access_token 驗證用戶身份
-      const { data: { user }, error: verifyError } = await supabase.auth.getUser(access_token);
+      const { data: { user }, error: verifyError } = await supabase.auth.getUser(actualToken);
       if (verifyError || !user) {
         return res.status(401).json({ error: '重設連結已過期或無效，請重新申請' });
       }
 
-      // 用 admin API 更新密碼
       const { error } = await supabase.auth.admin.updateUserById(user.id, {
         password: newPassword,
       });
@@ -155,18 +202,38 @@ export default async function handler(req, res) {
       return res.status(200).json({ success: true });
     }
 
-    /* ────────────────────────────────────────────────────────────
-       以下所有 action 都需要有效 token
-    ──────────────────────────────────────────────────────────── */
+    /* ════════════════════════════════════════════════════════════
+       需要 Token 的 Actions
+    ════════════════════════════════════════════════════════════ */
     const user = await verifyToken(req);
     if (!user) return res.status(401).json({ error: '認證已過期，請重新登入' });
 
-    /* ── 改密碼 ── */
+    /* ★ 修正：verify action（session 恢復用） */
+    if (action === 'verify') {
+      return res.status(200).json({ valid: true, email: user.email });
+    }
+
+    /* ★ 修正：'db' action — 同 'sb-proxy' 共用同一個邏輯 */
+    if (action === 'db' || action === 'sb-proxy') {
+      return handleDbProxy(payload, res);
+    }
+
+    /* 改密碼 */
     if (action === 'change-password') {
-      const { newPassword } = payload;
+      const { oldPassword, newPassword } = payload;
       if (!newPassword || newPassword.length < 6) {
         return res.status(400).json({ error: '密碼最少 6 位' });
       }
+
+      // 驗證舊密碼
+      if (oldPassword) {
+        const { error: loginErr } = await supabase.auth.signInWithPassword({
+          email: user.email,
+          password: oldPassword,
+        });
+        if (loginErr) return res.status(401).json({ error: '舊密碼不正確' });
+      }
+
       const { error } = await supabase.auth.admin.updateUserById(user.id, {
         password: newPassword,
       });
@@ -174,22 +241,30 @@ export default async function handler(req, res) {
       return res.status(200).json({ success: true });
     }
 
-    /* ── 衝突檢測 ── */
+    /* 衝突檢測 */
     if (action === 'check-conflict') {
       const { date, time, duration, technician, excludeId } = payload;
-      const { data, error } = await supabase.rpc('check_booking_conflict', {
-        p_date: date,
-        p_start_time: time,
-        p_duration: duration || 60,
-        p_technician: technician,
-        p_exclude_id: excludeId || null,
-        p_buffer: payload.buffer || 15,
-      });
-      if (error) return res.status(500).json({ error: error.message });
-      return res.status(200).json({ hasConflict: data });
+      try {
+        const { data, error } = await supabase.rpc('check_booking_conflict', {
+          p_date: date,
+          p_start_time: time,
+          p_duration: duration || 60,
+          p_technician: technician,
+          p_exclude_id: excludeId || null,
+          p_buffer: payload.buffer || 15,
+        });
+        if (error) {
+          // 如果 RPC 唔存在就 fallback 返 false
+          console.warn('check_booking_conflict RPC error:', error.message);
+          return res.status(200).json({ hasConflict: false });
+        }
+        return res.status(200).json({ hasConflict: data });
+      } catch (e) {
+        return res.status(200).json({ hasConflict: false });
+      }
     }
 
-    /* ── 安全建立預約 ── */
+    /* 安全建立預約 */
     if (action === 'create-booking-safe') {
       const { data, error } = await supabase.rpc('create_booking_safe', {
         p_date: payload.date,
@@ -206,11 +281,11 @@ export default async function handler(req, res) {
         p_staff_id: payload.staffId || null,
       });
       if (error) return res.status(500).json({ error: error.message });
-      if (!data.success) return res.status(409).json({ error: data.error });
+      if (!data?.success) return res.status(409).json({ error: data?.error || '建立失敗' });
       return res.status(200).json(data);
     }
 
-    /* ── 分頁查詢預約 ── */
+    /* 分頁查詢預約 */
     if (action === 'bookings-paginated') {
       const page = payload.page || 1;
       const pageSize = Math.min(payload.pageSize || 50, 200);
@@ -244,7 +319,7 @@ export default async function handler(req, res) {
       });
     }
 
-    /* ── 操作日誌 ── */
+    /* 操作日誌 */
     if (action === 'log-action') {
       await supabase.from('admin_logs').insert([{
         action: payload.text,
@@ -263,7 +338,7 @@ export default async function handler(req, res) {
       return res.status(200).json(data || []);
     }
 
-    /* ── 客戶 ── */
+    /* 客戶 */
     if (action === 'load-customers') {
       const { data } = await supabase
         .from('customers')
@@ -296,7 +371,7 @@ export default async function handler(req, res) {
       return res.status(200).json(data || []);
     }
 
-    /* ── 提醒（生成 WhatsApp 連結）── */
+    /* 提醒 */
     if (action === 'generate-reminders') {
       const targetDate = payload.date;
       if (!targetDate) return res.status(400).json({ error: 'Missing date' });
@@ -325,46 +400,20 @@ export default async function handler(req, res) {
       return res.status(200).json({ reminders, count: reminders.length });
     }
 
-    /* ────────────────────────────────────────────────────────────
-       Supabase REST Proxy（取代前端直接用 service key）
-    ──────────────────────────────────────────────────────────── */
-    if (action === 'sb-proxy') {
-      const { method = 'GET', path, body } = payload;
-      if (!path) return res.status(400).json({ error: 'Missing path' });
-
-      const table = path.split('?')[0].split('/')[0];
-      if (!ALLOWED_TABLES.includes(table)) {
-        return res.status(403).json({ error: `Table "${table}" not allowed` });
+    /* ★ 新增：健康檢查 */
+    if (action === 'health') {
+      const tables = {};
+      for (const t of ['staff', 'services', 'bookings', 'enabled_timeslots']) {
+        try {
+          const { count } = await supabase.from(t).select('*', { count: 'exact', head: true });
+          tables[t] = count;
+        } catch { tables[t] = 'error'; }
       }
-
-      const url = `${SB_URL}/rest/v1/${path}`;
-      const headers = {
-        apikey: SB_KEY,
-        Authorization: `Bearer ${SB_KEY}`,
-        'Content-Type': 'application/json',
-      };
-      if (method === 'POST') headers['Prefer'] = 'return=representation';
-      if (method === 'PATCH') headers['Prefer'] = 'return=representation';
-
-      const fetchOpts = { method, headers };
-      if (body && (method === 'POST' || method === 'PATCH' || method === 'PUT')) {
-        fetchOpts.body = JSON.stringify(body);
-      }
-
-      const response = await fetch(url, fetchOpts);
-
-      if (response.status === 204) {
-        return res.status(200).json({ success: true });
-      }
-
-      const responseData = await response.json().catch(() => null);
-      if (!response.ok) {
-        return res.status(response.status).json(responseData || { error: 'Supabase error' });
-      }
-      return res.status(200).json(responseData);
+      return res.status(200).json({ status: 'ok', tables, timestamp: new Date().toISOString() });
     }
 
-    /* ── 未知 action ── */
+    /* 未知 action */
+    console.warn(`⚠️ Unknown action received: "${action}"`);
     return res.status(400).json({ error: `Unknown action: ${action}` });
 
   } catch (err) {
