@@ -685,17 +685,39 @@ const addStaff = async () => { const name = newStaffName.trim(); if (!name) retu
       <div style={{ background: '#fff', padding: '20px 30px', boxShadow: '0 2px 10px rgba(0,0,0,0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div><h1 style={{ fontSize: 20, color: '#5c4a3a', margin: 0 }}>J.LAB 管理後台</h1><p style={{ color: '#999', fontSize: 12, margin: '4px 0 0', letterSpacing: 1 }}>ADMIN DASHBOARD</p></div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+     <button onClick={() => setShowHistory(true)} style={{ padding: '8px 20px', background: 'transparent', border: '1px solid #ccc', borderRadius: 6, cursor: 'pointer', color: '#666', fontFamily: font, fontSize: 13 }}>📋</button>
         <button onClick={() => { setShowChangePw(true); setCpOld(''); setCpNew(''); setCpConfirm(''); setCpMsg(''); setCpError(''); }} style={{ padding: '8px 20px', background: 'transparent', border: '1px solid #ccc', borderRadius: 6, cursor: 'pointer', color: '#666', fontFamily: font, fontSize: 13 }}>🔑</button>
           <button onClick={() => setAuth(false)} style={{ padding: '8px 20px', background: 'transparent', border: '1px solid #ccc', borderRadius: 6, cursor: 'pointer', color: '#666', fontFamily: font }}>登出</button>
         </div>
       </div>
-<button onClick={() => setShowHistory(true)} style={{
-  padding: '8px 20px', background: 'transparent',
-  border: '1px solid #ccc', borderRadius: 6,
-  cursor: 'pointer', color: '#666', fontFamily: font, fontSize: 13
-}}>📋</button>
+{showHistory && (
+  <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.4)', zIndex: 9999, display: 'flex', justifyContent: 'center', alignItems: 'center' }} onClick={() => setShowHistory(false)}>
+    <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 16, padding: 24, width: '90%', maxWidth: 500, maxHeight: '70vh', overflow: 'hidden', display: 'flex', flexDirection: 'column', fontFamily: font }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <h3 style={{ margin: 0, fontSize: 18, color: '#3e2f1c' }}>📋 操作歷史記錄</h3>
+        <button onClick={() => setShowHistory(false)} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#999' }}>✕</button>
+      </div>
+      <div style={{ overflowY: 'auto', flex: 1 }}>
+        {changeLog.length === 0 ? (
+          <p style={{ color: '#999', textAlign: 'center', padding: 40 }}>暫無操作記錄</p>
+        ) : (
+          changeLog.map((log, i) => (
+            <div key={log.id || i} style={{ padding: '12px 16px', marginBottom: 8, background: '#faf8f5', borderRadius: 10, borderLeft: '3px solid #b8956a' }}>
+              <div style={{ fontSize: 11, color: '#999', marginBottom: 4 }}>{log.ts}</div>
+              <div style={{ fontSize: 14, color: '#3e2f1c' }}>{log.text}</div>
+            </div>
+          ))
+        )}
+      </div>
+      {changeLog.length > 0 && (
+        <button onClick={() => { if(confirm('確定清除所有記錄？')) { setChangeLog([]); } }} style={{ marginTop: 12, padding: '8px 0', background: 'none', border: '1px solid #ddd', borderRadius: 8, color: '#999', fontSize: 12, cursor: 'pointer', fontFamily: font }}>🗑 清除全部記錄</button>
+      )}
+    </div>
+  </div>
+)}
+
       {showChangePw && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }} onClick={() => setShowChangePw(false)}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 2000
           <div style={{ background: '#fff', borderRadius: 16, padding: 32, maxWidth: 400, width: '100%', boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }} onClick={e => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
               <h3 style={{ margin: 0, color: '#5c4a3a', fontSize: 18 }}>🔑 更改密碼</h3>
@@ -887,53 +909,7 @@ const addStaff = async () => { const name = newStaffName.trim(); if (!name) retu
                       </div>
                       {staffList.length > 0 && <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>{staffList.map(s => <span key={s.id} title={s.name} style={{ width: isMobile ? 6 : 8, height: isMobile ? 6 : 8, borderRadius: '50%', background: avail?.[s.id] === 'available' ? '#4CAF50' : '#ddd' }} />)}</div>}
                       {bk && bk.total > 0 ? <div style={{ fontSize: isMobile ? 10 : 12, fontWeight: 600, color: '#5c4a3a', lineHeight: 1.3 }}>{bk.total} 個預約{!isMobile && <div style={{ fontWeight: 400, color: '#999', fontSize: 11 }}>${bk.revenue}</div>}</div> : (!isPast && avail && Object.values(avail).some(s => s === 'available')) ? <div style={{ fontSize: isMobile ? 9 : 11, color: '#a5d6a7' }}>{isMobile ? '✓' : '可預約'}</div> : null}
-                  {showHistory && (
-  <div style={{
-    position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-    background: 'rgba(0,0,0,0.4)', zIndex: 9999,
-    display: 'flex', justifyContent: 'center', alignItems: 'center'
-  }} onClick={() => setShowHistory(false)}>
-    <div onClick={e => e.stopPropagation()} style={{
-      background: '#fff', borderRadius: 16, padding: 24,
-      width: '90%', maxWidth: 500, maxHeight: '70vh',
-      overflow: 'hidden', display: 'flex', flexDirection: 'column',
-      fontFamily: font
-    }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <h3 style={{ margin: 0, fontSize: 18, color: '#3e2f1c' }}>📋 操作歷史記錄</h3>
-        <button onClick={() => setShowHistory(false)} style={{
-          background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#999'
-        }}>✕</button>
-      </div>
-
-      <div style={{ overflowY: 'auto', flex: 1 }}>
-        {changeLog.length === 0 ? (
-          <p style={{ color: '#999', textAlign: 'center', padding: 40 }}>暫無操作記錄</p>
-        ) : (
-          [...changeLog].reverse().map((log, i) => (
-            <div key={i} style={{
-              padding: '12px 16px', marginBottom: 8,
-              background: '#faf8f5', borderRadius: 10,
-              borderLeft: '3px solid #b8956a'
-            }}>
-              <div style={{ fontSize: 11, color: '#999', marginBottom: 4 }}>{log.ts}</div>
-              <div style={{ fontSize: 14, color: '#3e2f1c' }}>{log.text}</div>
-            </div>
-          ))
-        )}
-      </div>
-
-      {changeLog.length > 0 && (
-        <button onClick={() => { if(confirm('確定清除所有記錄？')) { setchangeLog([]); } }} style={{
-          marginTop: 12, padding: '8px 0', background: 'none',
-          border: '1px solid #ddd', borderRadius: 8,
-          color: '#999', fontSize: 12, cursor: 'pointer', fontFamily: font
-        }}>🗑 清除全部記錄</button>
-      )}
-    </div>
-  </div>
-)}
-                    </div>);
+                </div>);
                 })}
               </div>
             </div>
