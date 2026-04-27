@@ -718,7 +718,7 @@ const addStaff = async () => { const name = newStaffName.trim(); if (!name) retu
       )}
 
       <div style={{ background: '#fff', borderTop: '1px solid #f0ebe3', padding: '0 30px', display: 'flex', gap: 0, boxShadow: '0 2px 10px rgba(0,0,0,0.03)', overflowX: 'auto' }}>
-       {[{ key: 'bookings', label: `📋 預約管理${stats.pending > 0 ? ` (${stats.pending})` : ''}` }, { key: 'timeslots', label: '🕐 時段管理' }, { key: 'blocked', label: '📅 封鎖日期' }, { key: 'templates', label: '📝 訊息模板' }].map(t => (
+    {[{ key: 'bookings', label: `📋 預約管理${stats.pending > 0 ? ` (${stats.pending})` : ''}` }, { key: 'timeslots', label: '🕐 時段管理' }, { key: 'templates', label: '📝 訊息模板' }].map(t => (
           <button key={t.key} onClick={() => setTab(t.key)} style={{ padding: '14px 24px', background: 'none', border: 'none', borderBottom: tab === t.key ? '2px solid #5c4a3a' : '2px solid transparent', fontSize: 14, color: tab === t.key ? '#5c4a3a' : '#999', fontWeight: tab === t.key ? 600 : 400, cursor: 'pointer', fontFamily: font, whiteSpace: 'nowrap' }}>{t.label}</button>
         ))}
       </div>
