@@ -907,24 +907,24 @@ const addStaff = async () => { const name = newStaffName.trim(); if (!name) retu
       </div>
 
       <div style={{ overflowY: 'auto', flex: 1 }}>
-        {opLog.length === 0 ? (
+        {changeLog.length === 0 ? (
           <p style={{ color: '#999', textAlign: 'center', padding: 40 }}>暫無操作記錄</p>
         ) : (
-          [...opLog].reverse().map((log, i) => (
+          [...changeLog].reverse().map((log, i) => (
             <div key={i} style={{
               padding: '12px 16px', marginBottom: 8,
               background: '#faf8f5', borderRadius: 10,
               borderLeft: '3px solid #b8956a'
             }}>
-              <div style={{ fontSize: 11, color: '#999', marginBottom: 4 }}>{log.time}</div>
+              <div style={{ fontSize: 11, color: '#999', marginBottom: 4 }}>{log.ts}</div>
               <div style={{ fontSize: 14, color: '#3e2f1c' }}>{log.text}</div>
             </div>
           ))
         )}
       </div>
 
-      {opLog.length > 0 && (
-        <button onClick={() => { if(confirm('確定清除所有記錄？')) { setOpLog([]); } }} style={{
+      {changeLog.length > 0 && (
+        <button onClick={() => { if(confirm('確定清除所有記錄？')) { setchangeLog([]); } }} style={{
           marginTop: 12, padding: '8px 0', background: 'none',
           border: '1px solid #ddd', borderRadius: 8,
           color: '#999', fontSize: 12, cursor: 'pointer', fontFamily: font
