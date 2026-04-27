@@ -548,6 +548,36 @@ export default function Admin() {
   const handleReschedDateChange = (date) => { setReschedDate(date); setReschedTime(''); loadReschedSlots(date); };
   const saveResched = async () => {
     if (!selectedBooking || !reschedDate || !reschedTime) return showToast('❌ 請選擇日期同時間');
+    
+  // ✅ 新增：Server-side 衝突檢測
+  try {
+    const conflictResult = await apiCall('check-conflict', {
+      date: reschedDate,
+      time: reschedTime,
+      duration: selectedBooking.duration_minutes || 60,
+      technician: reschedTech,
+      excludeId: selectedBooking.id
+    });
+    
+    if (conflictResult.hasConflict) {
+      return showToast('❌ 此時段與其他預約衝突（包含服務時長）');
+    }
+  } catch (e) {
+    return showToast('❌ 衝突檢查失敗：' + e.message);
+  }
+  
+  // ... 原本嘅改期邏輯
+  setReschedLoading(true);
+  try {
+    const oldDate = selectedBooking.booking_date;
+    const oldTime = selectedBooking.booking_time;
+    const updates = { booking_date: reschedDate, booking_time: reschedTime };
+    if (reschedTech) updates.technician_label = reschedTech;
+    await sbPatch(`bookings?id=eq.${selectedBooking.id}`, updates);
+    // ... 其餘不變
+  } catch (e) { showToast('❌ 更改失敗'); }
+  setReschedLoading(false);
+};
     if (isTimeConflict) return showToast('❌ 此時段已有其他預約');
     setReschedLoading(true);
     try {
