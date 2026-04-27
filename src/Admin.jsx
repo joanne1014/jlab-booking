@@ -1,12 +1,11 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 
 let authToken = null; // 登入成功後儲存
+let onAuthExpired = null;   // 
 
 const apiCall = async (action, payload = {}) => {
   const headers = { 'Content-Type': 'application/json' };
 
-  // login 同 recover-password 唔需要 token
-  // 其他所有操作都要帶 token
   if (authToken && action !== 'login' && action !== 'recover-password') {
     headers['Authorization'] = `Bearer ${authToken}`;
   }
@@ -17,12 +16,17 @@ const apiCall = async (action, payload = {}) => {
     body: JSON.stringify({ action, payload })
   });
 
-  // 如果 401 = token 過期，自動登出
   if (res.status === 401 && action !== 'login' && action !== 'recover-password') {
     authToken = null;
-    sessionStorage.removeItem('jlab_token');
-    setAuth(false);
-    showToast('⚠️ 登入已過期，請重新登入');
+    try { sessionStorage.removeItem('jlab_token'); } catch (_) {}
+
+    // 改前（會爆錯）：
+    //   setAuth(false);
+    //   showToast('⚠️ 登入已過期');
+
+    // 改後（安全）：
+    if (onAuthExpired) onAuthExpired();
+
     throw new Error('登入已過期');
   }
 
@@ -61,8 +65,6 @@ const sDesc = { fontSize: 13, color: '#999', marginBottom: 16 };
 const font = "'Noto Serif TC', serif";
 const toTimeStr = (mins) => `${String(Math.floor(mins/60)).padStart(2,'0')}:${String(mins%60).padStart(2,'0')}`;
 const toMins = (t) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
-
-let authToken = null;
 
 export default function Admin() {
   const [auth, setAuth] = useState(false);
@@ -160,6 +162,14 @@ export default function Admin() {
   const todayStr = new Date().toISOString().split('T')[0];
   const bookingCountRef = useRef(0);
   const showToast = (m) => { setToast(m); setTimeout(() => setToast(''), 3000); };
+  useEffect(() => {
+  onAuthExpired = () => {
+    setAuth(false);
+    showToast('⚠️ 登入已過期，請重新登入');
+  };
+  return () => { onAuthExpired = null; };
+}, []);
+
   const toDS = (y, m, d) => `${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
   const navBtn = { padding: '8px 16px', background: '#f5f0eb', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 16, color: '#5c4a3a', fontFamily: font };
   const smallBtn = (bg, co, bd) => ({ padding: '6px 14px', borderRadius: 6, border: bd ? `1px solid ${bd}` : 'none', background: bg, color: co, cursor: 'pointer', fontSize: 12, fontFamily: font });
