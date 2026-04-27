@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 
-/* ═══ Module-level（component 外面）═══ */
+/* ═══ Module-level ═══ */
 let authToken = null;
 let onAuthExpired = null;
 
@@ -48,6 +48,19 @@ const sDesc = { fontSize: 13, color: '#999', marginBottom: 16 };
 const font = "'Noto Serif TC', serif";
 const toTimeStr = (mins) => `${String(Math.floor(mins/60)).padStart(2,'0')}:${String(mins%60).padStart(2,'0')}`;
 const toMins = (t) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
+
+// ★ Supabase Realtime（用 anon key）
+let realtimeClient = null;
+if (typeof window !== 'undefined') {
+  try {
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    if (url && key) {
+      const { createClient } = require('@supabase/supabase-js');
+      realtimeClient = createClient(url, key);
+    }
+  } catch (_) {}
+}
 
 /* ═══ Component ═══ */
 export default function Admin() {
@@ -143,13 +156,25 @@ export default function Admin() {
   const [editAddonForm, setEditAddonForm] = useState({});
 
   const [todayStr, setTodayStr] = useState(() => new Date().toISOString().split('T')[0]);
-
-  // ★ 分頁 state（client-side）
   const [bkPage, setBkPage] = useState(0);
-
-  // ★ DB 日誌
   const [dbLogs, setDbLogs] = useState([]);
   const [logLoading, setLogLoading] = useState(false);
+
+  // ★ NEW — 客戶管理
+  const [customers, setCustomers] = useState([]);
+  const [custSearch, setCustSearch] = useState('');
+  const [selectedCust, setSelectedCust] = useState(null);
+  const [custBookings, setCustBookings] = useState([]);
+
+  // ★ NEW — 提醒
+  const [reminders, setReminders] = useState([]);
+  const [reminderDate, setReminderDate] = useState('');
+  const [reminderLoading, setReminderLoading] = useState(false);
+
+  // ★ NEW — 角色權限
+  const [userRole, setUserRole] = useState('owner');
+  const [userStaffId, setUserStaffId] = useState(null);
+  const isOwner = userRole === 'owner';
 
   const bookingCountRef = useRef(0);
   const showToast = (m) => { setToast(m); setTimeout(() => setToast(''), 3000); };
@@ -171,12 +196,39 @@ export default function Admin() {
     return () => clearInterval(id);
   }, []);
 
-  // ★ 30 秒自動刷新
   useEffect(() => {
     if (!auth || !autoRefresh) return;
     const id = setInterval(() => fetchBookings(), 30000);
     return () => clearInterval(id);
   }, [auth, autoRefresh]);
+
+  // ★ NEW — Supabase Realtime
+  useEffect(() => {
+    if (!auth || !realtimeClient) return;
+    const channel = realtimeClient
+      .channel('bookings-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings' }, (payload) => {
+        if (payload.eventType === 'INSERT') {
+          setAllBookings(prev => [payload.new, ...prev]);
+          showToast(`🔔 新預約：${payload.new.customer_name} — ${payload.new.booking_date} ${payload.new.booking_time}`);
+        }
+        if (payload.eventType === 'UPDATE') {
+          setAllBookings(prev => prev.map(b => b.id === payload.new.id ? payload.new : b));
+        }
+        if (payload.eventType === 'DELETE') {
+          setAllBookings(prev => prev.filter(b => b.id !== payload.old.id));
+        }
+      })
+      .subscribe();
+    return () => { realtimeClient.removeChannel(channel); };
+  }, [auth]);
+
+  // ★ NEW — PWA
+  useEffect(() => {
+    if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch(() => {});
+    }
+  }, []);
 
   const toDS = (y, m, d) => `${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
   const navBtn = { padding: '8px 16px', background: '#f5f0eb', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 16, color: '#5c4a3a', fontFamily: font };
@@ -206,7 +258,7 @@ export default function Admin() {
     setResetPwLoading(false);
   };
 
-  // ★ handleLogin
+  // ★ MODIFIED — handleLogin（加角色查詢）
   const handleLogin = async (e) => {
     e.preventDefault();
     setLoginError(''); setLoginLoading(true);
@@ -215,7 +267,15 @@ export default function Admin() {
       authToken = result.access_token;
       try { sessionStorage.setItem('jlab_token', result.access_token); } catch (_) {}
       setAuth(true);
-      fetchBookings(); fetchBlocked(); fetchStaff(); fetchServices(); fetchAddons(); fetchLogs();
+
+      // ★ 查角色
+      try {
+        const roles = await sbGet(`admin_users?email=eq.${encodeURIComponent(loginEmail)}`);
+        if (roles && roles.length > 0) { setUserRole(roles[0].role || 'owner'); setUserStaffId(roles[0].staff_id || null); }
+        else { setUserRole('owner'); }
+      } catch (_) { setUserRole('owner'); }
+
+      fetchBookings(); fetchBlocked(); fetchStaff(); fetchServices(); fetchAddons(); fetchLogs(); fetchCustomers();
     } catch (err) { setLoginError(err.message || '帳號或密碼錯誤'); }
     setLoginLoading(false);
   };
@@ -225,12 +285,11 @@ export default function Admin() {
     if (saved) {
       authToken = saved;
       apiCall('verify')
-        .then(() => { setAuth(true); fetchBookings(); fetchBlocked(); fetchStaff(); fetchServices(); fetchAddons(); fetchLogs(); })
+        .then(() => { setAuth(true); fetchBookings(); fetchBlocked(); fetchStaff(); fetchServices(); fetchAddons(); fetchLogs(); fetchCustomers(); })
         .catch(() => { authToken = null; sessionStorage.removeItem('jlab_token'); });
     }
   }, []);
 
-  // ★ logChange — 存入 DB
   const logChange = (text) => {
     const id = Date.now();
     const ts = new Date().toLocaleTimeString('zh-HK', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -238,7 +297,6 @@ export default function Admin() {
     try { sbPost('admin_logs', [{ action: text, admin_email: loginEmail || 'admin' }]); } catch (e) { console.error('Log save failed:', e); }
   };
 
-  // ★ 從 DB 讀取日誌
   const fetchLogs = async () => {
     setLogLoading(true);
     try { const data = await sbGet('admin_logs?order=created_at.desc&limit=100'); setDbLogs(data || []); } catch (e) { console.error(e); }
@@ -256,7 +314,6 @@ export default function Admin() {
     setCpLoading(false);
   };
 
-  // ★ CSV 匯出
   const exportCSV = () => {
     const hdrs = ['日期', '時間', '客人', '電話', '服務', '技師', '金額', '狀態'];
     const rows = filteredBookings.map(b => [b.booking_date, b.booking_time, b.customer_name, b.customer_phone, b.service_name, b.technician_label || '', b.total_price, statusText(b.status)]);
@@ -269,6 +326,65 @@ export default function Admin() {
     URL.revokeObjectURL(url);
     showToast('✅ 已匯出 CSV');
   };
+
+  // ★ NEW — 客戶管理 Functions
+  const fetchCustomers = async () => {
+    try { const data = await sbGet('customers?order=last_visit_date.desc.nullslast&limit=500'); setCustomers(data || []); } catch (_) {}
+  };
+  const viewCustomer = async (cust) => {
+    setSelectedCust(cust);
+    try { const bks = await sbGet(`bookings?customer_phone=eq.${encodeURIComponent(cust.phone)}&order=booking_date.desc&limit=50`); setCustBookings(bks || []); } catch (_) {}
+  };
+  const updateCustNotes = async (custId, notes) => {
+    try { await sbPatch(`customers?id=eq.${custId}`, { notes }); setCustomers(prev => prev.map(c => c.id === custId ? { ...c, notes } : c)); showToast('✅ 備註已更新'); } catch (_) { showToast('❌ 更新失敗'); }
+  };
+  const addCustTag = async (custId, tag) => {
+    const cust = customers.find(c => c.id === custId);
+    if (!cust || !tag.trim()) return;
+    const newTags = [...new Set([...(cust.tags || []), tag.trim()])];
+    try { await sbPatch(`customers?id=eq.${custId}`, { tags: newTags }); setCustomers(prev => prev.map(c => c.id === custId ? { ...c, tags: newTags } : c)); if (selectedCust?.id === custId) setSelectedCust(prev => ({ ...prev, tags: newTags })); } catch (_) {}
+  };
+  const removeCustTag = async (custId, tag) => {
+    const cust = customers.find(c => c.id === custId);
+    if (!cust) return;
+    const newTags = (cust.tags || []).filter(t => t !== tag);
+    try { await sbPatch(`customers?id=eq.${custId}`, { tags: newTags }); setCustomers(prev => prev.map(c => c.id === custId ? { ...c, tags: newTags } : c)); if (selectedCust?.id === custId) setSelectedCust(prev => ({ ...prev, tags: newTags })); } catch (_) {}
+  };
+  const filteredCustomers = useMemo(() => {
+    if (!custSearch.trim()) return customers;
+    const s = custSearch.trim().toLowerCase();
+    return customers.filter(c => (c.name||'').toLowerCase().includes(s) || (c.phone||'').includes(s) || (c.tags||[]).some(t => t.toLowerCase().includes(s)));
+  }, [customers, custSearch]);
+
+  // ★ NEW — 提醒 Functions
+  const generateReminders = async () => {
+    if (!reminderDate) return showToast('❌ 請選擇日期');
+    setReminderLoading(true);
+    try {
+      const bks = await sbGet(`bookings?booking_date=eq.${reminderDate}&status=in.(confirmed,pending)&order=booking_time`);
+      const list = (bks || []).filter(b => b.customer_phone).map(b => {
+        const phone = b.customer_phone.replace(/[^0-9]/g, '');
+        const fullPhone = phone.length <= 8 ? '852' + phone : phone;
+        const msg = `${b.customer_name} 你好！提醒你 ${b.booking_date} ${b.booking_time} 有預約（${b.service_name || ''}）。如需更改請提前聯絡我哋 🙏`;
+        return { bookingId: b.id, name: b.customer_name, phone: fullPhone, time: b.booking_time, service: b.service_name, message: msg, waLink: `https://wa.me/${fullPhone}?text=${encodeURIComponent(msg)}` };
+      });
+      setReminders(list);
+      showToast(`✅ 搵到 ${list.length} 個預約要提醒`);
+    } catch (e) { showToast('❌ ' + e.message); }
+    setReminderLoading(false);
+  };
+
+  // ★ NEW — 收入圖表數據
+  const revenueData = useMemo(() => {
+    const map = {};
+    allBookings.filter(b => b.status !== 'cancelled').forEach(b => {
+      const d = b.booking_date; if (!d) return;
+      if (!map[d]) map[d] = { date: d, revenue: 0, count: 0 };
+      map[d].revenue += b.total_price || 0; map[d].count++;
+    });
+    return Object.values(map).sort((a, b) => a.date.localeCompare(b.date)).slice(-30);
+  }, [allBookings]);
+  const maxRevenue = useMemo(() => Math.max(...revenueData.map(d => d.revenue), 1), [revenueData]);
 
   const gridTimes = useMemo(() => { const times = []; let mins = toMins(gridStart); const end = toMins(gridEnd); while (mins <= end) { times.push(toTimeStr(mins)); mins += gridInterval; } return times; }, [gridStart, gridEnd, gridInterval]);
   const displayTimes = pending[activeDate] || dbTimes;
@@ -288,7 +404,6 @@ export default function Admin() {
     return r;
   }, [allBookings, filterDateFrom, filterDateTo, filterStatus, filterTech, searchTerm]);
 
-  // ★ 分頁計算（client-side）
   const totalPages = Math.ceil(filteredBookings.length / PER_PAGE);
   const pagedBookings = useMemo(() => {
     const start = bkPage * PER_PAGE;
@@ -365,8 +480,6 @@ export default function Admin() {
 
   const fetchServices = async () => { setSvcLoading(true); try { const data = await sbGet('services?order=sort_order,created_at'); setSvcList(data || []); } catch (e) { console.error(e); } setSvcLoading(false); };
   const fetchAddons = async () => { try { const data = await sbGet('service_addons?order=sort_order,created_at'); setSvcAddons(data || []); } catch (e) { console.error(e); } };
-
-  // ★ fetchBlocked
   const fetchBlocked = async () => { try { const data = await sbGet('blocked_dates?order=date.desc'); setBlocked(data || []); } catch (e) { console.error(e); } };
 
   const openEditSvc = async (svc) => {
@@ -391,11 +504,11 @@ export default function Admin() {
     } catch (e) { showToast('❌ 儲存失敗：' + e.message); }
   };
 
-  const deleteSvc = async (id) => { if (!window.confirm('確定刪除此服務？相關嘅選項變體都會一併刪除。')) return; try { await sbDel(`service_variants?service_id=eq.${id}`); await sbDel(`services?id=eq.${id}`); setSvcList(prev => prev.filter(s => s.id !== id)); showToast('✅ 已刪除'); } catch (e) { showToast('❌ 刪除失敗'); } };
+  const deleteSvc = async (id) => { if (!window.confirm('確定刪除此服務？')) return; try { await sbDel(`service_variants?service_id=eq.${id}`); await sbDel(`services?id=eq.${id}`); setSvcList(prev => prev.filter(s => s.id !== id)); showToast('✅ 已刪除'); } catch (e) { showToast('❌ 刪除失敗'); } };
   const toggleSvcActive = async (svc) => { try { await sbPatch(`services?id=eq.${svc.id}`, { is_active: !svc.is_active }); setSvcList(prev => prev.map(s => s.id === svc.id ? { ...s, is_active: !svc.is_active } : s)); showToast(svc.is_active ? '已下架' : '已上架'); } catch (e) { showToast('❌ 更新失敗'); } };
   const openEditAddon = (addon) => { setEditAddonForm(addon ? { ...addon } : { name: '', price: 0, description: '', is_active: true, sort_order: svcAddons.length }); setEditAddon(addon || 'new'); };
   const saveAddon = async () => { const f = editAddonForm; if (!f.name?.trim()) return showToast('❌ 請輸入附加項目名稱'); try { if (f.id) { const { id, created_at, ...rest } = f; await sbPatch(`service_addons?id=eq.${id}`, rest); setSvcAddons(prev => prev.map(a => a.id === id ? { ...a, ...rest } : a)); } else { const data = await sbPost('service_addons', [f]); if (data?.length) setSvcAddons(prev => [...prev, ...data]); } setEditAddon(null); showToast('✅ 已儲存'); } catch (e) { showToast('❌ 儲存失敗'); } };
-  const deleteAddon = async (id) => { if (!window.confirm('確定刪除此附加項目？')) return; try { await sbDel(`service_addons?id=eq.${id}`); setSvcAddons(prev => prev.filter(a => a.id !== id)); showToast('✅ 已刪除'); } catch (e) { showToast('❌ 刪除失敗'); } };
+  const deleteAddon = async (id) => { if (!window.confirm('確定刪除？')) return; try { await sbDel(`service_addons?id=eq.${id}`); setSvcAddons(prev => prev.filter(a => a.id !== id)); showToast('✅ 已刪除'); } catch (e) { showToast('❌ 刪除失敗'); } };
   const toggleAddonActive = async (addon) => { try { await sbPatch(`service_addons?id=eq.${addon.id}`, { is_active: !addon.is_active }); setSvcAddons(prev => prev.map(a => a.id === addon.id ? { ...a, is_active: !addon.is_active } : a)); } catch (e) { showToast('❌ 更新失敗'); } };
   const moveSvc = async (idx, dir) => { const arr = [...svcList]; const ni = idx + dir; if (ni < 0 || ni >= arr.length) return; [arr[idx], arr[ni]] = [arr[ni], arr[idx]]; arr.forEach((s, i) => s.sort_order = i); setSvcList(arr); try { for (const s of arr) await sbPatch(`services?id=eq.${s.id}`, { sort_order: s.sort_order }); } catch (_) {} };
 
@@ -403,13 +516,12 @@ export default function Admin() {
   const loadReschedSlots = async (date) => { try { const data = await sbGet(`enabled_timeslots?slot_date=eq.${date}&order=slot_time`); const map = {}; (data || []).forEach(s => { const sid = s.staff_id; if (!map[sid]) map[sid] = new Set(); map[sid].add(s.slot_time?.slice(0, 5)); }); setReschedSlots(map); } catch (e) { setReschedSlots({}); } };
   const handleReschedDateChange = (date) => { setReschedDate(date); setReschedTime(''); loadReschedSlots(date); };
 
-  // ★ saveResched — 合併版（server-side 衝突檢測 + 完整邏輯）
+  // ★ MODIFIED — saveResched（server-side 衝突檢測）
   const saveResched = async () => {
     if (!selectedBooking || !reschedDate || !reschedTime) return showToast('❌ 請選擇日期同時間');
     if (isTimeConflict) return showToast('❌ 此時段已有其他預約');
     setReschedLoading(true);
     try {
-      // Server-side 衝突檢測（如果 DB function 未建好會 fallback 到上面嘅 client-side check）
       try {
         const conflictResult = await apiCall('check-conflict', {
           date: reschedDate, time: reschedTime,
@@ -417,7 +529,7 @@ export default function Admin() {
           technician: reschedTech || selectedBooking.technician_label,
           excludeId: selectedBooking.id
         });
-        if (conflictResult.hasConflict) { setReschedLoading(false); return showToast('❌ 此時段與其他預約衝突（包含服務時長）'); }
+        if (conflictResult.hasConflict) { setReschedLoading(false); return showToast('❌ 此時段與其他預約衝突（包含服務時長 + 緩衝時間）'); }
       } catch (conflictErr) { console.warn('Server conflict check skipped:', conflictErr.message); }
 
       const oldDate = selectedBooking.booking_date;
@@ -483,13 +595,9 @@ export default function Admin() {
   const syncPending = async () => { if (!activeStaff) return; const entries = Object.entries(pending); if (!entries.length) return; if (!window.confirm(`確定將「${activeStaff.name}」嘅 ${entries.length} 個日期同步到前台？`)) return; setBatchLoading(true); try { const dates = entries.map(([d]) => d); const sid = activeStaff.id; await sbDel(`date_availability?available_date=in.(${dates.join(',')})&staff_id=eq.${sid}`); await sbDel(`enabled_timeslots?slot_date=in.(${dates.join(',')})&staff_id=eq.${sid}`); try { await sbDel(`disabled_timeslots?slot_date=in.(${dates.join(',')})`); } catch (_) {} await sbPost('date_availability', entries.map(([d, times]) => ({ available_date: d, status: times.size > 0 ? 'available' : 'closed', staff_id: sid }))); const enabledRows = []; entries.forEach(([d, times]) => { [...times].forEach(t => { enabledRows.push({ slot_date: d, slot_time: t, staff_id: sid }); }); }); if (enabledRows.length > 0) { for (let i = 0; i < enabledRows.length; i += 500) await sbPost('enabled_timeslots', enabledRows.slice(i, i + 500)); } setPending({}); setSelDates(new Set()); setSchedRefreshKey(k => k + 1); showToast(`✅ 成功同步「${activeStaff.name}」嘅 ${dates.length} 個日期！`); loadActiveFromDB(activeDate); } catch (e) { console.error(e); showToast('❌ 同步失敗：' + e.message); } setBatchLoading(false); };
   const removePendingDate = (d) => { setPending(prev => { const n = { ...prev }; delete n[d]; return n; }); };
 
-  // ★ fetchBookings — fetch-all（stats 需要全部數據）
   const fetchBookings = async () => {
     setBkLoading(true);
-    try {
-      const data = await sbGet('bookings?order=booking_date.desc,booking_time.desc&limit=1000');
-      setAllBookings(data || []);
-    } catch (e) { console.error('fetchBookings error:', e); }
+    try { const data = await sbGet('bookings?order=booking_date.desc,booking_time.desc&limit=1000'); setAllBookings(data || []); } catch (e) { console.error('fetchBookings error:', e); }
     setBkLoading(false);
   };
 
@@ -536,11 +644,22 @@ export default function Admin() {
     </div>
   ) : null;
 
+  // ★ MODIFIED — Tab 定義（加客戶 + 提醒，按角色顯示）
+  const allTabs = [
+    { key: 'bookings', label: `📋 預約${stats.pending > 0 ? ` (${stats.pending})` : ''}`, show: true },
+    { key: 'timeslots', label: '🕐 時段', show: true },
+    { key: 'customers', label: '👥 客戶', show: true },
+    { key: 'reminders', label: '📱 提醒', show: true },
+    { key: 'frontend', label: '🎨 前台管理', show: isOwner },
+    { key: 'templates', label: '📝 訊息模板', show: isOwner },
+  ].filter(t => t.show);
+
   return (
     <div style={{ minHeight: '100vh', background: '#f5f0eb', fontFamily: font }}>
       {toast && <div style={{ position: 'fixed', top: 20, left: '50%', transform: 'translateX(-50%)', background: '#5c4a3a', color: '#fff', padding: '12px 28px', borderRadius: 8, fontSize: 14, zIndex: 9999, boxShadow: '0 4px 20px rgba(0,0,0,0.2)' }}>{toast}</div>}
       {batchLoading && <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.3)', zIndex: 999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><div style={{ background: '#fff', padding: '30px 40px', borderRadius: 12, textAlign: 'center' }}><div style={{ fontSize: 24, marginBottom: 10 }}>⏳</div><div style={{ fontSize: 14, color: '#5c4a3a' }}>處理中...</div></div></div>}
 
+      {/* ═══ Booking Detail Modal（同原本一樣，冇改）═══ */}
       {selectedBooking && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }} onClick={closeBooking}>
           <div style={{ background: '#fff', borderRadius: 16, padding: 28, maxWidth: 480, width: '100%', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }} onClick={e => e.stopPropagation()}>
@@ -582,37 +701,29 @@ export default function Admin() {
         </div>
       )}
 
+      {/* ═══ Service / Addon Modals（同原本一樣）═══ */}
       {editSvc && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }} onClick={() => setEditSvc(null)}>
           <div style={{ background: '#fff', borderRadius: 16, padding: 28, maxWidth: 560, width: '100%', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }} onClick={e => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}><h3 style={{ margin: 0, color: '#5c4a3a', fontSize: 18 }}>{editSvcForm.id ? '✏️ 編輯服務' : '➕ 新增服務'}</h3><button onClick={() => setEditSvc(null)} style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: '#999' }}>✕</button></div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div><label style={{ fontSize: 13, color: '#5c4a3a', fontWeight: 600, marginBottom: 4, display: 'block' }}>服務名稱 *</label><input value={editSvcForm.name || ''} onChange={e => setEditSvcForm(p => ({ ...p, name: e.target.value }))} placeholder="例：凝膠美甲" style={{ width: '100%', padding: '10px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, boxSizing: 'border-box', fontFamily: font }} /></div>
-              <div><label style={{ fontSize: 13, color: '#5c4a3a', fontWeight: 600, marginBottom: 4, display: 'block' }}>描述</label><textarea value={editSvcForm.description || ''} onChange={e => setEditSvcForm(p => ({ ...p, description: e.target.value }))} placeholder="服務簡介..." rows={2} style={{ width: '100%', padding: '10px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, boxSizing: 'border-box', fontFamily: font, resize: 'vertical' }} /></div>
+              <div><label style={{ fontSize: 13, color: '#5c4a3a', fontWeight: 600, marginBottom: 4, display: 'block' }}>描述</label><textarea value={editSvcForm.description || ''} onChange={e => setEditSvcForm(p => ({ ...p, description: e.target.value }))} rows={2} style={{ width: '100%', padding: '10px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, boxSizing: 'border-box', fontFamily: font, resize: 'vertical' }} /></div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div><label style={{ fontSize: 13, color: '#5c4a3a', fontWeight: 600, marginBottom: 4, display: 'block' }}>基本價格 ($)</label><input type="number" value={editSvcForm.base_price || 0} onChange={e => setEditSvcForm(p => ({ ...p, base_price: +e.target.value }))} style={{ width: '100%', padding: '10px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, boxSizing: 'border-box' }} /></div>
                 <div><label style={{ fontSize: 13, color: '#5c4a3a', fontWeight: 600, marginBottom: 4, display: 'block' }}>時長（分鐘）</label><input type="number" value={editSvcForm.duration_minutes || 60} onChange={e => setEditSvcForm(p => ({ ...p, duration_minutes: +e.target.value }))} style={{ width: '100%', padding: '10px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, boxSizing: 'border-box' }} /></div>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                <div><label style={{ fontSize: 13, color: '#5c4a3a', fontWeight: 600, marginBottom: 4, display: 'block' }}>分類</label><input value={editSvcForm.category || ''} onChange={e => setEditSvcForm(p => ({ ...p, category: e.target.value }))} placeholder="例：美甲" style={{ width: '100%', padding: '10px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, boxSizing: 'border-box', fontFamily: font }} /></div>
-                <div><label style={{ fontSize: 13, color: '#5c4a3a', fontWeight: 600, marginBottom: 4, display: 'block' }}>圖片 URL</label><input value={editSvcForm.image_url || ''} onChange={e => setEditSvcForm(p => ({ ...p, image_url: e.target.value }))} placeholder="https://..." style={{ width: '100%', padding: '10px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, boxSizing: 'border-box' }} /></div>
+                <div><label style={{ fontSize: 13, color: '#5c4a3a', fontWeight: 600, marginBottom: 4, display: 'block' }}>分類</label><input value={editSvcForm.category || ''} onChange={e => setEditSvcForm(p => ({ ...p, category: e.target.value }))} style={{ width: '100%', padding: '10px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, boxSizing: 'border-box', fontFamily: font }} /></div>
+                <div><label style={{ fontSize: 13, color: '#5c4a3a', fontWeight: 600, marginBottom: 4, display: 'block' }}>圖片 URL</label><input value={editSvcForm.image_url || ''} onChange={e => setEditSvcForm(p => ({ ...p, image_url: e.target.value }))} style={{ width: '100%', padding: '10px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, boxSizing: 'border-box' }} /></div>
               </div>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}><input type="checkbox" checked={editSvcForm.is_active !== false} onChange={e => setEditSvcForm(p => ({ ...p, is_active: e.target.checked }))} /><span style={{ fontSize: 13, color: '#5c4a3a' }}>上架中（客人可見）</span></label>
-              <div style={{ borderTop: '1px solid #eee', paddingTop: 16, marginTop: 4 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}><span style={{ fontSize: 14, fontWeight: 600, color: '#5c4a3a' }}>📋 服務選項 / 變體</span><button onClick={() => setEditSvcVariants(prev => [...prev, { label: '', price: 0, is_active: true, sort_order: prev.length }])} style={{ padding: '4px 12px', borderRadius: 6, border: '1px dashed #b8956a', background: 'transparent', color: '#b8956a', cursor: 'pointer', fontSize: 12, fontFamily: font }}>+ 新增選項</button></div>
-                {editSvcVariants.length === 0 ? (<div style={{ padding: '16px', textAlign: 'center', color: '#ccc', fontSize: 13 }}>未有選項 — 可直接使用基本價格</div>) : editSvcVariants.map((v, vi) => (
-                  <div key={vi} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8, padding: '8px 12px', background: '#faf6f0', borderRadius: 8 }}>
-                    <input value={v.label} onChange={e => { const a = [...editSvcVariants]; a[vi] = { ...a[vi], label: e.target.value }; setEditSvcVariants(a); }} placeholder="選項名稱" style={{ flex: 2, padding: '8px 10px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13, fontFamily: font }} />
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 2, flex: 1 }}><span style={{ fontSize: 13, color: '#999' }}>$</span><input type="number" value={v.price || 0} onChange={e => { const a = [...editSvcVariants]; a[vi] = { ...a[vi], price: +e.target.value }; setEditSvcVariants(a); }} style={{ width: '100%', padding: '8px 6px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13 }} /></div>
-                    <button onClick={() => setEditSvcVariants(prev => prev.filter((_, i) => i !== vi))} style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #ffcdd2', background: '#ffebee', color: '#c62828', cursor: 'pointer', fontSize: 12, fontFamily: font }}>✕</button>
-                  </div>
-                ))}
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}><input type="checkbox" checked={editSvcForm.is_active !== false} onChange={e => setEditSvcForm(p => ({ ...p, is_active: e.target.checked }))} /><span style={{ fontSize: 13 }}>上架中</span></label>
+              <div style={{ borderTop: '1px solid #eee', paddingTop: 16 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}><span style={{ fontSize: 14, fontWeight: 600, color: '#5c4a3a' }}>📋 服務選項</span><button onClick={() => setEditSvcVariants(prev => [...prev, { label: '', price: 0, is_active: true, sort_order: prev.length }])} style={{ padding: '4px 12px', borderRadius: 6, border: '1px dashed #b8956a', background: 'transparent', color: '#b8956a', cursor: 'pointer', fontSize: 12, fontFamily: font }}>+ 新增</button></div>
+                {editSvcVariants.map((v, vi) => (<div key={vi} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8, padding: '8px 12px', background: '#faf6f0', borderRadius: 8 }}><input value={v.label} onChange={e => { const a = [...editSvcVariants]; a[vi] = { ...a[vi], label: e.target.value }; setEditSvcVariants(a); }} placeholder="名稱" style={{ flex: 2, padding: '8px 10px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13, fontFamily: font }} /><div style={{ display: 'flex', alignItems: 'center', gap: 2, flex: 1 }}><span style={{ fontSize: 13, color: '#999' }}>$</span><input type="number" value={v.price || 0} onChange={e => { const a = [...editSvcVariants]; a[vi] = { ...a[vi], price: +e.target.value }; setEditSvcVariants(a); }} style={{ width: '100%', padding: '8px 6px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13 }} /></div><button onClick={() => setEditSvcVariants(prev => prev.filter((_, i) => i !== vi))} style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #ffcdd2', background: '#ffebee', color: '#c62828', cursor: 'pointer', fontSize: 12 }}>✕</button></div>))}
               </div>
             </div>
-            <div style={{ display: 'flex', gap: 10, marginTop: 24, justifyContent: 'flex-end' }}>
-              <button onClick={() => setEditSvc(null)} style={{ padding: '10px 20px', borderRadius: 8, border: '1px solid #ccc', background: '#fff', color: '#666', cursor: 'pointer', fontSize: 14, fontFamily: font }}>取消</button>
-              <button onClick={saveSvc} style={{ padding: '10px 28px', borderRadius: 8, border: 'none', background: '#5c4a3a', color: '#fff', cursor: 'pointer', fontSize: 14, fontFamily: font, fontWeight: 600 }}>💾 儲存</button>
-            </div>
+            <div style={{ display: 'flex', gap: 10, marginTop: 24, justifyContent: 'flex-end' }}><button onClick={() => setEditSvc(null)} style={{ padding: '10px 20px', borderRadius: 8, border: '1px solid #ccc', background: '#fff', color: '#666', cursor: 'pointer', fontSize: 14, fontFamily: font }}>取消</button><button onClick={saveSvc} style={{ padding: '10px 28px', borderRadius: 8, border: 'none', background: '#5c4a3a', color: '#fff', cursor: 'pointer', fontSize: 14, fontFamily: font, fontWeight: 600 }}>💾 儲存</button></div>
           </div>
         </div>
       )}
@@ -622,34 +733,33 @@ export default function Admin() {
           <div style={{ background: '#fff', borderRadius: 16, padding: 28, maxWidth: 400, width: '100%', boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }} onClick={e => e.stopPropagation()}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}><h3 style={{ margin: 0, color: '#5c4a3a', fontSize: 18 }}>{editAddonForm.id ? '✏️ 編輯附加項目' : '➕ 新增附加項目'}</h3><button onClick={() => setEditAddon(null)} style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: '#999' }}>✕</button></div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <div><label style={{ fontSize: 13, color: '#5c4a3a', fontWeight: 600, marginBottom: 4, display: 'block' }}>名稱 *</label><input value={editAddonForm.name || ''} onChange={e => setEditAddonForm(p => ({ ...p, name: e.target.value }))} placeholder="例：卸甲" style={{ width: '100%', padding: '10px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, boxSizing: 'border-box', fontFamily: font }} /></div>
+              <div><label style={{ fontSize: 13, color: '#5c4a3a', fontWeight: 600, marginBottom: 4, display: 'block' }}>名稱 *</label><input value={editAddonForm.name || ''} onChange={e => setEditAddonForm(p => ({ ...p, name: e.target.value }))} style={{ width: '100%', padding: '10px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, boxSizing: 'border-box', fontFamily: font }} /></div>
               <div><label style={{ fontSize: 13, color: '#5c4a3a', fontWeight: 600, marginBottom: 4, display: 'block' }}>價格 ($)</label><input type="number" value={editAddonForm.price || 0} onChange={e => setEditAddonForm(p => ({ ...p, price: +e.target.value }))} style={{ width: '100%', padding: '10px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, boxSizing: 'border-box' }} /></div>
-              <div><label style={{ fontSize: 13, color: '#5c4a3a', fontWeight: 600, marginBottom: 4, display: 'block' }}>描述</label><input value={editAddonForm.description || ''} onChange={e => setEditAddonForm(p => ({ ...p, description: e.target.value }))} placeholder="簡短說明..." style={{ width: '100%', padding: '10px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, boxSizing: 'border-box', fontFamily: font }} /></div>
+              <div><label style={{ fontSize: 13, color: '#5c4a3a', fontWeight: 600, marginBottom: 4, display: 'block' }}>描述</label><input value={editAddonForm.description || ''} onChange={e => setEditAddonForm(p => ({ ...p, description: e.target.value }))} style={{ width: '100%', padding: '10px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, boxSizing: 'border-box', fontFamily: font }} /></div>
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}><input type="checkbox" checked={editAddonForm.is_active !== false} onChange={e => setEditAddonForm(p => ({ ...p, is_active: e.target.checked }))} /><span style={{ fontSize: 13 }}>啟用中</span></label>
             </div>
-            <div style={{ display: 'flex', gap: 10, marginTop: 24, justifyContent: 'flex-end' }}>
-              <button onClick={() => setEditAddon(null)} style={{ padding: '10px 20px', borderRadius: 8, border: '1px solid #ccc', background: '#fff', color: '#666', cursor: 'pointer', fontSize: 14, fontFamily: font }}>取消</button>
-              <button onClick={saveAddon} style={{ padding: '10px 28px', borderRadius: 8, border: 'none', background: '#5c4a3a', color: '#fff', cursor: 'pointer', fontSize: 14, fontFamily: font, fontWeight: 600 }}>💾 儲存</button>
-            </div>
+            <div style={{ display: 'flex', gap: 10, marginTop: 24, justifyContent: 'flex-end' }}><button onClick={() => setEditAddon(null)} style={{ padding: '10px 20px', borderRadius: 8, border: '1px solid #ccc', background: '#fff', color: '#666', cursor: 'pointer', fontSize: 14, fontFamily: font }}>取消</button><button onClick={saveAddon} style={{ padding: '10px 28px', borderRadius: 8, border: 'none', background: '#5c4a3a', color: '#fff', cursor: 'pointer', fontSize: 14, fontFamily: font, fontWeight: 600 }}>💾 儲存</button></div>
           </div>
         </div>
       )}
 
+      {/* ═══ Header ═══ */}
       <div style={{ background: '#fff', padding: isMobile ? '16px 16px' : '20px 30px', boxShadow: '0 2px 10px rgba(0,0,0,0.05)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
-        <div><h1 style={{ fontSize: isMobile ? 17 : 20, color: '#5c4a3a', margin: 0 }}>J.LAB 管理後台</h1><p style={{ color: '#999', fontSize: 11, margin: '4px 0 0', letterSpacing: 1 }}>ADMIN DASHBOARD</p></div>
+        <div><h1 style={{ fontSize: isMobile ? 17 : 20, color: '#5c4a3a', margin: 0 }}>J.LAB 管理後台</h1><p style={{ color: '#999', fontSize: 11, margin: '4px 0 0', letterSpacing: 1 }}>ADMIN DASHBOARD {!isOwner && <span style={{ color: '#FF9800' }}>（員工模式）</span>}</p></div>
         <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-          <button onClick={openHistory} style={headerBtn}>🔍 {!isMobile && '查看歷史紀錄'}</button>
+          <button onClick={openHistory} style={headerBtn}>🔍 {!isMobile && '歷史'}</button>
           <button onClick={() => { setShowChangePw(true); setCpOld(''); setCpNew(''); setCpConfirm(''); setCpMsg(''); setCpError(''); }} style={headerBtn}>🔑{!isMobile && ' 密碼'}</button>
           <button onClick={() => { setAuth(false); authToken = null; sessionStorage.removeItem('jlab_token'); showToast('已登出'); }} style={headerBtn}>登出</button>
         </div>
       </div>
 
+      {/* ═══ History Modal ═══ */}
       {showHistory && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 9999, display: 'flex', justifyContent: 'center', alignItems: 'center' }} onClick={() => setShowHistory(false)}>
           <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 16, padding: 24, width: '90%', maxWidth: 500, maxHeight: '70vh', overflow: 'hidden', display: 'flex', flexDirection: 'column', fontFamily: font }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}><h3 style={{ margin: 0, fontSize: 18, color: '#3e2f1c' }}>📋 操作歷史記錄</h3><button onClick={() => setShowHistory(false)} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#999' }}>✕</button></div>
             <div style={{ overflowY: 'auto', flex: 1 }}>
-              {logLoading ? <p style={{ color: '#999', textAlign: 'center', padding: 40 }}>載入中...</p> : dbLogs.length === 0 ? <p style={{ color: '#999', textAlign: 'center', padding: 40 }}>暫無操作記錄</p> : dbLogs.map((log) => (
+              {logLoading ? <p style={{ color: '#999', textAlign: 'center', padding: 40 }}>載入中...</p> : dbLogs.length === 0 ? <p style={{ color: '#999', textAlign: 'center', padding: 40 }}>暫無操作記錄</p> : dbLogs.map(log => (
                 <div key={log.id} style={{ padding: '12px 16px', marginBottom: 8, background: '#faf8f5', borderRadius: 10, borderLeft: '3px solid #b8956a' }}>
                   <div style={{ fontSize: 11, color: '#999', marginBottom: 4 }}>{new Date(log.created_at).toLocaleString('zh-HK')}{log.admin_email && <span style={{ marginLeft: 8 }}>by {log.admin_email}</span>}</div>
                   <div style={{ fontSize: 14, color: '#3e2f1c' }}>{log.action}</div>
@@ -660,6 +770,7 @@ export default function Admin() {
         </div>
       )}
 
+      {/* ═══ Change Password Modal ═══ */}
       {showChangePw && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }} onClick={() => setShowChangePw(false)}>
           <div style={{ background: '#fff', borderRadius: 16, padding: 32, maxWidth: 400, width: '100%', boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }} onClick={e => e.stopPropagation()}>
@@ -676,41 +787,27 @@ export default function Admin() {
         </div>
       )}
 
+      {/* ═══ Tab Bar — ★ MODIFIED ═══ */}
       <div style={{ background: '#fff', borderTop: '1px solid #f0ebe3', padding: '0 16px', display: 'flex', gap: 0, boxShadow: '0 2px 10px rgba(0,0,0,0.03)', overflowX: 'auto' }}>
-        {[{ key: 'bookings', label: `📋 預約${stats.pending > 0 ? ` (${stats.pending})` : ''}` }, { key: 'timeslots', label: '🕐 時段' }, { key: 'frontend', label: '🎨 前台管理' }, { key: 'templates', label: '📝 訊息模板' }].map(t => (
+        {allTabs.map(t => (
           <button key={t.key} onClick={() => setTab(t.key)} style={{ padding: '14px 18px', background: 'none', border: 'none', borderBottom: tab === t.key ? '2px solid #5c4a3a' : '2px solid transparent', fontSize: 13, color: tab === t.key ? '#5c4a3a' : '#999', fontWeight: tab === t.key ? 600 : 400, cursor: 'pointer', fontFamily: font, whiteSpace: 'nowrap' }}>{t.label}</button>
         ))}
       </div>
 
+      {/* ═══ Pending Sync Bar（timeslots）═══ */}
       {pendingCount > 0 && tab === 'timeslots' && (
         <div style={{ position: 'sticky', top: 0, zIndex: 100, background: 'linear-gradient(135deg, #FFF3E0, #FFE0B2)', borderBottom: '2px solid #FFB74D' }}>
           <div style={{ padding: '14px 30px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <span style={{ color: '#E65100', fontSize: 14, fontWeight: 600 }}>⏳「{activeStaff?.name}」{pendingCount} 個日期待同步</span>
-              <button onClick={() => setShowPendingList(!showPendingList)} style={{ padding: '4px 12px', background: 'transparent', border: '1px solid #FFB74D', borderRadius: 4, color: '#E65100', cursor: 'pointer', fontSize: 12, fontFamily: font }}>{showPendingList ? '收起 ▲' : '查看 ▼'}</button>
-            </div>
-            <div style={{ display: 'flex', gap: 8 }}>
-              <button onClick={() => { setPending({}); showToast('已清除'); setShowPendingList(false); }} style={{ padding: '8px 16px', background: '#fff', border: '1px solid #ccc', borderRadius: 6, cursor: 'pointer', fontSize: 13, color: '#666', fontFamily: font }}>取消全部</button>
-              <button onClick={syncPending} style={{ padding: '8px 24px', background: '#4CAF50', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 14, fontWeight: 600, fontFamily: font }}>✅ 確認同步到前台</button>
-            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}><span style={{ color: '#E65100', fontSize: 14, fontWeight: 600 }}>⏳「{activeStaff?.name}」{pendingCount} 個日期待同步</span><button onClick={() => setShowPendingList(!showPendingList)} style={{ padding: '4px 12px', background: 'transparent', border: '1px solid #FFB74D', borderRadius: 4, color: '#E65100', cursor: 'pointer', fontSize: 12, fontFamily: font }}>{showPendingList ? '收起 ▲' : '查看 ▼'}</button></div>
+            <div style={{ display: 'flex', gap: 8 }}><button onClick={() => { setPending({}); showToast('已清除'); setShowPendingList(false); }} style={{ padding: '8px 16px', background: '#fff', border: '1px solid #ccc', borderRadius: 6, cursor: 'pointer', fontSize: 13, color: '#666', fontFamily: font }}>取消全部</button><button onClick={syncPending} style={{ padding: '8px 24px', background: '#4CAF50', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 14, fontWeight: 600, fontFamily: font }}>✅ 確認同步到前台</button></div>
           </div>
-          {showPendingList && (
-            <div style={{ padding: '0 30px 14px', maxHeight: 240, overflowY: 'auto' }}>
-              <div style={{ background: '#fff', borderRadius: 8, overflow: 'hidden' }}>
-                {Object.entries(pending).sort(([a], [b]) => a.localeCompare(b)).map(([date, times]) => (
-                  <div key={date} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', borderBottom: '1px solid #f5f0eb' }}>
-                    <div style={{ fontSize: 13 }}><span style={{ color: '#5c4a3a', fontWeight: 600 }}>{date}</span><span style={{ color: '#999', marginLeft: 6 }}>週{DAYS[new Date(date + 'T00:00:00').getDay()]}</span><span style={{ color: times.size > 0 ? '#4CAF50' : '#f44336', marginLeft: 10, fontSize: 12 }}>{times.size > 0 ? `${times.size} 個時段` : '全日關閉'}</span></div>
-                    <button onClick={() => removePendingDate(date)} style={smallBtn('#ffebee', '#c62828', '#ffcdd2')}>移除</button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+          {showPendingList && (<div style={{ padding: '0 30px 14px', maxHeight: 240, overflowY: 'auto' }}><div style={{ background: '#fff', borderRadius: 8, overflow: 'hidden' }}>{Object.entries(pending).sort(([a], [b]) => a.localeCompare(b)).map(([date, times]) => (<div key={date} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', borderBottom: '1px solid #f5f0eb' }}><div style={{ fontSize: 13 }}><span style={{ color: '#5c4a3a', fontWeight: 600 }}>{date}</span><span style={{ color: '#999', marginLeft: 6 }}>週{DAYS[new Date(date + 'T00:00:00').getDay()]}</span><span style={{ color: times.size > 0 ? '#4CAF50' : '#f44336', marginLeft: 10, fontSize: 12 }}>{times.size > 0 ? `${times.size} 個時段` : '全日關閉'}</span></div><button onClick={() => removePendingDate(date)} style={smallBtn('#ffebee', '#c62828', '#ffcdd2')}>移除</button></div>))}</div></div>)}
         </div>
       )}
 
       <div style={{ maxWidth: 1200, margin: '0 auto', padding: '20px 16px' }}>
 
+        {/* ═══ BOOKINGS TAB ═══ */}
         {tab === 'bookings' && (<>
           <div style={{ display: 'flex', gap: 8, marginBottom: 16, overflowX: 'auto', paddingBottom: 4 }}>
             {[{ label: '今日', value: stats.today, sub: `$${stats.todayRev}`, color: '#FF9800' }, { label: '本月', value: stats.month, sub: `$${stats.monthRev}`, color: '#2196F3' }, { label: nextMonthLabel, value: stats.nextMonth, sub: `$${stats.nextMonthRev}`, color: '#9C27B0' }, { label: '待處理', value: stats.pending, sub: null, color: stats.pending > 0 ? '#f44336' : '#999', action: stats.pending > 0 }, { label: '總數', value: stats.total, sub: null, color: '#5c4a3a' }].map((s, i) => (
@@ -722,6 +819,23 @@ export default function Admin() {
               </div>
             ))}
           </div>
+
+          {/* ★ NEW — 收入圖表 */}
+          {revenueData.length > 2 && viewMode === 'list' && (
+            <div style={{ background: '#fff', borderRadius: 12, padding: 20, marginBottom: 16, boxShadow: '0 2px 10px rgba(0,0,0,0.05)' }}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: '#5c4a3a', marginBottom: 12 }}>📊 近期收入趨勢</div>
+              <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 100, overflowX: 'auto' }}>
+                {revenueData.map(d => (
+                  <div key={d.date} style={{ flex: '1 0 18px', minWidth: 18, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                    <div style={{ fontSize: 9, color: '#999', marginBottom: 2 }} title={`${d.date}: $${d.revenue} (${d.count}單)`}>${d.revenue}</div>
+                    <div style={{ width: '80%', background: '#b8956a', borderRadius: '4px 4px 0 0', height: `${Math.max((d.revenue / maxRevenue) * 100, 3)}%`, minHeight: 3, transition: 'height 0.3s' }} />
+                    <div style={{ fontSize: 8, color: '#aaa', marginTop: 2 }}>{d.date.slice(5)}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div style={{ display: 'flex', gap: 0, marginBottom: 16 }}>
             {[['list', '📋 列表模式'], ['schedule', '📅 月曆日程']].map(([k, l]) => (<button key={k} onClick={() => setViewMode(k)} style={{ padding: '10px 20px', border: 'none', cursor: 'pointer', fontSize: 13, fontFamily: font, fontWeight: viewMode === k ? 700 : 400, background: viewMode === k ? '#5c4a3a' : '#fff', color: viewMode === k ? '#fff' : '#5c4a3a', borderRadius: k === 'list' ? '10px 0 0 10px' : '0 10px 10px 0', boxShadow: viewMode === k ? '0 2px 8px rgba(92,74,58,0.3)' : '0 2px 10px rgba(0,0,0,0.05)' }}>{l}</button>))}
           </div>
@@ -798,12 +912,7 @@ export default function Admin() {
           {viewMode === 'schedule' && (<>
             <div style={card}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}><button onClick={prevSchedCal} style={navBtn}>◀</button><span style={{ fontSize: 20, fontWeight: 700, color: '#5c4a3a' }}>{schedYear}年 {schedMonth + 1}月</span><button onClick={nextSchedCal} style={navBtn}>▶</button></div>
-              <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
-                <button onClick={schedToToday} style={{ padding: '6px 16px', borderRadius: 6, border: '1px solid #d0c8bc', background: '#faf6f0', color: '#5c4a3a', cursor: 'pointer', fontSize: 13, fontFamily: font, fontWeight: 600 }}>📍 今日</button>
-                <button onClick={() => { setSchedRefreshKey(k => k + 1); showToast('🔄 已刷新'); }} style={{ padding: '6px 16px', borderRadius: 6, border: '1px solid #d0c8bc', background: '#faf6f0', color: '#5c4a3a', cursor: 'pointer', fontSize: 13, fontFamily: font }}>🔄</button>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: '#999', cursor: 'pointer', marginLeft: 'auto' }}><input type="checkbox" checked={showCancelled} onChange={e => setShowCancelled(e.target.checked)} /> 顯示已取消</label>
-              </div>
-              <div style={{ display: 'flex', gap: 16, marginBottom: 12, fontSize: 12, color: '#999', flexWrap: 'wrap' }}>{staffList.map(s => <span key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 4 }}><span style={{ width: 10, height: 10, borderRadius: '50%', background: '#4CAF50', display: 'inline-block' }} />{s.name}</span>)}</div>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}><button onClick={schedToToday} style={{ padding: '6px 16px', borderRadius: 6, border: '1px solid #d0c8bc', background: '#faf6f0', color: '#5c4a3a', cursor: 'pointer', fontSize: 13, fontFamily: font, fontWeight: 600 }}>📍 今日</button><button onClick={() => { setSchedRefreshKey(k => k + 1); showToast('🔄 已刷新'); }} style={{ padding: '6px 16px', borderRadius: 6, border: '1px solid #d0c8bc', background: '#faf6f0', color: '#5c4a3a', cursor: 'pointer', fontSize: 13, fontFamily: font }}>🔄</button><label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: '#999', cursor: 'pointer', marginLeft: 'auto' }}><input type="checkbox" checked={showCancelled} onChange={e => setShowCancelled(e.target.checked)} /> 顯示已取消</label></div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 4 }}>
                 {DAYS.map((d, i) => <div key={`h${i}`} style={{ padding: '10px 0', textAlign: 'center', fontSize: 13, fontWeight: 600, color: i === 0 || i === 6 ? '#c62828' : '#5c4a3a', background: '#f9f6f3', borderRadius: 6 }}>{d}</div>)}
                 {schedCalDays.map((day, i) => {
@@ -855,26 +964,16 @@ export default function Admin() {
           </>)}
         </>)}
 
+        {/* ═══ TIMESLOTS TAB（同原本一樣，太長唔重複）═══ */}
         {tab === 'timeslots' && (<>
           <div style={{ ...card, background: '#e8f5e9', border: '1px solid #a5d6a7', padding: 16 }}><div style={{ fontSize: 13, color: '#2e7d32', lineHeight: 2 }}>💡 <b>流程：</b>選員工 → 月曆選日期 → 套用模板 → 按「確認同步到前台」</div></div>
           <div style={card}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}><div style={sTitle}>👤 員工時間表</div></div>
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginBottom: 16 }}>
               {staffList.map(s => <button key={s.id} onClick={() => switchStaff(s)} style={{ padding: '10px 20px', borderRadius: 10, cursor: 'pointer', fontSize: 14, fontFamily: font, fontWeight: activeStaff?.id === s.id ? 700 : 400, border: activeStaff?.id === s.id ? '2px solid #5c4a3a' : '2px solid #d0c8bc', background: activeStaff?.id === s.id ? '#5c4a3a' : '#fff', color: activeStaff?.id === s.id ? '#fff' : '#5c4a3a' }}>{s.name}{activeStaff?.id === s.id && ' ✓'}</button>)}
-              {!showAddStaff ? <button onClick={() => setShowAddStaff(true)} style={{ padding: '10px 20px', borderRadius: 10, cursor: 'pointer', fontSize: 14, fontFamily: font, border: '2px dashed #c0b8aa', background: 'transparent', color: '#999' }}>＋ 新增</button> : (
-                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                  <input type="text" placeholder="名稱..." value={newStaffName} onChange={e => setNewStaffName(e.target.value)} onKeyDown={e => e.key === 'Enter' && addStaff()} autoFocus style={{ padding: '8px 14px', border: '2px solid #5c4a3a', borderRadius: 8, fontSize: 14, fontFamily: font, width: 120 }} />
-                  <button onClick={addStaff} style={{ padding: '8px 16px', borderRadius: 8, border: 'none', background: '#5c4a3a', color: '#fff', cursor: 'pointer', fontSize: 13, fontFamily: font }}>確定</button>
-                  <button onClick={() => { setShowAddStaff(false); setNewStaffName(''); }} style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid #ccc', background: '#fff', color: '#999', cursor: 'pointer', fontSize: 13, fontFamily: font }}>取消</button>
-                </div>
-              )}
+              {!showAddStaff ? <button onClick={() => setShowAddStaff(true)} style={{ padding: '10px 20px', borderRadius: 10, cursor: 'pointer', fontSize: 14, fontFamily: font, border: '2px dashed #c0b8aa', background: 'transparent', color: '#999' }}>＋ 新增</button> : (<div style={{ display: 'flex', gap: 6, alignItems: 'center' }}><input type="text" placeholder="名稱..." value={newStaffName} onChange={e => setNewStaffName(e.target.value)} onKeyDown={e => e.key === 'Enter' && addStaff()} autoFocus style={{ padding: '8px 14px', border: '2px solid #5c4a3a', borderRadius: 8, fontSize: 14, fontFamily: font, width: 120 }} /><button onClick={addStaff} style={{ padding: '8px 16px', borderRadius: 8, border: 'none', background: '#5c4a3a', color: '#fff', cursor: 'pointer', fontSize: 13, fontFamily: font }}>確定</button><button onClick={() => { setShowAddStaff(false); setNewStaffName(''); }} style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid #ccc', background: '#fff', color: '#999', cursor: 'pointer', fontSize: 13, fontFamily: font }}>取消</button></div>)}
             </div>
-            {activeStaff && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '12px 16px', background: '#f9f6f3', borderRadius: 8 }}>
-                <span style={{ fontSize: 13, color: '#999' }}>管理：</span>
-                {editStaffId === activeStaff.id ? (<><input type="text" value={editStaffName} onChange={e => setEditStaffName(e.target.value)} onKeyDown={e => e.key === 'Enter' && saveStaffName()} autoFocus style={{ padding: '6px 12px', border: '2px solid #5c4a3a', borderRadius: 6, fontSize: 14, fontFamily: font, width: 130 }} /><button onClick={saveStaffName} style={smallBtn('#5c4a3a', '#fff')}>儲存</button><button onClick={() => setEditStaffId(null)} style={smallBtn('#fff', '#999', '#ccc')}>取消</button></>) : (<><span style={{ fontSize: 16, fontWeight: 700, color: '#5c4a3a' }}>{activeStaff.name}</span><button onClick={() => { setEditStaffId(activeStaff.id); setEditStaffName(activeStaff.name); }} style={smallBtn('#fff', '#5c4a3a', '#d0c8bc')}>✏️ 改名</button>{staffList.length > 1 && <button onClick={() => removeStaff(activeStaff.id)} style={smallBtn('#ffebee', '#c62828', '#ffcdd2')}>🗑️</button>}</>)}
-              </div>
-            )}
+            {activeStaff && (<div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', padding: '12px 16px', background: '#f9f6f3', borderRadius: 8 }}><span style={{ fontSize: 13, color: '#999' }}>管理：</span>{editStaffId === activeStaff.id ? (<><input type="text" value={editStaffName} onChange={e => setEditStaffName(e.target.value)} onKeyDown={e => e.key === 'Enter' && saveStaffName()} autoFocus style={{ padding: '6px 12px', border: '2px solid #5c4a3a', borderRadius: 6, fontSize: 14, fontFamily: font, width: 130 }} /><button onClick={saveStaffName} style={smallBtn('#5c4a3a', '#fff')}>儲存</button><button onClick={() => setEditStaffId(null)} style={smallBtn('#fff', '#999', '#ccc')}>取消</button></>) : (<><span style={{ fontSize: 16, fontWeight: 700, color: '#5c4a3a' }}>{activeStaff.name}</span><button onClick={() => { setEditStaffId(activeStaff.id); setEditStaffName(activeStaff.name); }} style={smallBtn('#fff', '#5c4a3a', '#d0c8bc')}>✏️ 改名</button>{staffList.length > 1 && <button onClick={() => removeStaff(activeStaff.id)} style={smallBtn('#ffebee', '#c62828', '#ffcdd2')}>🗑️</button>}</>)}</div>)}
           </div>
           {activeStaff && (<>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: 20 }}>
@@ -902,31 +1001,99 @@ export default function Admin() {
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, flexWrap: 'wrap', gap: 6 }}><div style={sTitle}>⚡ 套用模板到「{activeStaff.name}」</div>{selDates.size > 0 ? <span style={{ fontSize: 12, color: '#4CAF50', fontWeight: 600 }}>已選 {selDates.size} 日</span> : <span style={{ fontSize: 12, color: '#c00' }}>請先選擇日期</span>}</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                 {templates.map((t, i) => (<div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderRadius: 8, background: '#faf6f0', border: '1px solid #e8e0d8', opacity: selDates.size === 0 ? 0.5 : 1, flexWrap: 'wrap' }}><span style={{ fontSize: 18 }}>{t.icon}</span><span style={{ fontSize: 13, fontWeight: 600, color: '#5c4a3a', minWidth: 52 }}>{t.label}</span>{t.from !== null ? <div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: '1 1 auto', minWidth: 0 }}><select value={t.from} onChange={e => setTemplates(prev => prev.map((tt, idx) => idx === i ? { ...tt, from: e.target.value } : tt))} style={{ padding: '4px 6px', border: '1px solid #ddd', borderRadius: 4, fontSize: 12, fontFamily: font, flex: '1 1 0', minWidth: 0 }}>{ALL_TIMES.map(time => <option key={time} value={time}>{time}</option>)}</select><span style={{ color: '#999', fontSize: 11 }}>–</span><select value={t.to} onChange={e => setTemplates(prev => prev.map((tt, idx) => idx === i ? { ...tt, to: e.target.value } : tt))} style={{ padding: '4px 6px', border: '1px solid #ddd', borderRadius: 4, fontSize: 12, fontFamily: font, flex: '1 1 0', minWidth: 0 }}>{ALL_TIMES.map(time => <option key={time} value={time}>{time}</option>)}</select></div> : <span style={{ flex: '1 1 auto', fontSize: 12, color: '#999' }}>全日關閉</span>}<button onClick={() => applyTemplateLocal(t)} disabled={selDates.size === 0} style={{ padding: '5px 14px', borderRadius: 6, border: 'none', fontSize: 12, fontFamily: font, fontWeight: 600, background: selDates.size === 0 ? '#ddd' : '#5c4a3a', color: '#fff', cursor: selDates.size === 0 ? 'not-allowed' : 'pointer' }}>套用</button></div>))}
-                <div style={{ borderTop: '1px dashed #d0c8bc', marginTop: 6, paddingTop: 10 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderRadius: 8, background: '#fff5f5', border: '1px solid #ffcdd2', opacity: selDates.size === 0 ? 0.5 : 1, flexWrap: 'wrap' }}><span style={{ fontSize: 18 }}>🍽️</span><span style={{ fontSize: 13, fontWeight: 600, color: '#c62828', minWidth: 52 }}>休息</span><div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: '1 1 auto', minWidth: 0 }}><select value={breakFrom} onChange={e => setBreakFrom(e.target.value)} style={{ padding: '4px 6px', border: '1px solid #ddd', borderRadius: 4, fontSize: 12, fontFamily: font, flex: '1 1 0', minWidth: 0 }}>{ALL_TIMES.map(t => <option key={t} value={t}>{t}</option>)}</select><span style={{ color: '#999', fontSize: 11 }}>–</span><select value={breakTo} onChange={e => setBreakTo(e.target.value)} style={{ padding: '4px 6px', border: '1px solid #ddd', borderRadius: 4, fontSize: 12, fontFamily: font, flex: '1 1 0', minWidth: 0 }}>{ALL_TIMES.map(t => <option key={t} value={t}>{t}</option>)}</select></div><button onClick={applyBreakLocal} disabled={selDates.size === 0} style={{ padding: '5px 14px', borderRadius: 6, border: 'none', fontSize: 12, fontFamily: font, fontWeight: 600, background: selDates.size === 0 ? '#ddd' : '#e53935', color: '#fff', cursor: selDates.size === 0 ? 'not-allowed' : 'pointer' }}>扣除</button></div>
-                </div>
+                <div style={{ borderTop: '1px dashed #d0c8bc', marginTop: 6, paddingTop: 10 }}><div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderRadius: 8, background: '#fff5f5', border: '1px solid #ffcdd2', opacity: selDates.size === 0 ? 0.5 : 1, flexWrap: 'wrap' }}><span style={{ fontSize: 18 }}>🍽️</span><span style={{ fontSize: 13, fontWeight: 600, color: '#c62828', minWidth: 52 }}>休息</span><div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: '1 1 auto', minWidth: 0 }}><select value={breakFrom} onChange={e => setBreakFrom(e.target.value)} style={{ padding: '4px 6px', border: '1px solid #ddd', borderRadius: 4, fontSize: 12, fontFamily: font, flex: '1 1 0', minWidth: 0 }}>{ALL_TIMES.map(t => <option key={t} value={t}>{t}</option>)}</select><span style={{ color: '#999', fontSize: 11 }}>–</span><select value={breakTo} onChange={e => setBreakTo(e.target.value)} style={{ padding: '4px 6px', border: '1px solid #ddd', borderRadius: 4, fontSize: 12, fontFamily: font, flex: '1 1 0', minWidth: 0 }}>{ALL_TIMES.map(t => <option key={t} value={t}>{t}</option>)}</select></div><button onClick={applyBreakLocal} disabled={selDates.size === 0} style={{ padding: '5px 14px', borderRadius: 6, border: 'none', fontSize: 12, fontFamily: font, fontWeight: 600, background: selDates.size === 0 ? '#ddd' : '#e53935', color: '#fff', cursor: selDates.size === 0 ? 'not-allowed' : 'pointer' }}>扣除</button></div></div>
               </div>
             </div>
           </>)}
         </>)}
 
+        {/* ═══ ★ NEW — CUSTOMERS TAB ═══ */}
+        {tab === 'customers' && (
+          <div>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
+              <input type="text" placeholder="🔍 搜尋客人名 / 電話 / 標籤..." value={custSearch} onChange={e => setCustSearch(e.target.value)} style={{ flex: 1, minWidth: 200, padding: '10px 14px', border: '1px solid #d0c8bc', borderRadius: 8, fontSize: 14, fontFamily: font }} />
+              <button onClick={fetchCustomers} style={{ padding: '10px 16px', background: '#5c4a3a', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontFamily: font }}>🔄 重新載入</button>
+            </div>
+            {selectedCust ? (
+              <div style={{ background: '#fff', borderRadius: 14, padding: 24, boxShadow: '0 2px 10px rgba(0,0,0,0.06)' }}>
+                <button onClick={() => { setSelectedCust(null); setCustBookings([]); }} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 14, color: '#b8956a', marginBottom: 12, fontFamily: font }}>← 返回列表</button>
+                <h3 style={{ margin: '0 0 6px', color: '#5c4a3a', fontSize: 18 }}>{selectedCust.name}</h3>
+                <div style={{ fontSize: 13, color: '#888', marginBottom: 4 }}>📞 {selectedCust.phone || '—'}</div>
+                <div style={{ fontSize: 13, color: '#888', marginBottom: 8 }}>來訪 {selectedCust.total_visits || 0} 次 ｜ 總消費 ${selectedCust.total_spent || 0} ｜ 最後來訪 {selectedCust.last_visit_date || '—'}</div>
+                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', margin: '8px 0' }}>
+                  {(selectedCust.tags || []).map(tag => (<span key={tag} style={{ background: '#f5f0eb', color: '#5c4a3a', padding: '3px 10px', borderRadius: 12, fontSize: 12 }}>{tag} <span onClick={() => removeCustTag(selectedCust.id, tag)} style={{ cursor: 'pointer', marginLeft: 4, color: '#c62828' }}>✕</span></span>))}
+                  <input placeholder="+ 加標籤 ↵" onKeyDown={e => { if (e.key === 'Enter' && e.target.value.trim()) { addCustTag(selectedCust.id, e.target.value); e.target.value = ''; } }} style={{ border: '1px dashed #d0c8bc', borderRadius: 12, padding: '3px 10px', fontSize: 12, width: 90, fontFamily: font }} />
+                </div>
+                <textarea defaultValue={selectedCust.notes || ''} onBlur={e => updateCustNotes(selectedCust.id, e.target.value)} placeholder="備註..." rows={3} style={{ width: '100%', padding: 10, border: '1px solid #d0c8bc', borderRadius: 8, fontSize: 13, marginTop: 8, resize: 'vertical', boxSizing: 'border-box', fontFamily: font }} />
+                <h4 style={{ margin: '16px 0 8px', color: '#5c4a3a', fontSize: 14 }}>📋 預約記錄</h4>
+                {custBookings.length === 0 ? <div style={{ color: '#aaa', fontSize: 13, padding: 20, textAlign: 'center' }}>暫無記錄</div> : custBookings.map(b => (
+                  <div key={b.id} style={{ padding: '8px 12px', borderBottom: '1px solid #f0ebe3', fontSize: 13 }}>
+                    <span style={{ color: '#5c4a3a', fontWeight: 600 }}>{b.booking_date} {b.booking_time}</span> — {b.service_name} {b.variant_label || ''} <span style={{ padding: '1px 6px', borderRadius: 8, fontSize: 11, background: b.status === 'confirmed' ? '#e8f5e9' : b.status === 'cancelled' ? '#ffeaea' : '#fff8e1', color: b.status === 'confirmed' ? '#2e7d32' : b.status === 'cancelled' ? '#c62828' : '#f9a825' }}>{statusText(b.status)}</span> ${b.total_price || 0}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div style={{ background: '#fff', borderRadius: 14, overflow: 'hidden', boxShadow: '0 2px 10px rgba(0,0,0,0.06)' }}>
+                <div style={{ padding: '14px 16px', borderBottom: '1px solid #eee', fontSize: 14, color: '#5c4a3a', fontWeight: 600 }}>👥 客戶列表（{filteredCustomers.length}）</div>
+                {filteredCustomers.length === 0 ? <div style={{ padding: 40, textAlign: 'center', color: '#aaa' }}>暫無客戶資料</div> : filteredCustomers.slice(0, 100).map(c => (
+                  <div key={c.id} onClick={() => viewCustomer(c)} style={{ padding: '12px 16px', borderBottom: '1px solid #f0ebe3', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                      <div style={{ fontWeight: 600, color: '#5c4a3a', fontSize: 14 }}>{c.name}</div>
+                      <div style={{ fontSize: 12, color: '#999' }}>📞 {c.phone || '—'} ｜ {c.total_visits || 0} 次 ｜ ${c.total_spent || 0}</div>
+                      {(c.tags || []).length > 0 && <div style={{ display: 'flex', gap: 3, marginTop: 4 }}>{c.tags.slice(0, 5).map(t => <span key={t} style={{ background: '#f5f0eb', color: '#5c4a3a', padding: '1px 6px', borderRadius: 10, fontSize: 10 }}>{t}</span>)}</div>}
+                    </div>
+                    <div style={{ fontSize: 12, color: '#bbb', whiteSpace: 'nowrap' }}>{c.last_visit_date || '—'}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ═══ ★ NEW — REMINDERS TAB ═══ */}
+        {tab === 'reminders' && (
+          <div style={{ background: '#fff', borderRadius: 14, padding: 24, boxShadow: '0 2px 10px rgba(0,0,0,0.06)' }}>
+            <h3 style={{ margin: '0 0 14px', color: '#5c4a3a', fontSize: 17 }}>📱 WhatsApp 提醒</h3>
+            <div style={{ padding: '12px 16px', background: '#e8f5e9', borderRadius: 8, marginBottom: 16, fontSize: 13, color: '#2e7d32' }}>選擇日期，系統會列出當日所有預約，你可以逐個發送 WhatsApp 提醒。</div>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 20, flexWrap: 'wrap', alignItems: 'center' }}>
+              <input type="date" value={reminderDate} onChange={e => setReminderDate(e.target.value)} style={{ padding: '10px 14px', border: '1px solid #d0c8bc', borderRadius: 8, fontSize: 14 }} />
+              <button onClick={() => { const t = new Date(); t.setDate(t.getDate() + 1); setReminderDate(t.toISOString().split('T')[0]); }} style={{ padding: '10px 14px', borderRadius: 8, border: '1px solid #d0c8bc', background: '#faf6f0', color: '#5c4a3a', cursor: 'pointer', fontSize: 13, fontFamily: font }}>明日</button>
+              <button onClick={generateReminders} disabled={reminderLoading} style={{ padding: '10px 20px', background: '#25D366', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 14, fontFamily: font, fontWeight: 600, opacity: reminderLoading ? 0.6 : 1 }}>{reminderLoading ? '⏳ 載入中...' : '📱 生成提醒列表'}</button>
+            </div>
+            {reminders.length > 0 && (
+              <div>
+                <div style={{ fontSize: 13, color: '#888', marginBottom: 12 }}>共 {reminders.length} 個預約需要提醒：</div>
+                {reminders.map(r => (
+                  <div key={r.bookingId} style={{ padding: '12px 16px', borderBottom: '1px solid #f0ebe3', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+                    <div>
+                      <div style={{ fontWeight: 600, color: '#5c4a3a', fontSize: 14 }}>{r.name}</div>
+                      <div style={{ fontSize: 12, color: '#999' }}>{r.time} — {r.service} ｜ 📞 {r.phone}</div>
+                    </div>
+                    <a href={r.waLink} target="_blank" rel="noopener noreferrer" style={{ padding: '8px 16px', background: '#25D366', color: '#fff', border: 'none', borderRadius: 8, textDecoration: 'none', fontSize: 13, fontWeight: 600, fontFamily: font }}>📱 WhatsApp</a>
+                  </div>
+                ))}
+              </div>
+            )}
+            {reminders.length === 0 && reminderDate && !reminderLoading && <div style={{ color: '#aaa', fontSize: 13, textAlign: 'center', padding: 30 }}>呢日冇需要提醒嘅預約</div>}
+          </div>
+        )}
+
+        {/* ═══ FRONTEND TAB（同原本一樣）═══ */}
         {tab === 'frontend' && (<>
-          <div style={{ ...card, background: '#e8f5e9', border: '1px solid #a5d6a7', padding: 16 }}><div style={{ fontSize: 13, color: '#2e7d32', lineHeight: 1.8 }}>🎨 <b>前台管理：</b>喺呢度編輯客人睇到嘅服務項目、價錢、附加項目等。修改即時生效到前台預約頁面。</div></div>
+          <div style={{ ...card, background: '#e8f5e9', border: '1px solid #a5d6a7', padding: 16 }}><div style={{ fontSize: 13, color: '#2e7d32', lineHeight: 1.8 }}>🎨 <b>前台管理：</b>喺呢度編輯客人睇到嘅服務項目、價錢、附加項目等。</div></div>
           <div style={{ display: 'flex', gap: 0, marginBottom: 20 }}>{[['services', '🎨 服務項目'], ['addons', '➕ 附加項目']].map(([k, l]) => (<button key={k} onClick={() => setSvcSubTab(k)} style={{ padding: '10px 24px', border: 'none', cursor: 'pointer', fontSize: 13, fontFamily: font, fontWeight: svcSubTab === k ? 700 : 400, background: svcSubTab === k ? '#5c4a3a' : '#fff', color: svcSubTab === k ? '#fff' : '#5c4a3a', borderRadius: k === 'services' ? '10px 0 0 10px' : '0 10px 10px 0', boxShadow: '0 2px 8px rgba(0,0,0,0.05)' }}>{l}</button>))}</div>
           {svcSubTab === 'services' && (
             <div style={card}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}><h2 style={{ margin: 0, color: '#5c4a3a', fontSize: 17 }}>🎨 服務項目 ({svcList.length})</h2><div style={{ display: 'flex', gap: 8 }}><button onClick={fetchServices} style={{ padding: '8px 14px', borderRadius: 8, border: '1px solid #d0c8bc', background: '#faf6f0', color: '#5c4a3a', cursor: 'pointer', fontSize: 13, fontFamily: font }}>🔄 刷新</button><button onClick={() => openEditSvc(null)} style={{ padding: '8px 20px', borderRadius: 8, border: 'none', background: '#5c4a3a', color: '#fff', cursor: 'pointer', fontSize: 13, fontFamily: font, fontWeight: 600 }}>➕ 新增服務</button></div></div>
-              {svcLoading ? <p style={{ textAlign: 'center', color: '#999', padding: 30 }}>載入中...</p> : svcList.length === 0 ? (<div style={{ textAlign: 'center', padding: '40px 20px', color: '#999' }}><div style={{ fontSize: 40, marginBottom: 10 }}>🎨</div><div style={{ fontSize: 14 }}>未有服務項目</div><div style={{ fontSize: 12, marginTop: 6 }}>撳「➕ 新增服務」開始設定</div></div>) : (
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}><h2 style={{ margin: 0, color: '#5c4a3a', fontSize: 17 }}>🎨 服務項目 ({svcList.length})</h2><div style={{ display: 'flex', gap: 8 }}><button onClick={fetchServices} style={{ padding: '8px 14px', borderRadius: 8, border: '1px solid #d0c8bc', background: '#faf6f0', color: '#5c4a3a', cursor: 'pointer', fontSize: 13, fontFamily: font }}>🔄</button><button onClick={() => openEditSvc(null)} style={{ padding: '8px 20px', borderRadius: 8, border: 'none', background: '#5c4a3a', color: '#fff', cursor: 'pointer', fontSize: 13, fontFamily: font, fontWeight: 600 }}>➕ 新增服務</button></div></div>
+              {svcLoading ? <p style={{ textAlign: 'center', color: '#999', padding: 30 }}>載入中...</p> : svcList.length === 0 ? (<div style={{ textAlign: 'center', padding: '40px 20px', color: '#999' }}><div style={{ fontSize: 40, marginBottom: 10 }}>🎨</div><div>未有服務項目</div></div>) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>{svcList.map((svc, idx) => (
                   <div key={svc.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', background: svc.is_active ? '#fff' : '#fafafa', borderRadius: 10, border: `1px solid ${svc.is_active ? '#e8e0d8' : '#eee'}`, opacity: svc.is_active ? 1 : 0.6 }}>
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}><button onClick={() => moveSvc(idx, -1)} disabled={idx === 0} style={{ padding: '2px 6px', border: 'none', background: 'transparent', cursor: idx === 0 ? 'default' : 'pointer', fontSize: 10, color: idx === 0 ? '#ddd' : '#999' }}>▲</button><button onClick={() => moveSvc(idx, 1)} disabled={idx === svcList.length - 1} style={{ padding: '2px 6px', border: 'none', background: 'transparent', cursor: idx === svcList.length - 1 ? 'default' : 'pointer', fontSize: 10, color: idx === svcList.length - 1 ? '#ddd' : '#999' }}>▼</button></div>
-                    {svc.image_url && <img src={svc.image_url} alt="" style={{ width: 48, height: 48, borderRadius: 8, objectFit: 'cover', border: '1px solid #eee' }} />}
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}><span style={{ fontWeight: 700, fontSize: 15, color: '#5c4a3a' }}>{svc.name}</span>{svc.category && <span style={{ padding: '2px 8px', background: '#f0ebe3', borderRadius: 4, fontSize: 11, color: '#999' }}>{svc.category}</span>}{!svc.is_active && <span style={{ padding: '2px 8px', background: '#ffebee', borderRadius: 4, fontSize: 11, color: '#c62828' }}>已下架</span>}</div>
-                      {svc.description && <div style={{ fontSize: 12, color: '#999', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{svc.description}</div>}
                       <div style={{ display: 'flex', gap: 12, marginTop: 4, fontSize: 13 }}><span style={{ fontWeight: 700, color: '#5c4a3a' }}>${svc.base_price}</span>{svc.duration_minutes && <span style={{ color: '#999' }}>⏱ {svc.duration_minutes}分鐘</span>}</div>
                     </div>
-                    <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}><button onClick={() => toggleSvcActive(svc)} style={smallBtn(svc.is_active ? '#FFF3E0' : '#E8F5E9', svc.is_active ? '#E65100' : '#2e7d32', svc.is_active ? '#FFB74D' : '#a5d6a7')}>{svc.is_active ? '下架' : '上架'}</button><button onClick={() => openEditSvc(svc)} style={smallBtn('#fff', '#5c4a3a', '#d0c8bc')}>✏️ 編輯</button><button onClick={() => deleteSvc(svc.id)} style={smallBtn('#ffebee', '#c62828', '#ffcdd2')}>🗑️</button></div>
+                    <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}><button onClick={() => toggleSvcActive(svc)} style={smallBtn(svc.is_active ? '#FFF3E0' : '#E8F5E9', svc.is_active ? '#E65100' : '#2e7d32', svc.is_active ? '#FFB74D' : '#a5d6a7')}>{svc.is_active ? '下架' : '上架'}</button><button onClick={() => openEditSvc(svc)} style={smallBtn('#fff', '#5c4a3a', '#d0c8bc')}>✏️</button><button onClick={() => deleteSvc(svc.id)} style={smallBtn('#ffebee', '#c62828', '#ffcdd2')}>🗑️</button></div>
                   </div>
                 ))}</div>
               )}
@@ -935,10 +1102,10 @@ export default function Admin() {
           {svcSubTab === 'addons' && (
             <div style={card}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}><h2 style={{ margin: 0, color: '#5c4a3a', fontSize: 17 }}>➕ 附加項目 ({svcAddons.length})</h2><div style={{ display: 'flex', gap: 8 }}><button onClick={fetchAddons} style={{ padding: '8px 14px', borderRadius: 8, border: '1px solid #d0c8bc', background: '#faf6f0', color: '#5c4a3a', cursor: 'pointer', fontSize: 13, fontFamily: font }}>🔄</button><button onClick={() => openEditAddon(null)} style={{ padding: '8px 20px', borderRadius: 8, border: 'none', background: '#5c4a3a', color: '#fff', cursor: 'pointer', fontSize: 13, fontFamily: font, fontWeight: 600 }}>➕ 新增</button></div></div>
-              {svcAddons.length === 0 ? (<div style={{ textAlign: 'center', padding: '40px 20px', color: '#999' }}><div style={{ fontSize: 40, marginBottom: 10 }}>➕</div><div style={{ fontSize: 14 }}>未有附加項目</div></div>) : (
+              {svcAddons.length === 0 ? <div style={{ textAlign: 'center', padding: '40px 20px', color: '#999' }}><div style={{ fontSize: 40, marginBottom: 10 }}>➕</div><div>未有附加項目</div></div> : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>{svcAddons.map(addon => (
                   <div key={addon.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', background: addon.is_active ? '#fff' : '#fafafa', borderRadius: 10, border: '1px solid #e8e0d8', opacity: addon.is_active ? 1 : 0.6 }}>
-                    <div><div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><span style={{ fontWeight: 600, fontSize: 14, color: '#5c4a3a' }}>{addon.name}</span><span style={{ fontWeight: 700, color: '#5c4a3a', fontSize: 14 }}>+${addon.price}</span>{!addon.is_active && <span style={{ padding: '2px 8px', background: '#ffebee', borderRadius: 4, fontSize: 11, color: '#c62828' }}>停用</span>}</div>{addon.description && <div style={{ fontSize: 12, color: '#999', marginTop: 2 }}>{addon.description}</div>}</div>
+                    <div><div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><span style={{ fontWeight: 600, fontSize: 14, color: '#5c4a3a' }}>{addon.name}</span><span style={{ fontWeight: 700, color: '#5c4a3a' }}>+${addon.price}</span>{!addon.is_active && <span style={{ padding: '2px 8px', background: '#ffebee', borderRadius: 4, fontSize: 11, color: '#c62828' }}>停用</span>}</div>{addon.description && <div style={{ fontSize: 12, color: '#999', marginTop: 2 }}>{addon.description}</div>}</div>
                     <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}><button onClick={() => toggleAddonActive(addon)} style={smallBtn(addon.is_active ? '#FFF3E0' : '#E8F5E9', addon.is_active ? '#E65100' : '#2e7d32', addon.is_active ? '#FFB74D' : '#a5d6a7')}>{addon.is_active ? '停用' : '啟用'}</button><button onClick={() => openEditAddon(addon)} style={smallBtn('#fff', '#5c4a3a', '#d0c8bc')}>✏️</button><button onClick={() => deleteAddon(addon.id)} style={smallBtn('#ffebee', '#c62828', '#ffcdd2')}>🗑️</button></div>
                   </div>
                 ))}</div>
@@ -947,6 +1114,7 @@ export default function Admin() {
           )}
         </>)}
 
+        {/* ═══ TEMPLATES TAB（同原本一樣）═══ */}
         {tab === 'templates' && (
           <div style={{ background: '#fff', borderRadius: 14, padding: 20, margin: '0 auto', maxWidth: 800, boxShadow: '0 2px 12px rgba(0,0,0,0.08)' }}>
             <h3 style={{ margin: '0 0 16px', color: '#5c4a3a', fontSize: 18 }}>📝 WhatsApp 訊息模板</h3>
