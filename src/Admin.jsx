@@ -716,33 +716,24 @@ const addStaff = async () => { const name = newStaffName.trim(); if (!name) retu
   </div>
 )}
 
- {showChangePw && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }} onClick={() => setShowChangePw(false)}>
-          <div style={{ background: '#fff', borderRadius: 16, padding: 32, maxWidth: 400, width: '100%', boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }} onClick={e => e.stopPropagation()}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-              <h3 style={{ margin: 0, color: '#5c4a3a', fontSize: 18 }}>🔑 更改密碼</h3>
-              <button onClick={() => setShowChangePw(false)} style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: '#999' }}>✕</button>
-            </div>
-            {cpMsg && <div style={{ padding: '12px 16px', background: '#E8F5E9', color: '#2e7d32', borderRadius: 8, fontSize: 14, marginBottom: 16, textAlign: 'center', fontWeight: 600 }}>{cpMsg}</div>}
-            {cpError && <div style={{ padding: '12px 16px', background: '#FFEBEE', color: '#c62828', borderRadius: 8, fontSize: 14, marginBottom: 16 }}>❌ {cpError}</div>}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <div>
-                <label style={{ fontSize: 13, color: '#5c4a3a', fontWeight: 600, marginBottom: 4, display: 'block' }}>舊密碼</label>
-                <input type="password" value={cpOld} onChange={e => setCpOld(e.target.value)} placeholder="輸入目前嘅密碼" style={{ width: '100%', padding: '12px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, boxSizing: 'border-box', fontFamily: font }} />
-              </div>
-              <div>
-                <label style={{ fontSize: 13, color: '#5c4a3a', fontWeight: 600, marginBottom: 4, display: 'block' }}>新密碼</label>
-                <input type="password" value={cpNew} onChange={e => setCpNew(e.target.value)} placeholder="至少 6 個字元" style={{ width: '100%', padding: '12px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, boxSizing: 'border-box', fontFamily: font }} />
-              </div>
-              <div>
-                <label style={{ fontSize: 13, color: '#5c4a3a', fontWeight: 600, marginBottom: 4, display: 'block' }}>確認新密碼</label>
-                <input type="password" value={cpConfirm} onChange={e => setCpConfirm(e.target.value)} placeholder="再輸入一次新密碼" style={{ width: '100%', padding: '12px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, boxSizing: 'border-box', fontFamily: font }} />
-              </div>
-            </div>
-            <button onClick={handleChangePw} disabled={cpLoading} style={{ width: '100%', padding: 14, background: cpLoading ? '#a89888' : '#5c4a3a', color: '#fff', border: 'none', borderRadius: 8, fontSize: 15, cursor: cpLoading ? 'not-allowed' : 'pointer', fontFamily: font, fontWeight: 600, marginTop: 20 }}>{cpLoading ? '處理中...' : '確認更改'}</button>
-          </div>
-        </div>
-      )}
+{showChangePw && (
+  <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }} onClick={() => setShowChangePw(false)}>
+    <div style={{ background: '#fff', borderRadius: 16, padding: 32, maxWidth: 400, width: '100%', boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }} onClick={e => e.stopPropagation()}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
+        <h3 style={{ margin: 0, color: '#5c4a3a', fontSize: 18 }}>🔑 更改密碼</h3>
+        <button onClick={() => setShowChangePw(false)} style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: '#999' }}>✕</button>
+      </div>
+      {cpMsg && <div style={{ padding: '12px 16px', background: '#E8F5E9', color: '#2e7d32', borderRadius: 8, fontSize: 14, marginBottom: 16, textAlign: 'center', fontWeight: 600 }}>{cpMsg}</div>}
+      {cpError && <div style={{ padding: '12px 16px', background: '#FFEBEE', color: '#c62828', borderRadius: 8, fontSize: 14, marginBottom: 16 }}>❌ {cpError}</div>}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div><label style={{ fontSize: 13, color: '#5c4a3a', fontWeight: 600, marginBottom: 4, display: 'block' }}>舊密碼</label><input type="password" value={cpOld} onChange={e => setCpOld(e.target.value)} placeholder="輸入目前嘅密碼" style={{ width: '100%', padding: '12px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, boxSizing: 'border-box', fontFamily: font }} /></div>
+        <div><label style={{ fontSize: 13, color: '#5c4a3a', fontWeight: 600, marginBottom: 4, display: 'block' }}>新密碼</label><input type="password" value={cpNew} onChange={e => setCpNew(e.target.value)} placeholder="至少 6 個字元" style={{ width: '100%', padding: '12px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, boxSizing: 'border-box', fontFamily: font }} /></div>
+        <div><label style={{ fontSize: 13, color: '#5c4a3a', fontWeight: 600, marginBottom: 4, display: 'block' }}>確認新密碼</label><input type="password" value={cpConfirm} onChange={e => setCpConfirm(e.target.value)} placeholder="再輸入一次新密碼" style={{ width: '100%', padding: '12px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, boxSizing: 'border-box', fontFamily: font }} /></div>
+      </div>
+      <button onClick={handleChangePw} disabled={cpLoading} style={{ width: '100%', padding: 14, background: cpLoading ? '#a89888' : '#5c4a3a', color: '#fff', border: 'none', borderRadius: 8, fontSize: 15, cursor: cpLoading ? 'not-allowed' : 'pointer', fontFamily: font, fontWeight: 600, marginTop: 20 }}>{cpLoading ? '處理中...' : '確認更改'}</button>
+    </div>
+  </div>
+)}
       <div style={{ background: '#fff', borderTop: '1px solid #f0ebe3', padding: '0 30px', display: 'flex', gap: 0, boxShadow: '0 2px 10px rgba(0,0,0,0.03)', overflowX: 'auto' }}>
     {[{ key: 'bookings', label: `📋 預約管理${stats.pending > 0 ? ` (${stats.pending})` : ''}` }, { key: 'timeslots', label: '🕐 時段管理' }, { key: 'templates', label: '📝 訊息模板' }].map(t => (
           <button key={t.key} onClick={() => setTab(t.key)} style={{ padding: '14px 24px', background: 'none', border: 'none', borderBottom: tab === t.key ? '2px solid #5c4a3a' : '2px solid transparent', fontSize: 14, color: tab === t.key ? '#5c4a3a' : '#999', fontWeight: tab === t.key ? 600 : 400, cursor: 'pointer', fontFamily: font, whiteSpace: 'nowrap' }}>{t.label}</button>
