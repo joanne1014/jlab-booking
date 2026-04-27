@@ -1,14 +1,19 @@
 // pages/api/admin.js
 import { createClient } from '@supabase/supabase-js';
 
-/* ═══ Supabase service-role client ═══ */
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
-);
-
+/* ═══ 環境變數 ═══ */
 const SB_URL = process.env.SUPABASE_URL;
 const SB_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+/* ═══ 🔥 新增：安全初始化 Supabase client ═══ */
+let supabase = null;
+try {
+  if (SB_URL && SB_KEY) {
+    supabase = createClient(SB_URL, SB_KEY);
+  }
+} catch (e) {
+  console.error('Failed to create Supabase client:', e.message);
+}
 
 /* ═══ Rate Limiting（防暴力破解）═══ */
 const loginAttempts = new Map();
@@ -57,6 +62,18 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
+  /* 🔥 新增：環境變數診斷 — 如果 Supabase client 初始化失敗，直接報錯 */
+  if (!supabase) {
+    console.error('Supabase client not initialized. SUPABASE_URL:', SB_URL ? 'SET' : 'MISSING', 'SUPABASE_SERVICE_ROLE_KEY:', SB_KEY ? 'SET' : 'MISSING');
+    return res.status(500).json({
+      error: '伺服器配置錯誤：無法連接資料庫。請檢查 Vercel 環境變數。',
+      debug: {
+        hasUrl: !!SB_URL,
+        hasKey: !!SB_KEY,
+      }
+    });
+  }
+
   const { action, payload = {} } = req.body || {};
   if (!action) return res.status(400).json({ error: 'Missing action' });
 
@@ -85,10 +102,57 @@ export default async function handler(req, res) {
 
       return res.status(200).json({
         token: data.session.access_token,
+        access_token: data.session.access_token,  /* 🔥 修改：兼容兩種寫法 */
         email: data.user.email,
         role: adminUser?.role || 'staff',
         staffId: adminUser?.staff_id || null,
       });
+    }
+
+    /* ────────────────────────────────────────────────────────────
+       🔥 新增：RECOVER（忘記密碼 — 唔需要 token）
+    ──────────────────────────────────────────────────────────── */
+    if (action === 'recover') {
+      const { email, redirectUrl } = payload;
+      if (!email) return res.status(400).json({ error: '請輸入 Email' });
+
+      const ip = (req.headers['x-forwarded-for'] || req.socket?.remoteAddress || 'unknown').split(',')[0].trim();
+      if (!checkRateLimit(ip)) {
+        return res.status(429).json({ error: '嘗試次數過多，請稍後再試' });
+      }
+
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: redirectUrl || undefined,
+      });
+      if (error) return res.status(500).json({ error: error.message });
+      return res.status(200).json({ success: true });
+    }
+
+    /* ────────────────────────────────────────────────────────────
+       🔥 新增：RESET-VIA-TOKEN（用 email 連結嘅 token 重設密碼 — 唔需要 token）
+    ──────────────────────────────────────────────────────────── */
+    if (action === 'reset-via-token') {
+      const { access_token, refresh_token, newPassword } = payload;
+
+      if (!newPassword || newPassword.length < 6) {
+        return res.status(400).json({ error: '密碼最少 6 位' });
+      }
+      if (!access_token) {
+        return res.status(400).json({ error: '重設連結已過期或無效（缺少 token）' });
+      }
+
+      // 用 access_token 驗證用戶身份
+      const { data: { user }, error: verifyError } = await supabase.auth.getUser(access_token);
+      if (verifyError || !user) {
+        return res.status(401).json({ error: '重設連結已過期或無效，請重新申請' });
+      }
+
+      // 用 admin API 更新密碼
+      const { error } = await supabase.auth.admin.updateUserById(user.id, {
+        password: newPassword,
+      });
+      if (error) return res.status(500).json({ error: error.message });
+      return res.status(200).json({ success: true });
     }
 
     /* ────────────────────────────────────────────────────────────
@@ -234,7 +298,7 @@ export default async function handler(req, res) {
 
     /* ── 提醒（生成 WhatsApp 連結）── */
     if (action === 'generate-reminders') {
-      const targetDate = payload.date; // YYYY-MM-DD
+      const targetDate = payload.date;
       if (!targetDate) return res.status(400).json({ error: 'Missing date' });
 
       const { data: bookings } = await supabase
