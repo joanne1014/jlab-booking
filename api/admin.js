@@ -400,6 +400,164 @@ export default async function handler(req, res) {
       return res.status(200).json({ reminders, count: reminders.length });
     }
 /* ★ 自動備份（每日一次，靜默執行） */
+    /* ============================================
+       ★ 儀表板統計
+       ============================================ */
+    if (action === 'dashboard-stats') {
+      const today = new Date().toISOString().slice(0, 10);
+      const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+      const monthStart = today.slice(0, 7) + '-01';
+
+      const [r1, r2, r3, r4, r5] = await Promise.all([
+        supabase.from('bookings').select('*', { count: 'exact', head: true })
+          .eq('booking_date', today).neq('status', 'cancelled'),
+        supabase.from('bookings').select('*', { count: 'exact', head: true })
+          .gte('booking_date', weekAgo).neq('status', 'cancelled'),
+        supabase.from('bookings').select('*', { count: 'exact', head: true })
+          .gte('booking_date', monthStart).neq('status', 'cancelled'),
+        supabase.from('customers').select('*', { count: 'exact', head: true }),
+        supabase.from('bookings').select('*', { count: 'exact', head: true })
+          .eq('booking_date', today).eq('status', 'cancelled'),
+      ]);
+
+      return res.status(200).json({
+        today: r1.count || 0,
+        week: r2.count || 0,
+        month: r3.count || 0,
+        customers: r4.count || 0,
+        cancelledToday: r5.count || 0,
+      });
+    }
+
+    /* ============================================
+       ★ 篩選預約記錄（支援日期範圍 + 狀態）
+       ============================================ */
+    if (action === 'get-bookings') {
+      const { fromDate, toDate, status: bookingStatus } = req.method === 'GET' ? req.query : req.body;
+
+      let query = supabase
+        .from('bookings')
+        .select('*')
+        .order('booking_date', { ascending: false })
+        .order('booking_time', { ascending: false });
+
+      if (fromDate) query = query.gte('booking_date', fromDate);
+      if (toDate)   query = query.lte('booking_date', toDate);
+      if (bookingStatus && bookingStatus !== 'all') query = query.eq('status', bookingStatus);
+
+      const { data, error } = await query.limit(500);
+      if (error) return res.status(500).json({ error: error.message });
+      return res.status(200).json({ data });
+    }
+
+    /* ============================================
+       ★ 更新預約狀態（確認 / 完成 / 取消）
+       ============================================ */
+    if (action === 'update-booking-status') {
+      const { bookingId, status: newStatus, cancel_reason } = req.body;
+
+      const updateData = { status: newStatus };
+      if (cancel_reason) updateData.cancel_reason = cancel_reason;
+
+      const { error } = await supabase
+        .from('bookings')
+        .update(updateData)
+        .eq('id', bookingId);
+
+      if (error) return res.status(500).json({ error: error.message });
+
+      await supabase.from('audit_logs').insert([{
+        action: 'booking_' + newStatus,
+        target_type: 'booking',
+        target_id: String(bookingId),
+        details: { status: newStatus, cancel_reason: cancel_reason || null },
+      }]);
+
+      return res.status(200).json({ success: true });
+    }
+
+    /* ============================================
+       ★ 檢查預約衝突（防止同時段重複預約）
+       ============================================ */
+    if (action === 'check-conflict') {
+      const p = req.method === 'GET' ? req.query : req.body;
+
+      let query = supabase
+        .from('bookings')
+        .select('id, customer_name, booking_time')
+        .eq('booking_date', p.booking_date)
+        .eq('booking_time', p.booking_time)
+        .neq('status', 'cancelled');
+
+      if (p.staff_id) query = query.eq('staff_id', p.staff_id);
+
+      const { data } = await query;
+      return res.status(200).json({
+        hasConflict: data && data.length > 0,
+        conflicts: data || [],
+      });
+    }
+
+    /* ============================================
+       ★ 更新客戶（備註 / 黑名單）
+       ============================================ */
+    if (action === 'update-customer') {
+      const { customerId, notes, is_blacklisted } = req.body;
+      const updateData = {};
+      if (notes !== undefined)          updateData.notes = notes;
+      if (is_blacklisted !== undefined) updateData.is_blacklisted = is_blacklisted;
+
+      const { error } = await supabase
+        .from('customers')
+        .update(updateData)
+        .eq('id', customerId);
+
+      if (error) return res.status(500).json({ error: error.message });
+
+      await supabase.from('audit_logs').insert([{
+        action: is_blacklisted !== undefined ? 'customer_blacklist_toggle' : 'customer_notes_update',
+        target_type: 'customer',
+        target_id: String(customerId),
+        details: updateData,
+      }]);
+
+      return res.status(200).json({ success: true });
+    }
+
+    /* ============================================
+       ★ 取得操作記錄
+       ============================================ */
+    if (action === 'get-audit-logs') {
+      const { data, error } = await supabase
+        .from('audit_logs')
+        .select('*')
+        .order('performed_at', { ascending: false })
+        .limit(200);
+
+      if (error) return res.status(500).json({ error: error.message });
+      return res.status(200).json({ data });
+    }
+
+    /* ============================================
+       ★ 刷新客戶到訪次數
+       ============================================ */
+    if (action === 'refresh-customer-stats') {
+      const { data: bookings } = await supabase
+        .from('bookings')
+        .select('customer_phone')
+        .in('status', ['confirmed', 'completed']);
+
+      if (bookings) {
+        const counts = {};
+        bookings.forEach(b => {
+          if (b.customer_phone) counts[b.customer_phone] = (counts[b.customer_phone] || 0) + 1;
+        });
+        for (const [phone, count] of Object.entries(counts)) {
+          await supabase.from('customers').update({ total_visits: count }).eq('phone', phone);
+        }
+      }
+      return res.status(200).json({ success: true });
+    }
     if (action === 'auto-backup') {
       const today = new Date().toISOString().slice(0, 10);
 
