@@ -451,10 +451,11 @@ export default async function handler(req, res) {
     }
 
     /* ============================================
-       ★ 更新預約狀態（確認 / 完成 / 取消）
+       ★ 更新預約狀態（確認 / 完成 / 取消 + 原因）
        ============================================ */
     if (action === 'update-booking-status') {
-      const { bookingId, status: newStatus, cancel_reason } = req.body;
+      const { bookingId, status: newStatus, cancel_reason } = payload || {};
+      if (!bookingId || !newStatus) return res.status(400).json({ error: 'Missing bookingId or status' });
 
       const updateData = { status: newStatus };
       if (cancel_reason) updateData.cancel_reason = cancel_reason;
@@ -471,7 +472,7 @@ export default async function handler(req, res) {
         target_type: 'booking',
         target_id: String(bookingId),
         details: { status: newStatus, cancel_reason: cancel_reason || null },
-      }]);
+      }]).catch(() => {});
 
       return res.status(200).json({ success: true });
     }
@@ -480,16 +481,17 @@ export default async function handler(req, res) {
        ★ 檢查預約衝突（防止同時段重複預約）
        ============================================ */
     if (action === 'check-conflict') {
-      const p = req.method === 'GET' ? req.query : req.body;
+      const { date, time, technician, excludeId } = payload || {};
 
       let query = supabase
         .from('bookings')
-        .select('id, customer_name, booking_time')
-        .eq('booking_date', p.booking_date)
-        .eq('booking_time', p.booking_time)
+        .select('id, customer_name, booking_time, booking_date')
+        .eq('booking_date', date)
+        .eq('booking_time', time)
         .neq('status', 'cancelled');
 
-      if (p.staff_id) query = query.eq('staff_id', p.staff_id);
+      if (technician) query = query.eq('technician_label', technician);
+      if (excludeId) query = query.neq('id', excludeId);
 
       const { data } = await query;
       return res.status(200).json({
@@ -502,9 +504,11 @@ export default async function handler(req, res) {
        ★ 更新客戶（備註 / 黑名單）
        ============================================ */
     if (action === 'update-customer') {
-      const { customerId, notes, is_blacklisted } = req.body;
+      const { customerId, notes, is_blacklisted } = payload || {};
+      if (!customerId) return res.status(400).json({ error: 'Missing customerId' });
+
       const updateData = {};
-      if (notes !== undefined)          updateData.notes = notes;
+      if (notes !== undefined) updateData.notes = notes;
       if (is_blacklisted !== undefined) updateData.is_blacklisted = is_blacklisted;
 
       const { error } = await supabase
@@ -519,13 +523,13 @@ export default async function handler(req, res) {
         target_type: 'customer',
         target_id: String(customerId),
         details: updateData,
-      }]);
+      }]).catch(() => {});
 
       return res.status(200).json({ success: true });
     }
 
     /* ============================================
-       ★ 取得操作記錄
+       ★ 取得審計記錄
        ============================================ */
     if (action === 'get-audit-logs') {
       const { data, error } = await supabase
@@ -547,6 +551,17 @@ export default async function handler(req, res) {
         .select('customer_phone')
         .in('status', ['confirmed', 'completed']);
 
+      if (bookings) {
+        const counts = {};
+        bookings.forEach(b => {
+          if (b.customer_phone) counts[b.customer_phone] = (counts[b.customer_phone] || 0) + 1;
+        });
+        for (const [phone, count] of Object.entries(counts)) {
+          await supabase.from('customers').update({ total_visits: count }).eq('phone', phone);
+        }
+      }
+      return res.status(200).json({ success: true });
+    }
       if (bookings) {
         const counts = {};
         bookings.forEach(b => {
