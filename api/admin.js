@@ -501,6 +501,57 @@ export default async function handler(req, res) {
     }
 
     /* ============================================
+       ★ 更新預約狀態（確認 / 完成 / 取消 + 原因）
+       — 自動寫審計記錄
+       ============================================ */
+    if (action === 'update-booking-status') {
+      const { bookingId, status: newStatus, cancel_reason } = payload || {};
+      if (!bookingId || !newStatus) return res.status(400).json({ error: 'Missing bookingId or status' });
+
+      const updateData = { status: newStatus };
+      if (cancel_reason) updateData.cancel_reason = cancel_reason;
+
+      const { error } = await supabase
+        .from('bookings')
+        .update(updateData)
+        .eq('id', bookingId);
+
+      if (error) return res.status(500).json({ error: error.message });
+
+      await supabase.from('audit_logs').insert([{
+        action: 'booking_' + newStatus,
+        target_type: 'booking',
+        target_id: String(bookingId),
+        details: { status: newStatus, cancel_reason: cancel_reason || null },
+      }]).catch(() => {});
+
+      return res.status(200).json({ success: true });
+    }
+
+    /* ============================================
+       ★ 檢查預約衝突
+       ============================================ */
+    if (action === 'check-conflict') {
+      const { date, time, technician, excludeId } = payload || {};
+
+      let query = supabase
+        .from('bookings')
+        .select('id, customer_name, booking_time, booking_date')
+        .eq('booking_date', date)
+        .eq('booking_time', time)
+        .neq('status', 'cancelled');
+
+      if (technician) query = query.eq('technician_label', technician);
+      if (excludeId) query = query.neq('id', excludeId);
+
+      const { data } = await query;
+      return res.status(200).json({
+        hasConflict: data && data.length > 0,
+        conflicts: data || [],
+      });
+    }
+
+    /* ============================================
        ★ 更新客戶（備註 / 黑名單）
        ============================================ */
     if (action === 'update-customer') {
@@ -551,17 +602,6 @@ export default async function handler(req, res) {
         .select('customer_phone')
         .in('status', ['confirmed', 'completed']);
 
-      if (bookings) {
-        const counts = {};
-        bookings.forEach(b => {
-          if (b.customer_phone) counts[b.customer_phone] = (counts[b.customer_phone] || 0) + 1;
-        });
-        for (const [phone, count] of Object.entries(counts)) {
-          await supabase.from('customers').update({ total_visits: count }).eq('phone', phone);
-        }
-      }
-      return res.status(200).json({ success: true });
-    }
       if (bookings) {
         const counts = {};
         bookings.forEach(b => {
