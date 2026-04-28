@@ -49,7 +49,6 @@ const font = "'Noto Serif TC', serif";
 const toTimeStr = (mins) => `${String(Math.floor(mins/60)).padStart(2,'0')}:${String(mins%60).padStart(2,'0')}`;
 const toMins = (t) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
 
-// ★ Supabase Realtime（用 anon key）
 let realtimeClient = null;
 if (typeof window !== 'undefined') {
   try {
@@ -160,21 +159,29 @@ export default function Admin() {
   const [dbLogs, setDbLogs] = useState([]);
   const [logLoading, setLogLoading] = useState(false);
 
-  // ★ NEW — 客戶管理
   const [customers, setCustomers] = useState([]);
   const [custSearch, setCustSearch] = useState('');
   const [selectedCust, setSelectedCust] = useState(null);
   const [custBookings, setCustBookings] = useState([]);
 
-  // ★ NEW — 提醒
   const [reminders, setReminders] = useState([]);
   const [reminderDate, setReminderDate] = useState('');
   const [reminderLoading, setReminderLoading] = useState(false);
 
-  // ★ NEW — 角色權限
   const [userRole, setUserRole] = useState('owner');
   const [userStaffId, setUserStaffId] = useState(null);
   const isOwner = userRole === 'owner';
+
+  // ★ NEW — 取消原因對話框
+  const [showCancelDialog, setShowCancelDialog] = useState(false);
+  const [cancelTarget, setCancelTarget] = useState(null);
+  const [cancelReason, setCancelReason] = useState('');
+  const [cancelLoading, setCancelLoading] = useState(false);
+
+  // ★ NEW — 審計日誌
+  const [auditLogs, setAuditLogs] = useState([]);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [historyTab, setHistoryTab] = useState('changes');
 
   const bookingCountRef = useRef(0);
   const showToast = (m) => { setToast(m); setTimeout(() => setToast(''), 3000); };
@@ -202,7 +209,6 @@ export default function Admin() {
     return () => clearInterval(id);
   }, [auth, autoRefresh]);
 
-  // ★ NEW — Supabase Realtime
   useEffect(() => {
     if (!auth || !realtimeClient) return;
     const channel = realtimeClient
@@ -223,7 +229,6 @@ export default function Admin() {
     return () => { realtimeClient.removeChannel(channel); };
   }, [auth]);
 
-  // ★ NEW — PWA
   useEffect(() => {
     if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
       navigator.serviceWorker.register('/sw.js').catch(() => {});
@@ -258,7 +263,6 @@ export default function Admin() {
     setResetPwLoading(false);
   };
 
-  // ★ MODIFIED — handleLogin（加角色查詢）
   const handleLogin = async (e) => {
     e.preventDefault();
     setLoginError(''); setLoginLoading(true);
@@ -267,14 +271,11 @@ export default function Admin() {
       authToken = result.access_token;
       try { sessionStorage.setItem('jlab_token', result.access_token); } catch (_) {}
       setAuth(true);
-
-      // ★ 查角色
       try {
         const roles = await sbGet(`admin_users?email=eq.${encodeURIComponent(loginEmail)}`);
         if (roles && roles.length > 0) { setUserRole(roles[0].role || 'owner'); setUserStaffId(roles[0].staff_id || null); }
         else { setUserRole('owner'); }
       } catch (_) { setUserRole('owner'); }
-
       fetchBookings(); fetchBlocked(); fetchStaff(); fetchServices(); fetchAddons(); fetchLogs(); fetchCustomers();
       apiCall('auto-backup').catch(() => {});
     } catch (err) { setLoginError(err.message || '帳號或密碼錯誤'); }
@@ -286,7 +287,7 @@ export default function Admin() {
     if (saved) {
       authToken = saved;
       apiCall('verify')
-       .then(() => { setAuth(true); fetchBookings(); fetchBlocked(); fetchStaff(); fetchServices(); fetchAddons(); fetchLogs(); fetchCustomers(); apiCall('auto-backup').catch(() => {}); })
+        .then(() => { setAuth(true); fetchBookings(); fetchBlocked(); fetchStaff(); fetchServices(); fetchAddons(); fetchLogs(); fetchCustomers(); apiCall('auto-backup').catch(() => {}); })
         .catch(() => { authToken = null; sessionStorage.removeItem('jlab_token'); });
     }
   }, []);
@@ -303,7 +304,19 @@ export default function Admin() {
     try { const data = await sbGet('admin_logs?order=created_at.desc&limit=100'); setDbLogs(data || []); } catch (e) { console.error(e); }
     setLogLoading(false);
   };
-  const openHistory = () => { setShowHistory(true); fetchLogs(); };
+
+  // ★ NEW — 取得審計日誌
+  const fetchAuditLogs = async () => {
+    setAuditLoading(true);
+    try {
+      const result = await apiCall('get-audit-logs', {});
+      setAuditLogs(result.data || []);
+    } catch (e) { console.error(e); }
+    setAuditLoading(false);
+  };
+
+  // ★ MODIFIED — 打開歷史記錄時同時載入審計日誌
+  const openHistory = () => { setShowHistory(true); fetchLogs(); fetchAuditLogs(); };
 
   const handleChangePw = async () => {
     setCpError(''); setCpMsg('');
@@ -316,8 +329,8 @@ export default function Admin() {
   };
 
   const exportCSV = () => {
-    const hdrs = ['日期', '時間', '客人', '電話', '服務', '技師', '金額', '狀態'];
-    const rows = filteredBookings.map(b => [b.booking_date, b.booking_time, b.customer_name, b.customer_phone, b.service_name, b.technician_label || '', b.total_price, statusText(b.status)]);
+    const hdrs = ['日期', '時間', '客人', '電話', '服務', '技師', '金額', '狀態', '取消原因'];
+    const rows = filteredBookings.map(b => [b.booking_date, b.booking_time, b.customer_name, b.customer_phone, b.service_name, b.technician_label || '', b.total_price, statusText(b.status), b.cancel_reason || '']);
     const BOM = '\uFEFF';
     const csv = BOM + [hdrs, ...rows].map(row => row.map(cell => `"${String(cell || '').replace(/"/g, '""')}"`).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -328,7 +341,6 @@ export default function Admin() {
     showToast('✅ 已匯出 CSV');
   };
 
-  // ★ NEW — 客戶管理 Functions
   const fetchCustomers = async () => {
     try { const data = await sbGet('customers?order=last_visit_date.desc.nullslast&limit=500'); setCustomers(data || []); } catch (_) {}
   };
@@ -337,7 +349,7 @@ export default function Admin() {
     try { const bks = await sbGet(`bookings?customer_phone=eq.${encodeURIComponent(cust.phone)}&order=booking_date.desc&limit=50`); setCustBookings(bks || []); } catch (_) {}
   };
   const updateCustNotes = async (custId, notes) => {
-    try { await sbPatch(`customers?id=eq.${custId}`, { notes }); setCustomers(prev => prev.map(c => c.id === custId ? { ...c, notes } : c)); showToast('✅ 備註已更新'); } catch (_) { showToast('❌ 更新失敗'); }
+    try { await apiCall('update-customer', { customerId: custId, notes }); setCustomers(prev => prev.map(c => c.id === custId ? { ...c, notes } : c)); if (selectedCust?.id === custId) setSelectedCust(prev => ({ ...prev, notes })); showToast('✅ 備註已更新'); } catch (_) { showToast('❌ 更新失敗'); }
   };
   const addCustTag = async (custId, tag) => {
     const cust = customers.find(c => c.id === custId);
@@ -351,13 +363,33 @@ export default function Admin() {
     const newTags = (cust.tags || []).filter(t => t !== tag);
     try { await sbPatch(`customers?id=eq.${custId}`, { tags: newTags }); setCustomers(prev => prev.map(c => c.id === custId ? { ...c, tags: newTags } : c)); if (selectedCust?.id === custId) setSelectedCust(prev => ({ ...prev, tags: newTags })); } catch (_) {}
   };
+
+  // ★ NEW — 黑名單切換
+  const toggleBlacklist = async (custId, currentVal) => {
+    try {
+      await apiCall('update-customer', { customerId: custId, is_blacklisted: !currentVal });
+      setCustomers(prev => prev.map(c => c.id === custId ? { ...c, is_blacklisted: !currentVal } : c));
+      if (selectedCust?.id === custId) setSelectedCust(prev => ({ ...prev, is_blacklisted: !currentVal }));
+      showToast(!currentVal ? '⚠️ 已加入黑名單' : '✅ 已移出黑名單');
+    } catch (_) { showToast('❌ 更新失敗'); }
+  };
+
+  // ★ NEW — 刷新客戶統計
+  const refreshCustomerStats = async () => {
+    showToast('⏳ 正在更新客戶統計...');
+    try {
+      await apiCall('refresh-customer-stats', {});
+      await fetchCustomers();
+      showToast('✅ 客戶統計已更新');
+    } catch (e) { showToast('❌ 更新失敗: ' + e.message); }
+  };
+
   const filteredCustomers = useMemo(() => {
     if (!custSearch.trim()) return customers;
     const s = custSearch.trim().toLowerCase();
     return customers.filter(c => (c.name||'').toLowerCase().includes(s) || (c.phone||'').includes(s) || (c.tags||[]).some(t => t.toLowerCase().includes(s)));
   }, [customers, custSearch]);
 
-  // ★ NEW — 提醒 Functions
   const generateReminders = async () => {
     if (!reminderDate) return showToast('❌ 請選擇日期');
     setReminderLoading(true);
@@ -375,7 +407,6 @@ export default function Admin() {
     setReminderLoading(false);
   };
 
-  // ★ NEW — 收入圖表數據
   const revenueData = useMemo(() => {
     const map = {};
     allBookings.filter(b => b.status !== 'cancelled').forEach(b => {
@@ -406,10 +437,7 @@ export default function Admin() {
   }, [allBookings, filterDateFrom, filterDateTo, filterStatus, filterTech, searchTerm]);
 
   const totalPages = Math.ceil(filteredBookings.length / PER_PAGE);
-  const pagedBookings = useMemo(() => {
-    const start = bkPage * PER_PAGE;
-    return filteredBookings.slice(start, start + PER_PAGE);
-  }, [filteredBookings, bkPage]);
+  const pagedBookings = useMemo(() => { const start = bkPage * PER_PAGE; return filteredBookings.slice(start, start + PER_PAGE); }, [filteredBookings, bkPage]);
 
   const nextMonthStr = useMemo(() => { const d = new Date(); d.setMonth(d.getMonth() + 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; }, []);
   const nextMonthLabel = useMemo(() => { const d = new Date(); d.setMonth(d.getMonth() + 1); return `${d.getMonth() + 1}月`; }, []);
@@ -483,6 +511,27 @@ export default function Admin() {
   const fetchAddons = async () => { try { const data = await sbGet('service_addons?order=sort_order,created_at'); setSvcAddons(data || []); } catch (e) { console.error(e); } };
   const fetchBlocked = async () => { try { const data = await sbGet('blocked_dates?order=date.desc'); setBlocked(data || []); } catch (e) { console.error(e); } };
 
+  // ★ NEW — 封鎖日期管理
+  const addBlockedDate = async () => {
+    if (!newBD) return showToast('❌ 請選擇日期');
+    try {
+      await sbPost('blocked_dates', [{ date: newBD, reason: newBR || '休息' }]);
+      setNewBD(''); setNewBR('');
+      fetchBlocked();
+      logChange(`🚫 封鎖日期 ${newBD}（${newBR || '休息'}）`);
+      showToast('✅ 已封鎖日期');
+    } catch (e) { showToast('❌ 新增失敗'); }
+  };
+  const removeBlockedDate = async (id) => {
+    const bd = blocked.find(b => b.id === id);
+    try {
+      await sbDel(`blocked_dates?id=eq.${id}`);
+      setBlocked(prev => prev.filter(b => b.id !== id));
+      logChange(`✅ 解除封鎖 ${bd?.date || ''}`);
+      showToast('✅ 已移除');
+    } catch (e) { showToast('❌ 移除失敗'); }
+  };
+
   const openEditSvc = async (svc) => {
     const form = svc ? { ...svc } : { name: '', description: '', base_price: 0, duration_minutes: 60, image_url: '', category: '', is_active: true, sort_order: svcList.length };
     setEditSvcForm(form);
@@ -517,7 +566,6 @@ export default function Admin() {
   const loadReschedSlots = async (date) => { try { const data = await sbGet(`enabled_timeslots?slot_date=eq.${date}&order=slot_time`); const map = {}; (data || []).forEach(s => { const sid = s.staff_id; if (!map[sid]) map[sid] = new Set(); map[sid].add(s.slot_time?.slice(0, 5)); }); setReschedSlots(map); } catch (e) { setReschedSlots({}); } };
   const handleReschedDateChange = (date) => { setReschedDate(date); setReschedTime(''); loadReschedSlots(date); };
 
-  // ★ MODIFIED — saveResched（server-side 衝突檢測）
   const saveResched = async () => {
     if (!selectedBooking || !reschedDate || !reschedTime) return showToast('❌ 請選擇日期同時間');
     if (isTimeConflict) return showToast('❌ 此時段已有其他預約');
@@ -549,20 +597,61 @@ export default function Admin() {
     setReschedLoading(false);
   };
 
-  const updateStatus = async (id, s) => { const b = allBookings.find(x => x.id === id); try { await sbPatch(`bookings?id=eq.${id}`, { status: s }); setAllBookings(prev => prev.map(x => x.id === id ? { ...x, status: s } : x)); logChange(`${statusText(s)} — ${b?.customer_name} ${b?.booking_date} ${b?.booking_time}`); showToast(`✅ 狀態已更新為「${statusText(s)}」`); } catch (e) { showToast('❌ 更新失敗'); } };
+  // ★ NEW — 取消預約對話框
+  const promptCancel = (booking, isModal = false) => {
+    if (!booking) return;
+    setCancelTarget({ booking, isModal });
+    setCancelReason('');
+    setShowCancelDialog(true);
+  };
+
+  const confirmCancel = async () => {
+    if (!cancelTarget) return;
+    setCancelLoading(true);
+    const { booking, isModal } = cancelTarget;
+    try {
+      await apiCall('update-booking-status', { bookingId: booking.id, status: 'cancelled', cancel_reason: cancelReason || null });
+      const updated = { ...booking, status: 'cancelled', cancel_reason: cancelReason || null };
+      setAllBookings(prev => prev.map(b => b.id === booking.id ? updated : b));
+      if (isModal && selectedBooking?.id === booking.id) setSelectedBooking(updated);
+      logChange(`❌ 取消 — ${booking.customer_name} ${booking.booking_date} ${booking.booking_time}${cancelReason ? ` (${cancelReason})` : ''}`);
+      showToast('✅ 已取消預約');
+      setShowCancelDialog(false);
+      const ask = window.confirm(`📲 要唔要 WhatsApp 通知 ${booking.customer_name}？`);
+      if (ask) { const msg = fillTemplate('cancelled', updated); sendWhatsApp(booking.customer_phone, msg); }
+    } catch (e) { showToast('❌ 取消失敗: ' + e.message); }
+    setCancelLoading(false);
+  };
+
+  // ★ MODIFIED — updateStatus 用 apiCall + 審計記錄，取消走 promptCancel
+  const updateStatus = async (id, s) => {
+    if (s === 'cancelled') { promptCancel(allBookings.find(x => x.id === id)); return; }
+    const b = allBookings.find(x => x.id === id);
+    try {
+      await apiCall('update-booking-status', { bookingId: id, status: s });
+      setAllBookings(prev => prev.map(x => x.id === id ? { ...x, status: s } : x));
+      logChange(`${statusText(s)} — ${b?.customer_name} ${b?.booking_date} ${b?.booking_time}`);
+      showToast(`✅ 狀態已更新為「${statusText(s)}」`);
+    } catch (e) { showToast('❌ 更新失敗: ' + e.message); }
+  };
+
   const deleteBooking = async (id) => { if (!window.confirm('確定要刪除？')) return; const b = allBookings.find(x => x.id === id); try { await sbDel(`bookings?id=eq.${id}`); setAllBookings(prev => prev.filter(x => x.id !== id)); logChange(`🗑️ 已刪除 — ${b?.customer_name} ${b?.booking_date} ${b?.booking_time}`); showToast('✅ 已刪除'); } catch (e) { console.error(e); } };
+
+  // ★ MODIFIED — modalUpdate 用 apiCall + 取消走 promptCancel
   const modalUpdate = async (s) => {
     if (!selectedBooking) return;
+    if (s === 'cancelled') { promptCancel(selectedBooking, true); return; }
     try {
-      await sbPatch(`bookings?id=eq.${selectedBooking.id}`, { status: s });
+      await apiCall('update-booking-status', { bookingId: selectedBooking.id, status: s });
       const updated = { ...selectedBooking, status: s };
       setAllBookings(prev => prev.map(b => b.id === selectedBooking.id ? updated : b));
       setSelectedBooking(updated);
       logChange(`${statusText(s)} — ${selectedBooking.customer_name} ${selectedBooking.booking_date} ${selectedBooking.booking_time}`);
       showToast(`✅ 狀態已更新為「${statusText(s)}」`);
-      if (s === 'confirmed' || s === 'cancelled') { const ask = window.confirm(`📲 要唔要 WhatsApp 通知 ${selectedBooking.customer_name}？`); if (ask) { const msg = fillTemplate(s, updated); sendWhatsApp(selectedBooking.customer_phone, msg); } }
+      if (s === 'confirmed') { const ask = window.confirm(`📲 要唔要 WhatsApp 通知 ${selectedBooking.customer_name}？`); if (ask) { const msg = fillTemplate(s, updated); sendWhatsApp(selectedBooking.customer_phone, msg); } }
     } catch (e) { showToast('❌ 更新失敗'); }
   };
+
   const modalDelete = async () => { if (!selectedBooking || !window.confirm('確定要刪除？')) return; try { logChange(`🗑️ 已刪除 — ${selectedBooking.customer_name} ${selectedBooking.booking_date} ${selectedBooking.booking_time}`); await sbDel(`bookings?id=eq.${selectedBooking.id}`); setAllBookings(prev => prev.filter(b => b.id !== selectedBooking.id)); closeBooking(); showToast('✅ 已刪除'); } catch (e) { console.error(e); } };
   const confirmAllPending = async () => { const pend = allBookings.filter(b => b.status === 'pending' && b.booking_date >= todayStr); if (!pend.length) return showToast('❌ 沒有待確認嘅預約'); if (!window.confirm(`確定確認全部 ${pend.length} 個待確認預約？`)) return; try { const ids = pend.map(b => b.id); await sbPatch(`bookings?id=in.(${ids.join(',')})`, { status: 'confirmed' }); setAllBookings(prev => prev.map(b => ids.includes(b.id) ? { ...b, status: 'confirmed' } : b)); logChange(`✅ 批量確認 ${pend.length} 個預約`); showToast(`✅ 已確認 ${pend.length} 個預約`); } catch (e) { showToast('❌ 確認失敗'); } };
   const confirmDayPending = async () => { const pend = dayBks.filter(b => b.status === 'pending'); if (!pend.length) return; if (!window.confirm(`確定確認 ${schedDate} 共 ${pend.length} 個待確認預約？`)) return; try { const ids = pend.map(b => b.id); await sbPatch(`bookings?id=in.(${ids.join(',')})`, { status: 'confirmed' }); setAllBookings(prev => prev.map(b => ids.includes(b.id) ? { ...b, status: 'confirmed' } : b)); logChange(`✅ 批量確認 ${schedDate} 共 ${pend.length} 個預約`); showToast(`✅ 已確認 ${pend.length} 個預約`); } catch (e) { showToast('❌ 確認失敗'); } };
@@ -645,7 +734,6 @@ export default function Admin() {
     </div>
   ) : null;
 
-  // ★ MODIFIED — Tab 定義（加客戶 + 提醒，按角色顯示）
   const allTabs = [
     { key: 'bookings', label: `📋 預約${stats.pending > 0 ? ` (${stats.pending})` : ''}`, show: true },
     { key: 'timeslots', label: '🕐 時段', show: true },
@@ -655,12 +743,53 @@ export default function Admin() {
     { key: 'templates', label: '📝 訊息模板', show: isOwner },
   ].filter(t => t.show);
 
+  // ★ NEW — 審計日誌 action 名稱中文化
+  const auditActionText = (a) => {
+    if (a === 'booking_confirmed') return '✅ 確認預約';
+    if (a === 'booking_completed') return '✔️ 完成預約';
+    if (a === 'booking_cancelled') return '❌ 取消預約';
+    if (a === 'customer_blacklist_toggle') return '🚫 黑名單切換';
+    if (a === 'customer_notes_update') return '📝 客戶備註更新';
+    return a;
+  };
+
   return (
     <div style={{ minHeight: '100vh', background: '#f5f0eb', fontFamily: font }}>
       {toast && <div style={{ position: 'fixed', top: 20, left: '50%', transform: 'translateX(-50%)', background: '#5c4a3a', color: '#fff', padding: '12px 28px', borderRadius: 8, fontSize: 14, zIndex: 9999, boxShadow: '0 4px 20px rgba(0,0,0,0.2)' }}>{toast}</div>}
       {batchLoading && <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.3)', zIndex: 999, display: 'flex', alignItems: 'center', justifyContent: 'center' }}><div style={{ background: '#fff', padding: '30px 40px', borderRadius: 12, textAlign: 'center' }}><div style={{ fontSize: 24, marginBottom: 10 }}>⏳</div><div style={{ fontSize: 14, color: '#5c4a3a' }}>處理中...</div></div></div>}
 
-      {/* ═══ Booking Detail Modal（同原本一樣，冇改）═══ */}
+      {/* ═══ ★ NEW — 取消原因對話框 ═══ */}
+      {showCancelDialog && cancelTarget && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }} onClick={() => setShowCancelDialog(false)}>
+          <div style={{ background: '#fff', borderRadius: 16, padding: 28, maxWidth: 420, width: '100%', boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }} onClick={e => e.stopPropagation()}>
+            <h3 style={{ margin: '0 0 6px', color: '#c62828', fontSize: 18 }}>❌ 取消預約</h3>
+            <div style={{ fontSize: 14, color: '#5c4a3a', marginBottom: 16, padding: '10px 14px', background: '#FFF8E1', borderRadius: 8 }}>
+              <div style={{ fontWeight: 700 }}>{cancelTarget.booking.customer_name}</div>
+              <div style={{ fontSize: 13, color: '#888', marginTop: 4 }}>{cancelTarget.booking.booking_date} {cancelTarget.booking.booking_time} — {cancelTarget.booking.service_name}</div>
+            </div>
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ fontSize: 13, color: '#5c4a3a', fontWeight: 600, marginBottom: 6, display: 'block' }}>取消原因（可選）</label>
+              <select value={cancelReason} onChange={e => setCancelReason(e.target.value)} style={{ width: '100%', padding: '10px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, fontFamily: font, marginBottom: 8, boxSizing: 'border-box' }}>
+                <option value="">— 選擇原因 —</option>
+                <option value="客人要求取消">客人要求取消</option>
+                <option value="客人甩底 no-show">客人甩底 no-show</option>
+                <option value="時間衝突">時間衝突</option>
+                <option value="技師請假">技師請假</option>
+                <option value="其他">其他</option>
+              </select>
+              {cancelReason === '其他' && (
+                <input type="text" placeholder="請輸入原因..." onChange={e => setCancelReason(e.target.value)} style={{ width: '100%', padding: '10px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, fontFamily: font, boxSizing: 'border-box' }} />
+              )}
+            </div>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button onClick={() => setShowCancelDialog(false)} style={{ padding: '10px 20px', borderRadius: 8, border: '1px solid #ccc', background: '#fff', color: '#666', cursor: 'pointer', fontSize: 14, fontFamily: font }}>返回</button>
+              <button onClick={confirmCancel} disabled={cancelLoading} style={{ padding: '10px 24px', borderRadius: 8, border: 'none', background: cancelLoading ? '#e0a0a0' : '#c62828', color: '#fff', cursor: cancelLoading ? 'not-allowed' : 'pointer', fontSize: 14, fontFamily: font, fontWeight: 600 }}>{cancelLoading ? '處理中...' : '確認取消'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══ Booking Detail Modal ═══ */}
       {selectedBooking && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }} onClick={closeBooking}>
           <div style={{ background: '#fff', borderRadius: 16, padding: 28, maxWidth: 480, width: '100%', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }} onClick={e => e.stopPropagation()}>
@@ -673,6 +802,8 @@ export default function Admin() {
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}><span style={{ fontSize: 18 }}>🎨</span><div>{selectedBooking.service_name}{selectedBooking.variant_label && <span style={{ color: '#999' }}> · {selectedBooking.variant_label}</span>}{selectedBooking.addon_names?.length > 0 && <div style={{ fontSize: 12, color: '#999', marginTop: 2 }}>+ {selectedBooking.addon_names.join('、')}</div>}</div></div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}><span style={{ fontSize: 18 }}>💰</span><div style={{ fontSize: 22, fontWeight: 700 }}>${selectedBooking.total_price}</div></div>
               {(selectedBooking.notes || selectedBooking.remarks || selectedBooking.customer_notes) && <div style={{ padding: '10px 14px', background: '#FFF8E1', borderRadius: 8, fontSize: 13, color: '#F57F17' }}>📝 {selectedBooking.notes || selectedBooking.remarks || selectedBooking.customer_notes}</div>}
+              {/* ★ NEW — 顯示取消原因 */}
+              {selectedBooking.status === 'cancelled' && selectedBooking.cancel_reason && <div style={{ padding: '10px 14px', background: '#FFEBEE', borderRadius: 8, fontSize: 13, color: '#c62828' }}>❌ 取消原因：{selectedBooking.cancel_reason}</div>}
             </div>
             {reschedMode && (
               <div style={{ marginTop: 20, padding: 16, background: '#FFF3E0', borderRadius: 10, border: '1px solid #FFB74D' }}>
@@ -694,7 +825,7 @@ export default function Admin() {
               {(selectedBooking.status === 'pending' || selectedBooking.status === 'confirmed') && <button onClick={() => modalUpdate('completed')} style={{ padding: '10px 20px', borderRadius: 8, border: 'none', background: '#2196F3', color: '#fff', cursor: 'pointer', fontSize: 14, fontFamily: font, fontWeight: 600 }}>✔️ 完成</button>}
               {selectedBooking.status !== 'cancelled' && selectedBooking.status !== 'completed' && <button onClick={() => modalUpdate('cancelled')} style={{ padding: '10px 20px', borderRadius: 8, border: '1px solid #ef9a9a', background: '#ffebee', color: '#c62828', cursor: 'pointer', fontSize: 14, fontFamily: font }}>❌ 取消</button>}
               {!reschedMode && selectedBooking.status !== 'cancelled' && <button onClick={startResched} style={{ padding: '10px 16px', borderRadius: 8, border: '1px solid #FFB74D', background: '#FFF3E0', color: '#E65100', cursor: 'pointer', fontSize: 14, fontFamily: font }}>✏️ 改期</button>}
-              {selectedBooking.customer_phone && <button onClick={() => { const msg = fillTemplate('reminder', selectedBooking); sendWhatsApp(selectedBooking.customer_phone, msg || `${selectedBooking.customer_name} 你好！關於你 ${selectedBooking.booking_date} ${selectedBooking.booking_time} 嘅預約，如有任何疑問歡迎聯絡我哋。\n— J.LAB`); }} style={{ padding: '10px 16px', borderRadius: 8, border: '1px solid #25D366', background: '#E8F5E9', color: '#25D366', cursor: 'pointer', fontSize: 14, fontFamily: font, fontWeight: 600 }}>📲 通知客人</button>}
+              {selectedBooking.customer_phone && <button onClick={() => { const msg = fillTemplate('reminder', selectedBooking) || `${selectedBooking.customer_name} 你好！關於你 ${selectedBooking.booking_date} ${selectedBooking.booking_time} 嘅預約，如有任何疑問歡迎聯絡我哋。\n— J.LAB`; sendWhatsApp(selectedBooking.customer_phone, msg); }} style={{ padding: '10px 16px', borderRadius: 8, border: '1px solid #25D366', background: '#E8F5E9', color: '#25D366', cursor: 'pointer', fontSize: 14, fontFamily: font, fontWeight: 600 }}>📲 通知客人</button>}
               <div style={{ flex: 1 }} />
               <button onClick={modalDelete} style={{ padding: '10px 16px', borderRadius: 8, border: '1px solid #ddd', background: '#fafafa', color: '#999', cursor: 'pointer', fontSize: 14, fontFamily: font }}>🗑️</button>
             </div>
@@ -702,7 +833,7 @@ export default function Admin() {
         </div>
       )}
 
-      {/* ═══ Service / Addon Modals（同原本一樣）═══ */}
+      {/* ═══ Service Modal ═══ */}
       {editSvc && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }} onClick={() => setEditSvc(null)}>
           <div style={{ background: '#fff', borderRadius: 16, padding: 28, maxWidth: 560, width: '100%', maxHeight: '90vh', overflowY: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }} onClick={e => e.stopPropagation()}>
@@ -750,23 +881,42 @@ export default function Admin() {
         <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
           <button onClick={openHistory} style={headerBtn}>🔍 {!isMobile && '歷史'}</button>
           <button onClick={() => { setShowChangePw(true); setCpOld(''); setCpNew(''); setCpConfirm(''); setCpMsg(''); setCpError(''); }} style={headerBtn}>🔑{!isMobile && ' 密碼'}</button>
-  
           <button onClick={() => { setAuth(false); authToken = null; sessionStorage.removeItem('jlab_token'); showToast('已登出'); }} style={headerBtn}>登出</button>
         </div>
       </div>
 
-      {/* ═══ History Modal ═══ */}
+      {/* ═══ ★ MODIFIED — History Modal（加審計日誌 Tab）═══ */}
       {showHistory && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 9999, display: 'flex', justifyContent: 'center', alignItems: 'center' }} onClick={() => setShowHistory(false)}>
-          <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 16, padding: 24, width: '90%', maxWidth: 500, maxHeight: '70vh', overflow: 'hidden', display: 'flex', flexDirection: 'column', fontFamily: font }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}><h3 style={{ margin: 0, fontSize: 18, color: '#3e2f1c' }}>📋 操作歷史記錄</h3><button onClick={() => setShowHistory(false)} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#999' }}>✕</button></div>
-            <div style={{ overflowY: 'auto', flex: 1 }}>
-              {logLoading ? <p style={{ color: '#999', textAlign: 'center', padding: 40 }}>載入中...</p> : dbLogs.length === 0 ? <p style={{ color: '#999', textAlign: 'center', padding: 40 }}>暫無操作記錄</p> : dbLogs.map(log => (
-                <div key={log.id} style={{ padding: '12px 16px', marginBottom: 8, background: '#faf8f5', borderRadius: 10, borderLeft: '3px solid #b8956a' }}>
-                  <div style={{ fontSize: 11, color: '#999', marginBottom: 4 }}>{new Date(log.created_at).toLocaleString('zh-HK')}{log.admin_email && <span style={{ marginLeft: 8 }}>by {log.admin_email}</span>}</div>
-                  <div style={{ fontSize: 14, color: '#3e2f1c' }}>{log.action}</div>
-                </div>
+          <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 16, padding: 24, width: '90%', maxWidth: 560, maxHeight: '75vh', overflow: 'hidden', display: 'flex', flexDirection: 'column', fontFamily: font }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}><h3 style={{ margin: 0, fontSize: 18, color: '#3e2f1c' }}>📋 操作記錄</h3><button onClick={() => setShowHistory(false)} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#999' }}>✕</button></div>
+            {/* ★ NEW — 兩個 Tab 切換 */}
+            <div style={{ display: 'flex', gap: 0, marginBottom: 14 }}>
+              {[['changes', '📝 操作日誌'], ['audit', '🔍 審計記錄']].map(([k, l]) => (
+                <button key={k} onClick={() => { setHistoryTab(k); if (k === 'audit' && auditLogs.length === 0) fetchAuditLogs(); }} style={{ padding: '8px 16px', border: 'none', cursor: 'pointer', fontSize: 13, fontFamily: font, fontWeight: historyTab === k ? 700 : 400, background: historyTab === k ? '#5c4a3a' : '#f5f0eb', color: historyTab === k ? '#fff' : '#5c4a3a', borderRadius: k === 'changes' ? '8px 0 0 8px' : '0 8px 8px 0' }}>{l}</button>
               ))}
+            </div>
+            <div style={{ overflowY: 'auto', flex: 1 }}>
+              {historyTab === 'changes' && (<>
+                {logLoading ? <p style={{ color: '#999', textAlign: 'center', padding: 40 }}>載入中...</p> : dbLogs.length === 0 ? <p style={{ color: '#999', textAlign: 'center', padding: 40 }}>暫無操作記錄</p> : dbLogs.map(log => (
+                  <div key={log.id} style={{ padding: '12px 16px', marginBottom: 8, background: '#faf8f5', borderRadius: 10, borderLeft: '3px solid #b8956a' }}>
+                    <div style={{ fontSize: 11, color: '#999', marginBottom: 4 }}>{new Date(log.created_at).toLocaleString('zh-HK')}{log.admin_email && <span style={{ marginLeft: 8 }}>by {log.admin_email}</span>}</div>
+                    <div style={{ fontSize: 14, color: '#3e2f1c' }}>{log.action}</div>
+                  </div>
+                ))}
+              </>)}
+              {/* ★ NEW — 審計記錄 Tab */}
+              {historyTab === 'audit' && (<>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}><button onClick={fetchAuditLogs} style={{ padding: '4px 12px', borderRadius: 6, border: '1px solid #d0c8bc', background: '#faf6f0', color: '#5c4a3a', cursor: 'pointer', fontSize: 12, fontFamily: font }}>🔄 刷新</button></div>
+                {auditLoading ? <p style={{ color: '#999', textAlign: 'center', padding: 40 }}>載入中...</p> : auditLogs.length === 0 ? <p style={{ color: '#999', textAlign: 'center', padding: 40 }}>暫無審計記錄</p> : auditLogs.map(log => (
+                  <div key={log.id} style={{ padding: '12px 16px', marginBottom: 8, background: '#f5f8ff', borderRadius: 10, borderLeft: `3px solid ${log.action?.includes('cancel') ? '#f44336' : log.action?.includes('confirm') ? '#4CAF50' : '#2196F3'}` }}>
+                    <div style={{ fontSize: 11, color: '#999', marginBottom: 4 }}>{new Date(log.performed_at).toLocaleString('zh-HK')}</div>
+                    <div style={{ fontSize: 14, color: '#3e2f1c', fontWeight: 600 }}>{auditActionText(log.action)}</div>
+                    {log.details && (log.details.cancel_reason || log.details.notes) && <div style={{ fontSize: 12, color: '#888', marginTop: 4 }}>{log.details.cancel_reason && `原因：${log.details.cancel_reason}`}{log.details.notes && `備註：${log.details.notes}`}</div>}
+                    <div style={{ fontSize: 11, color: '#bbb', marginTop: 2 }}>{log.target_type} #{log.target_id}</div>
+                  </div>
+                ))}
+              </>)}
             </div>
           </div>
         </div>
@@ -789,14 +939,14 @@ export default function Admin() {
         </div>
       )}
 
-      {/* ═══ Tab Bar — ★ MODIFIED ═══ */}
+      {/* ═══ Tab Bar ═══ */}
       <div style={{ background: '#fff', borderTop: '1px solid #f0ebe3', padding: '0 16px', display: 'flex', gap: 0, boxShadow: '0 2px 10px rgba(0,0,0,0.03)', overflowX: 'auto' }}>
         {allTabs.map(t => (
           <button key={t.key} onClick={() => setTab(t.key)} style={{ padding: '14px 18px', background: 'none', border: 'none', borderBottom: tab === t.key ? '2px solid #5c4a3a' : '2px solid transparent', fontSize: 13, color: tab === t.key ? '#5c4a3a' : '#999', fontWeight: tab === t.key ? 600 : 400, cursor: 'pointer', fontFamily: font, whiteSpace: 'nowrap' }}>{t.label}</button>
         ))}
       </div>
 
-      {/* ═══ Pending Sync Bar（timeslots）═══ */}
+      {/* ═══ Pending Sync Bar ═══ */}
       {pendingCount > 0 && tab === 'timeslots' && (
         <div style={{ position: 'sticky', top: 0, zIndex: 100, background: 'linear-gradient(135deg, #FFF3E0, #FFE0B2)', borderBottom: '2px solid #FFB74D' }}>
           <div style={{ padding: '14px 30px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
@@ -809,7 +959,7 @@ export default function Admin() {
 
       <div style={{ maxWidth: 1200, margin: '0 auto', padding: '20px 16px' }}>
 
-        {/* ═══ BOOKINGS TAB ═══ */}
+        {/* ═══ BOOKINGS TAB（原有，加上取消原因顯示）═══ */}
         {tab === 'bookings' && (<>
           <div style={{ display: 'flex', gap: 8, marginBottom: 16, overflowX: 'auto', paddingBottom: 4 }}>
             {[{ label: '今日', value: stats.today, sub: `$${stats.todayRev}`, color: '#FF9800' }, { label: '本月', value: stats.month, sub: `$${stats.monthRev}`, color: '#2196F3' }, { label: nextMonthLabel, value: stats.nextMonth, sub: `$${stats.nextMonthRev}`, color: '#9C27B0' }, { label: '待處理', value: stats.pending, sub: null, color: stats.pending > 0 ? '#f44336' : '#999', action: stats.pending > 0 }, { label: '總數', value: stats.total, sub: null, color: '#5c4a3a' }].map((s, i) => (
@@ -822,7 +972,6 @@ export default function Admin() {
             ))}
           </div>
 
-          {/* ★ NEW — 收入圖表 */}
           {revenueData.length > 2 && viewMode === 'list' && (
             <div style={{ background: '#fff', borderRadius: 12, padding: 20, marginBottom: 16, boxShadow: '0 2px 10px rgba(0,0,0,0.05)' }}>
               <div style={{ fontSize: 14, fontWeight: 600, color: '#5c4a3a', marginBottom: 12 }}>📊 近期收入趨勢</div>
@@ -877,6 +1026,7 @@ export default function Admin() {
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}><div><span style={{ fontWeight: 700, fontSize: 15, color: '#5c4a3a' }}>{b.customer_name}</span><div style={{ fontSize: 13, color: '#666', marginTop: 4 }}>{b.customer_phone}</div></div><span style={{ padding: '3px 10px', borderRadius: 20, fontSize: 11, color: '#fff', background: statusColor(b.status), fontWeight: 600 }}>{statusText(b.status)}</span></div>
                     <div style={{ fontSize: 13, color: '#666', marginBottom: 4 }}>📅 {b.booking_date}　🕐 {b.booking_time}　👤 {b.technician_label || '未指定'}</div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}><span style={{ fontSize: 13, color: '#5c4a3a' }}>{b.service_name}</span><span style={{ fontSize: 17, fontWeight: 700, color: '#5c4a3a' }}>${b.total_price}</span></div>
+                    {b.cancel_reason && <div style={{ fontSize: 11, color: '#c62828', marginTop: 4 }}>❌ {b.cancel_reason}</div>}
                     {b.status === 'pending' && <div style={{ marginTop: 8, display: 'flex', gap: 6 }}><button onClick={e => { e.stopPropagation(); updateStatus(b.id, 'confirmed'); }} style={{ padding: '6px 16px', borderRadius: 6, border: 'none', background: '#4CAF50', color: '#fff', cursor: 'pointer', fontSize: 12, fontFamily: font, fontWeight: 600 }}>✅ 快速確認</button></div>}
                   </div>
                 ))}</div>
@@ -893,7 +1043,7 @@ export default function Admin() {
                         <td style={{ padding: '12px 10px', whiteSpace: 'nowrap' }}>{b.customer_phone}{b.customer_phone && <a href={waLink(b.customer_phone)} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} style={{ marginLeft: 6, textDecoration: 'none', fontSize: 14 }}>💬</a>}</td>
                         <td style={{ padding: '12px 10px' }}>{b.technician_label || <span style={{ color: '#ccc' }}>-</span>}</td>
                         <td style={{ padding: '12px 10px', fontWeight: 'bold', fontSize: 15 }}>${b.total_price}</td>
-                        <td style={{ padding: '12px 10px' }}><span style={{ padding: '3px 10px', borderRadius: 20, fontSize: 11, color: '#fff', background: statusColor(b.status), fontWeight: 600 }}>{statusText(b.status)}</span></td>
+                        <td style={{ padding: '12px 10px' }}><span style={{ padding: '3px 10px', borderRadius: 20, fontSize: 11, color: '#fff', background: statusColor(b.status), fontWeight: 600 }}>{statusText(b.status)}</span>{b.cancel_reason && <div style={{ fontSize: 10, color: '#c62828', marginTop: 2 }}>{b.cancel_reason}</div>}</td>
                         <td style={{ padding: '12px 10px', whiteSpace: 'nowrap' }} onClick={e => e.stopPropagation()}>
                           <div style={{ display: 'flex', gap: 4 }}>
                             {b.status === 'pending' && actBtn('✅', '#E8F5E9', '#A5D6A7', () => updateStatus(b.id, 'confirmed'), '確認')}
@@ -966,7 +1116,7 @@ export default function Admin() {
           </>)}
         </>)}
 
-        {/* ═══ TIMESLOTS TAB（同原本一樣，太長唔重複）═══ */}
+        {/* ═══ TIMESLOTS TAB（加封鎖日期管理）═══ */}
         {tab === 'timeslots' && (<>
           <div style={{ ...card, background: '#e8f5e9', border: '1px solid #a5d6a7', padding: 16 }}><div style={{ fontSize: 13, color: '#2e7d32', lineHeight: 2 }}>💡 <b>流程：</b>選員工 → 月曆選日期 → 套用模板 → 按「確認同步到前台」</div></div>
           <div style={card}>
@@ -1006,22 +1156,50 @@ export default function Admin() {
                 <div style={{ borderTop: '1px dashed #d0c8bc', marginTop: 6, paddingTop: 10 }}><div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderRadius: 8, background: '#fff5f5', border: '1px solid #ffcdd2', opacity: selDates.size === 0 ? 0.5 : 1, flexWrap: 'wrap' }}><span style={{ fontSize: 18 }}>🍽️</span><span style={{ fontSize: 13, fontWeight: 600, color: '#c62828', minWidth: 52 }}>休息</span><div style={{ display: 'flex', alignItems: 'center', gap: 4, flex: '1 1 auto', minWidth: 0 }}><select value={breakFrom} onChange={e => setBreakFrom(e.target.value)} style={{ padding: '4px 6px', border: '1px solid #ddd', borderRadius: 4, fontSize: 12, fontFamily: font, flex: '1 1 0', minWidth: 0 }}>{ALL_TIMES.map(t => <option key={t} value={t}>{t}</option>)}</select><span style={{ color: '#999', fontSize: 11 }}>–</span><select value={breakTo} onChange={e => setBreakTo(e.target.value)} style={{ padding: '4px 6px', border: '1px solid #ddd', borderRadius: 4, fontSize: 12, fontFamily: font, flex: '1 1 0', minWidth: 0 }}>{ALL_TIMES.map(t => <option key={t} value={t}>{t}</option>)}</select></div><button onClick={applyBreakLocal} disabled={selDates.size === 0} style={{ padding: '5px 14px', borderRadius: 6, border: 'none', fontSize: 12, fontFamily: font, fontWeight: 600, background: selDates.size === 0 ? '#ddd' : '#e53935', color: '#fff', cursor: selDates.size === 0 ? 'not-allowed' : 'pointer' }}>扣除</button></div></div>
               </div>
             </div>
+
+            {/* ★ NEW — 封鎖日期管理 */}
+            <div style={card}>
+              <div style={sTitle}>🚫 封鎖日期（全店休息）</div>
+              <div style={sDesc}>封鎖嘅日期所有員工都唔會開放預約</div>
+              <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+                <input type="date" value={newBD} onChange={e => setNewBD(e.target.value)} style={{ padding: '8px 12px', border: '1px solid #ddd', borderRadius: 6, fontSize: 14 }} />
+                <input type="text" placeholder="原因（例：公眾假期）" value={newBR} onChange={e => setNewBR(e.target.value)} style={{ padding: '8px 12px', border: '1px solid #ddd', borderRadius: 6, fontSize: 14, fontFamily: font, flex: 1, minWidth: 120 }} />
+                <button onClick={addBlockedDate} style={{ padding: '8px 18px', borderRadius: 6, border: 'none', background: '#c62828', color: '#fff', cursor: 'pointer', fontSize: 13, fontFamily: font, fontWeight: 600 }}>🚫 封鎖</button>
+              </div>
+              {blocked.length === 0 ? <div style={{ color: '#999', fontSize: 13, textAlign: 'center', padding: 20 }}>暫無封鎖日期</div> : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {blocked.map(b => (
+                    <div key={b.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', background: '#FFEBEE', borderRadius: 8, border: '1px solid #ffcdd2' }}>
+                      <div><span style={{ fontWeight: 600, color: '#c62828' }}>{b.date}</span><span style={{ color: '#999', marginLeft: 8, fontSize: 13 }}>（週{DAYS[new Date(b.date + 'T00:00:00').getDay()]}）</span>{b.reason && <span style={{ marginLeft: 8, fontSize: 12, color: '#888' }}>{b.reason}</span>}</div>
+                      <button onClick={() => removeBlockedDate(b.id)} style={smallBtn('#fff', '#c62828', '#ffcdd2')}>移除</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </>)}
         </>)}
 
-        {/* ═══ ★ NEW — CUSTOMERS TAB ═══ */}
+        {/* ═══ ★ MODIFIED — CUSTOMERS TAB（加黑名單 + 刷新統計）═══ */}
         {tab === 'customers' && (
           <div>
             <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
               <input type="text" placeholder="🔍 搜尋客人名 / 電話 / 標籤..." value={custSearch} onChange={e => setCustSearch(e.target.value)} style={{ flex: 1, minWidth: 200, padding: '10px 14px', border: '1px solid #d0c8bc', borderRadius: 8, fontSize: 14, fontFamily: font }} />
+              <button onClick={refreshCustomerStats} style={{ padding: '10px 16px', background: '#FF9800', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontFamily: font, fontWeight: 600 }}>📊 刷新統計</button>
               <button onClick={fetchCustomers} style={{ padding: '10px 16px', background: '#5c4a3a', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontFamily: font }}>🔄 重新載入</button>
             </div>
             {selectedCust ? (
               <div style={{ background: '#fff', borderRadius: 14, padding: 24, boxShadow: '0 2px 10px rgba(0,0,0,0.06)' }}>
                 <button onClick={() => { setSelectedCust(null); setCustBookings([]); }} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 14, color: '#b8956a', marginBottom: 12, fontFamily: font }}>← 返回列表</button>
-                <h3 style={{ margin: '0 0 6px', color: '#5c4a3a', fontSize: 18 }}>{selectedCust.name}</h3>
-                <div style={{ fontSize: 13, color: '#888', marginBottom: 4 }}>📞 {selectedCust.phone || '—'}</div>
-                <div style={{ fontSize: 13, color: '#888', marginBottom: 8 }}>來訪 {selectedCust.total_visits || 0} 次 ｜ 總消費 ${selectedCust.total_spent || 0} ｜ 最後來訪 {selectedCust.last_visit_date || '—'}</div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 10, marginBottom: 8 }}>
+                  <div>
+                    <h3 style={{ margin: '0 0 6px', color: '#5c4a3a', fontSize: 18 }}>{selectedCust.name}{selectedCust.is_blacklisted && <span style={{ marginLeft: 8, padding: '2px 8px', background: '#FFEBEE', color: '#c62828', borderRadius: 6, fontSize: 11 }}>🚫 黑名單</span>}</h3>
+                    <div style={{ fontSize: 13, color: '#888', marginBottom: 4 }}>📞 {selectedCust.phone || '—'}</div>
+                    <div style={{ fontSize: 13, color: '#888' }}>來訪 {selectedCust.total_visits || 0} 次 ｜ 總消費 ${selectedCust.total_spent || 0} ｜ 最後來訪 {selectedCust.last_visit_date || '—'}</div>
+                  </div>
+                  {/* ★ NEW — 黑名單切換 */}
+                  <button onClick={() => toggleBlacklist(selectedCust.id, selectedCust.is_blacklisted)} style={{ padding: '8px 16px', borderRadius: 8, border: `1px solid ${selectedCust.is_blacklisted ? '#a5d6a7' : '#ffcdd2'}`, background: selectedCust.is_blacklisted ? '#E8F5E9' : '#FFEBEE', color: selectedCust.is_blacklisted ? '#2e7d32' : '#c62828', cursor: 'pointer', fontSize: 13, fontFamily: font, fontWeight: 600 }}>{selectedCust.is_blacklisted ? '✅ 解除黑名單' : '🚫 加入黑名單'}</button>
+                </div>
                 <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', margin: '8px 0' }}>
                   {(selectedCust.tags || []).map(tag => (<span key={tag} style={{ background: '#f5f0eb', color: '#5c4a3a', padding: '3px 10px', borderRadius: 12, fontSize: 12 }}>{tag} <span onClick={() => removeCustTag(selectedCust.id, tag)} style={{ cursor: 'pointer', marginLeft: 4, color: '#c62828' }}>✕</span></span>))}
                   <input placeholder="+ 加標籤 ↵" onKeyDown={e => { if (e.key === 'Enter' && e.target.value.trim()) { addCustTag(selectedCust.id, e.target.value); e.target.value = ''; } }} style={{ border: '1px dashed #d0c8bc', borderRadius: 12, padding: '3px 10px', fontSize: 12, width: 90, fontFamily: font }} />
@@ -1030,7 +1208,8 @@ export default function Admin() {
                 <h4 style={{ margin: '16px 0 8px', color: '#5c4a3a', fontSize: 14 }}>📋 預約記錄</h4>
                 {custBookings.length === 0 ? <div style={{ color: '#aaa', fontSize: 13, padding: 20, textAlign: 'center' }}>暫無記錄</div> : custBookings.map(b => (
                   <div key={b.id} style={{ padding: '8px 12px', borderBottom: '1px solid #f0ebe3', fontSize: 13 }}>
-                    <span style={{ color: '#5c4a3a', fontWeight: 600 }}>{b.booking_date} {b.booking_time}</span> — {b.service_name} {b.variant_label || ''} <span style={{ padding: '1px 6px', borderRadius: 8, fontSize: 11, background: b.status === 'confirmed' ? '#e8f5e9' : b.status === 'cancelled' ? '#ffeaea' : '#fff8e1', color: b.status === 'confirmed' ? '#2e7d32' : b.status === 'cancelled' ? '#c62828' : '#f9a825' }}>{statusText(b.status)}</span> ${b.total_price || 0}
+                    <span style={{ color: '#5c4a3a', fontWeight: 600 }}>{b.booking_date} {b.booking_time}</span> — {b.service_name} {b.variant_label || ''} <span style={{ padding: '1px 6px', borderRadius: 8, fontSize: 11, background: b.status === 'confirmed' ? '#e8f5e9' : b.status === 'cancelled' ? '#ffeaea' : b.status === 'completed' ? '#e3f2fd' : '#fff8e1', color: b.status === 'confirmed' ? '#2e7d32' : b.status === 'cancelled' ? '#c62828' : b.status === 'completed' ? '#1565c0' : '#f9a825' }}>{statusText(b.status)}</span> ${b.total_price || 0}
+                    {b.cancel_reason && <span style={{ fontSize: 11, color: '#c62828', marginLeft: 6 }}>({b.cancel_reason})</span>}
                   </div>
                 ))}
               </div>
@@ -1038,9 +1217,9 @@ export default function Admin() {
               <div style={{ background: '#fff', borderRadius: 14, overflow: 'hidden', boxShadow: '0 2px 10px rgba(0,0,0,0.06)' }}>
                 <div style={{ padding: '14px 16px', borderBottom: '1px solid #eee', fontSize: 14, color: '#5c4a3a', fontWeight: 600 }}>👥 客戶列表（{filteredCustomers.length}）</div>
                 {filteredCustomers.length === 0 ? <div style={{ padding: 40, textAlign: 'center', color: '#aaa' }}>暫無客戶資料</div> : filteredCustomers.slice(0, 100).map(c => (
-                  <div key={c.id} onClick={() => viewCustomer(c)} style={{ padding: '12px 16px', borderBottom: '1px solid #f0ebe3', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div key={c.id} onClick={() => viewCustomer(c)} style={{ padding: '12px 16px', borderBottom: '1px solid #f0ebe3', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: c.is_blacklisted ? '#FFF8F8' : '#fff' }}>
                     <div>
-                      <div style={{ fontWeight: 600, color: '#5c4a3a', fontSize: 14 }}>{c.name}</div>
+                      <div style={{ fontWeight: 600, color: '#5c4a3a', fontSize: 14 }}>{c.name}{c.is_blacklisted && <span style={{ marginLeft: 6, fontSize: 10, color: '#c62828' }}>🚫</span>}</div>
                       <div style={{ fontSize: 12, color: '#999' }}>📞 {c.phone || '—'} ｜ {c.total_visits || 0} 次 ｜ ${c.total_spent || 0}</div>
                       {(c.tags || []).length > 0 && <div style={{ display: 'flex', gap: 3, marginTop: 4 }}>{c.tags.slice(0, 5).map(t => <span key={t} style={{ background: '#f5f0eb', color: '#5c4a3a', padding: '1px 6px', borderRadius: 10, fontSize: 10 }}>{t}</span>)}</div>}
                     </div>
@@ -1052,7 +1231,7 @@ export default function Admin() {
           </div>
         )}
 
-        {/* ═══ ★ NEW — REMINDERS TAB ═══ */}
+        {/* ═══ REMINDERS TAB ═══ */}
         {tab === 'reminders' && (
           <div style={{ background: '#fff', borderRadius: 14, padding: 24, boxShadow: '0 2px 10px rgba(0,0,0,0.06)' }}>
             <h3 style={{ margin: '0 0 14px', color: '#5c4a3a', fontSize: 17 }}>📱 WhatsApp 提醒</h3>
@@ -1080,7 +1259,7 @@ export default function Admin() {
           </div>
         )}
 
-        {/* ═══ FRONTEND TAB（同原本一樣）═══ */}
+        {/* ═══ FRONTEND TAB ═══ */}
         {tab === 'frontend' && (<>
           <div style={{ ...card, background: '#e8f5e9', border: '1px solid #a5d6a7', padding: 16 }}><div style={{ fontSize: 13, color: '#2e7d32', lineHeight: 1.8 }}>🎨 <b>前台管理：</b>喺呢度編輯客人睇到嘅服務項目、價錢、附加項目等。</div></div>
           <div style={{ display: 'flex', gap: 0, marginBottom: 20 }}>{[['services', '🎨 服務項目'], ['addons', '➕ 附加項目']].map(([k, l]) => (<button key={k} onClick={() => setSvcSubTab(k)} style={{ padding: '10px 24px', border: 'none', cursor: 'pointer', fontSize: 13, fontFamily: font, fontWeight: svcSubTab === k ? 700 : 400, background: svcSubTab === k ? '#5c4a3a' : '#fff', color: svcSubTab === k ? '#fff' : '#5c4a3a', borderRadius: k === 'services' ? '10px 0 0 10px' : '0 10px 10px 0', boxShadow: '0 2px 8px rgba(0,0,0,0.05)' }}>{l}</button>))}</div>
@@ -1116,7 +1295,7 @@ export default function Admin() {
           )}
         </>)}
 
-        {/* ═══ TEMPLATES TAB（同原本一樣）═══ */}
+        {/* ═══ TEMPLATES TAB ═══ */}
         {tab === 'templates' && (
           <div style={{ background: '#fff', borderRadius: 14, padding: 20, margin: '0 auto', maxWidth: 800, boxShadow: '0 2px 12px rgba(0,0,0,0.08)' }}>
             <h3 style={{ margin: '0 0 16px', color: '#5c4a3a', fontSize: 18 }}>📝 WhatsApp 訊息模板</h3>
