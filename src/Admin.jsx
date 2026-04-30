@@ -108,7 +108,11 @@ export default function Admin() {
   const [viewMode, setViewMode] = useState('list');
   const [schedYear, setSchedYear] = useState(new Date().getFullYear());
   const [schedMonth, setSchedMonth] = useState(new Date().getMonth());
-  const [schedDate, setSchedDate] = useState(new Date().toISOString().split('T')[0]);
+const getLocalDate = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+};
+const [todayStr, setTodayStr] = useState(getLocalDate);
   const [monthAvail, setMonthAvail] = useState({});
   const [daySlots, setDaySlots] = useState({});
   const [dayLoading, setDayLoading] = useState(false);
@@ -192,17 +196,16 @@ export default function Admin() {
   }, []);
 
   useEffect(() => {
-    const checkDate = () => {
-      const now = new Date().toISOString().split('T')[0];
-      setTodayStr(prev => {
-        if (prev !== now) { showToast('📅 日期已跨日，自動刷新中...'); fetchBookings(); return now; }
-        return prev;
-      });
-    };
-    const id = setInterval(checkDate, 60000);
-    return () => clearInterval(id);
-  }, []);
-
+   const checkDate = () => {
+    const now = getLocalDate();  // ← 改呢度
+    setTodayStr(prev => {
+      if (prev !== now) { showToast('📅 日期已跨日，自動刷新中...'); fetchBookings(); return now; }
+      return prev;
+    });
+  };
+  const id = setInterval(checkDate, 60000);
+  return () => clearInterval(id);
+}, []);
   useEffect(() => {
     if (!auth || !autoRefresh) return;
     const id = setInterval(() => fetchBookings(), 30000);
@@ -634,7 +637,34 @@ export default function Admin() {
       showToast(`✅ 狀態已更新為「${statusText(s)}」`);
     } catch (e) { showToast('❌ 更新失敗: ' + e.message); }
   };
-
+// ★ 確認/完成時自動新增客戶
+      if ((s === 'confirmed' || s === 'completed') && selectedBooking.customer_phone) {
+        try {
+          const phone = selectedBooking.customer_phone;
+          const existing = await sbGet(`customers?phone=eq.${encodeURIComponent(phone)}`);
+          if (existing && existing.length > 0) {
+            // 更新現有客戶
+            const cust = existing[0];
+            await sbPatch(`customers?id=eq.${cust.id}`, {
+              name: selectedBooking.customer_name,
+              total_visits: (cust.total_visits || 0) + (s === 'completed' ? 1 : 0),
+              total_spent: (cust.total_spent || 0) + (s === 'completed' ? (selectedBooking.total_price || 0) : 0),
+              last_visit_date: selectedBooking.booking_date,
+            });
+          } else {
+            // 新增客戶
+            await sbPost('customers', [{
+              name: selectedBooking.customer_name,
+              phone: phone,
+              total_visits: s === 'completed' ? 1 : 0,
+              total_spent: s === 'completed' ? (selectedBooking.total_price || 0) : 0,
+              last_visit_date: selectedBooking.booking_date,
+              tags: [],
+            }]);
+          }
+          fetchCustomers();
+        } catch (custErr) { console.error('客戶建立失敗:', custErr); }
+      }
   const deleteBooking = async (id) => { if (!window.confirm('確定要刪除？')) return; const b = allBookings.find(x => x.id === id); try { await sbDel(`bookings?id=eq.${id}`); setAllBookings(prev => prev.filter(x => x.id !== id)); logChange(`🗑️ 已刪除 — ${b?.customer_name} ${b?.booking_date} ${b?.booking_time}`); showToast('✅ 已刪除'); } catch (e) { console.error(e); } };
 
   // ★ MODIFIED — modalUpdate 用 apiCall + 取消走 promptCancel
@@ -651,7 +681,40 @@ export default function Admin() {
       if (s === 'confirmed') { const ask = window.confirm(`📲 要唔要 WhatsApp 通知 ${selectedBooking.customer_name}？`); if (ask) { const msg = fillTemplate(s, updated); sendWhatsApp(selectedBooking.customer_phone, msg); } }
     } catch (e) { showToast('❌ 更新失敗'); }
   };
-
+const updateStatus = async (id, s) => {
+    if (s === 'cancelled') { promptCancel(allBookings.find(x => x.id === id)); return; }
+    const b = allBookings.find(x => x.id === id);
+    try {
+      await apiCall('update-booking-status', { bookingId: id, status: s });
+      setAllBookings(prev => prev.map(x => x.id === id ? { ...x, status: s } : x));
+      logChange(`${statusText(s)} — ${b?.customer_name} ${b?.booking_date} ${b?.booking_time}`);
+      showToast(`✅ 狀態已更新為「${statusText(s)}」`);
+      
+      // ★ 加喺呢度
+      if ((s === 'confirmed' || s === 'completed') && b?.customer_phone) {
+        try {
+          const existing = await sbGet(`customers?phone=eq.${encodeURIComponent(b.customer_phone)}`);
+          if (existing && existing.length > 0) {
+            const cust = existing[0];
+            await sbPatch(`customers?id=eq.${cust.id}`, {
+              name: b.customer_name,
+              total_visits: (cust.total_visits || 0) + (s === 'completed' ? 1 : 0),
+              total_spent: (cust.total_spent || 0) + (s === 'completed' ? (b.total_price || 0) : 0),
+              last_visit_date: b.booking_date,
+            });
+          } else {
+            await sbPost('customers', [{
+              name: b.customer_name, phone: b.customer_phone,
+              total_visits: s === 'completed' ? 1 : 0,
+              total_spent: s === 'completed' ? (b.total_price || 0) : 0,
+              last_visit_date: b.booking_date, tags: [],
+            }]);
+          }
+          fetchCustomers();
+        } catch (_) {}
+      }
+    } catch (e) { showToast('❌ 更新失敗: ' + e.message); }
+  };
   const modalDelete = async () => { if (!selectedBooking || !window.confirm('確定要刪除？')) return; try { logChange(`🗑️ 已刪除 — ${selectedBooking.customer_name} ${selectedBooking.booking_date} ${selectedBooking.booking_time}`); await sbDel(`bookings?id=eq.${selectedBooking.id}`); setAllBookings(prev => prev.filter(b => b.id !== selectedBooking.id)); closeBooking(); showToast('✅ 已刪除'); } catch (e) { console.error(e); } };
   const confirmAllPending = async () => { const pend = allBookings.filter(b => b.status === 'pending' && b.booking_date >= todayStr); if (!pend.length) return showToast('❌ 沒有待確認嘅預約'); if (!window.confirm(`確定確認全部 ${pend.length} 個待確認預約？`)) return; try { const ids = pend.map(b => b.id); await sbPatch(`bookings?id=in.(${ids.join(',')})`, { status: 'confirmed' }); setAllBookings(prev => prev.map(b => ids.includes(b.id) ? { ...b, status: 'confirmed' } : b)); logChange(`✅ 批量確認 ${pend.length} 個預約`); showToast(`✅ 已確認 ${pend.length} 個預約`); } catch (e) { showToast('❌ 確認失敗'); } };
   const confirmDayPending = async () => { const pend = dayBks.filter(b => b.status === 'pending'); if (!pend.length) return; if (!window.confirm(`確定確認 ${schedDate} 共 ${pend.length} 個待確認預約？`)) return; try { const ids = pend.map(b => b.id); await sbPatch(`bookings?id=in.(${ids.join(',')})`, { status: 'confirmed' }); setAllBookings(prev => prev.map(b => ids.includes(b.id) ? { ...b, status: 'confirmed' } : b)); logChange(`✅ 批量確認 ${schedDate} 共 ${pend.length} 個預約`); showToast(`✅ 已確認 ${pend.length} 個預約`); } catch (e) { showToast('❌ 確認失敗'); } };
@@ -867,6 +930,7 @@ export default function Admin() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div><label style={{ fontSize: 13, color: '#5c4a3a', fontWeight: 600, marginBottom: 4, display: 'block' }}>名稱 *</label><input value={editAddonForm.name || ''} onChange={e => setEditAddonForm(p => ({ ...p, name: e.target.value }))} style={{ width: '100%', padding: '10px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, boxSizing: 'border-box', fontFamily: font }} /></div>
               <div><label style={{ fontSize: 13, color: '#5c4a3a', fontWeight: 600, marginBottom: 4, display: 'block' }}>價格 ($)</label><input type="number" value={editAddonForm.price || 0} onChange={e => setEditAddonForm(p => ({ ...p, price: +e.target.value }))} style={{ width: '100%', padding: '10px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, boxSizing: 'border-box' }} /></div>
+              <div><label style={{ fontSize: 13, color: '#5c4a3a', fontWeight: 600, marginBottom: 4, display: 'block' }}>時間長度（分鐘）</label><input type="number" value={editAddonForm.duration_minutes || 0} onChange={e => setEditAddonForm(p => ({ ...p, duration_minutes: +e.target.value }))} placeholder="例：15" style={{ width: '100%', padding: '10px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, boxSizing: 'border-box' }} /></div>
               <div><label style={{ fontSize: 13, color: '#5c4a3a', fontWeight: 600, marginBottom: 4, display: 'block' }}>描述</label><input value={editAddonForm.description || ''} onChange={e => setEditAddonForm(p => ({ ...p, description: e.target.value }))} style={{ width: '100%', padding: '10px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, boxSizing: 'border-box', fontFamily: font }} /></div>
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}><input type="checkbox" checked={editAddonForm.is_active !== false} onChange={e => setEditAddonForm(p => ({ ...p, is_active: e.target.checked }))} /><span style={{ fontSize: 13 }}>啟用中</span></label>
             </div>
