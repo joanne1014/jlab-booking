@@ -123,7 +123,6 @@ export default async function handler(req, res) {
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) return res.status(401).json({ error: error.message });
 
-      // admin_users 表可能唔存在，用 try-catch 保護
       let role = 'staff';
       let staffId = null;
       try {
@@ -133,7 +132,7 @@ export default async function handler(req, res) {
           role = adminUser.role || 'staff';
           staffId = adminUser.staff_id || null;
         }
-      } catch (_) { /* table 唔存在都唔會 crash */ }
+      } catch (_) {}
 
       return res.status(200).json({
         token: data.session.access_token,
@@ -223,6 +222,48 @@ export default async function handler(req, res) {
       if (cancel_reason) updateData.cancel_reason = cancel_reason;
       const { error } = await supabase.from('bookings').update(updateData).eq('id', bookingId);
       if (error) return res.status(500).json({ error: error.message });
+
+      // ★ 確認/完成時自動建立或更新客戶
+      if (['confirmed', 'completed'].includes(newStatus)) {
+        try {
+          const { data: booking } = await supabase
+            .from('bookings')
+            .select('customer_name, customer_phone, booking_date, total_price')
+            .eq('id', bookingId)
+            .single();
+
+          if (booking && booking.customer_phone) {
+            const { data: existCust } = await supabase
+              .from('customers')
+              .select('id, total_visits, total_spent')
+              .eq('phone', booking.customer_phone)
+              .limit(1);
+
+            if (existCust && existCust.length > 0) {
+              await supabase.from('customers').update({
+                name: booking.customer_name,
+                total_visits: (existCust[0].total_visits || 0) + 1,
+                total_spent: (existCust[0].total_spent || 0) + (booking.total_price || 0),
+                last_visit_date: booking.booking_date,
+              }).eq('id', existCust[0].id);
+            } else {
+              await supabase.from('customers').insert([{
+                name: booking.customer_name,
+                phone: booking.customer_phone,
+                total_visits: 1,
+                total_spent: booking.total_price || 0,
+                last_visit_date: booking.booking_date,
+                tags: [],
+                notes: '',
+                is_blacklisted: false,
+              }]);
+            }
+          }
+        } catch (e) {
+          console.error('Auto-create customer error:', e.message);
+        }
+      }
+
       await supabase.from('audit_logs').insert([{
         action: 'booking_' + newStatus,
         target_type: 'booking',
@@ -346,20 +387,94 @@ export default async function handler(req, res) {
     }
 
     if (action === 'refresh-customer-stats') {
-      const { data: bookings } = await supabase
+      // 1. 攞所有已確認/已完成嘅預約
+      const { data: bookings, error: bErr } = await supabase
         .from('bookings')
-        .select('customer_phone')
+        .select('*')
         .in('status', ['confirmed', 'completed']);
-      if (bookings) {
-        const counts = {};
-        bookings.forEach(b => {
-          if (b.customer_phone) counts[b.customer_phone] = (counts[b.customer_phone] || 0) + 1;
-        });
-        for (const [phone, count] of Object.entries(counts)) {
-          await supabase.from('customers').update({ total_visits: count }).eq('phone', phone);
+
+      if (bErr) return res.status(500).json({ error: bErr.message });
+
+      // 2. 按電話號碼分組統計
+      const phoneMap = {};
+      for (const b of (bookings || [])) {
+        const phone = b.customer_phone;
+        if (!phone) continue;
+
+        if (!phoneMap[phone]) {
+          phoneMap[phone] = {
+            name: b.customer_name || '未知',
+            phone,
+            total_visits: 0,
+            total_spent: 0,
+            last_visit_date: null,
+          };
+        }
+
+        // 計算次數同金額
+        phoneMap[phone].total_visits++;
+        phoneMap[phone].total_spent += (b.total_price || 0);
+
+        // 記錄最近一次日期
+        if (b.booking_date) {
+          if (!phoneMap[phone].last_visit_date || b.booking_date > phoneMap[phone].last_visit_date) {
+            phoneMap[phone].last_visit_date = b.booking_date;
+          }
+        }
+
+        // 用最新嘅名
+        if (b.customer_name) {
+          phoneMap[phone].name = b.customer_name;
         }
       }
-      return res.status(200).json({ success: true });
+
+      // 3. Upsert：有就 update，冇就 insert
+      let created = 0;
+      let updated = 0;
+
+      for (const phone of Object.keys(phoneMap)) {
+        const cust = phoneMap[phone];
+
+        const { data: existing } = await supabase
+          .from('customers')
+          .select('id')
+          .eq('phone', phone)
+          .limit(1);
+
+        if (existing && existing.length > 0) {
+          await supabase
+            .from('customers')
+            .update({
+              name: cust.name,
+              total_visits: cust.total_visits,
+              total_spent: cust.total_spent,
+              last_visit_date: cust.last_visit_date,
+            })
+            .eq('id', existing[0].id);
+          updated++;
+        } else {
+          await supabase
+            .from('customers')
+            .insert([{
+              name: cust.name,
+              phone: cust.phone,
+              total_visits: cust.total_visits,
+              total_spent: cust.total_spent,
+              last_visit_date: cust.last_visit_date,
+              tags: [],
+              notes: '',
+              is_blacklisted: false,
+            }]);
+          created++;
+        }
+      }
+
+      return res.status(200).json({
+        success: true,
+        total: Object.keys(phoneMap).length,
+        created,
+        updated,
+      });
     }
 
     /* ══════════════════════════════════════
