@@ -9,12 +9,10 @@ export default function BookingPage() {
   const [services, setServices] = useState([])
   const [staff, setStaff] = useState([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
   
-  // 預約資料
   const [booking, setBooking] = useState({
     service: null,
-    variant: null,
-    addons: [],
     staffMember: null,
     date: '',
     time: '',
@@ -29,20 +27,31 @@ export default function BookingPage() {
 
   async function loadData() {
     try {
+      const headers = {
+        apikey: SUPABASE_ANON_KEY,
+        Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+        'Content-Type': 'application/json'
+      }
+
       const [servRes, staffRes] = await Promise.all([
-        fetch(`${SUPABASE_URL}/rest/v1/services?is_active=eq.true&order=sort_order`, {
-          headers: { apikey: SUPABASE_ANON_KEY }
-        }),
-        fetch(`${SUPABASE_URL}/rest/v1/staff?is_active=eq.true&order=sort_order`, {
-          headers: { apikey: SUPABASE_ANON_KEY }
-        }),
+        fetch(`${SUPABASE_URL}/rest/v1/services?is_active=eq.true&order=sort_order`, { headers }),
+        fetch(`${SUPABASE_URL}/rest/v1/staff?is_active=eq.true&order=sort_order`, { headers }),
       ])
+
       const servData = await servRes.json()
       const staffData = await staffRes.json()
-      setServices(servData || [])
-      setStaff(staffData || [])
+
+      // 確保一定係 array，唔會 crash
+      setServices(Array.isArray(servData) ? servData : [])
+      setStaff(Array.isArray(staffData) ? staffData : [])
+
+      if (!servRes.ok || !staffRes.ok) {
+        console.warn('Supabase response:', servData, staffData)
+        setError('暫時未能載入服務資料，請稍後再試')
+      }
     } catch (e) {
       console.error('Load error:', e)
+      setError('網絡錯誤，請檢查連線')
     }
     setLoading(false)
   }
@@ -69,10 +78,17 @@ export default function BookingPage() {
       </div>
       <p style={styles.stepLabel}>步驟 {step} / {totalSteps}</p>
 
+      {/* Error Message */}
+      {error && (
+        <div style={styles.errorMsg}>
+          ⚠️ {error}
+        </div>
+      )}
+
       {/* Step Content */}
       <main style={styles.main}>
         {step === 1 && (
-          <div style={styles.stepContent}>
+          <div>
             <h2 style={styles.stepTitle}>選擇服務</h2>
             <div style={styles.serviceList}>
               {services.map(s => (
@@ -92,14 +108,14 @@ export default function BookingPage() {
                 </div>
               ))}
               {services.length === 0 && (
-                <p style={{color:'#999', textAlign:'center'}}>暫無可用服務</p>
+                <p style={{color:'#999', textAlign:'center'}}>暫無可用服務，請稍後再試</p>
               )}
             </div>
           </div>
         )}
 
         {step === 2 && (
-          <div style={styles.stepContent}>
+          <div>
             <h2 style={styles.stepTitle}>選擇美療師</h2>
             <div style={styles.serviceList}>
               {staff.map(s => (
@@ -129,7 +145,7 @@ export default function BookingPage() {
         )}
 
         {step === 3 && (
-          <div style={styles.stepContent}>
+          <div>
             <h2 style={styles.stepTitle}>選擇日期同時間</h2>
             <div style={styles.formGroup}>
               <label style={styles.label}>日期</label>
@@ -160,7 +176,7 @@ export default function BookingPage() {
         )}
 
         {step === 4 && (
-          <div style={styles.stepContent}>
+          <div>
             <h2 style={styles.stepTitle}>聯絡資料</h2>
             <div style={styles.formGroup}>
               <label style={styles.label}>姓名 *</label>
@@ -195,7 +211,7 @@ export default function BookingPage() {
         )}
 
         {step === 5 && (
-          <div style={styles.stepContent}>
+          <div>
             <h2 style={styles.stepTitle}>確認預約</h2>
             <div style={styles.summaryCard}>
               <div style={styles.summaryRow}>
@@ -252,20 +268,30 @@ export default function BookingPage() {
         {step < totalSteps ? (
           <button
             onClick={() => setStep(step + 1)}
-            style={styles.btnNext}
             disabled={
               (step === 1 && !booking.service) ||
               (step === 2 && !booking.staffMember) ||
               (step === 3 && (!booking.date || !booking.time))
             }
+            style={{
+              ...styles.btnNext,
+              opacity: (
+                (step === 1 && !booking.service) ||
+                (step === 2 && !booking.staffMember) ||
+                (step === 3 && (!booking.date || !booking.time))
+              ) ? 0.5 : 1
+            }}
           >
             下一步 →
           </button>
         ) : (
           <button
             onClick={() => alert('預約功能即將啟用！')}
-            style={styles.btnSubmit}
             disabled={!booking.name || !booking.phone}
+            style={{
+              ...styles.btnSubmit,
+              opacity: (!booking.name || !booking.phone) ? 0.5 : 1
+            }}
           >
             ✓ 確認預約
           </button>
@@ -290,18 +316,17 @@ const styles = {
   },
   headerTitle: { fontSize: '0.9rem', color: '#8B6F5C' },
   closeBtn: { color: '#8B6F5C', textDecoration: 'none', fontSize: '1.2rem' },
-  progressContainer: {
-    height: 4, background: '#E8D5C4', width: '100%',
-  },
+  progressContainer: { height: 4, background: '#E8D5C4', width: '100%' },
   progressBar: {
     height: '100%', background: 'linear-gradient(90deg, #8B6F5C, #C4956A)',
     transition: 'width 0.3s ease',
   },
-  stepLabel: {
-    textAlign: 'center', fontSize: '0.8rem', color: '#A08B7A', padding: '0.5rem',
+  stepLabel: { textAlign: 'center', fontSize: '0.8rem', color: '#A08B7A', padding: '0.5rem' },
+  errorMsg: {
+    background: '#FFF3CD', color: '#856404', padding: '0.75rem 1.5rem',
+    textAlign: 'center', fontSize: '0.85rem',
   },
-  main: { flex: 1, padding: '1rem 1.5rem', maxWidth: 500, margin: '0 auto', width: '100%' },
-  stepContent: {},
+  main: { flex: 1, padding: '1rem 1.5rem', maxWidth: 500, margin: '0 auto', width: '100%', boxSizing: 'border-box' },
   stepTitle: {
     fontFamily: "'Cormorant Garamond', serif",
     fontSize: '1.5rem', color: '#5C3D2E', marginBottom: '1.5rem', textAlign: 'center',
@@ -313,9 +338,7 @@ const styles = {
     boxShadow: '0 2px 10px rgba(139,111,92,0.06)',
     cursor: 'pointer', transition: 'all 0.2s',
   },
-  serviceCardActive: {
-    borderColor: '#8B6F5C', background: '#FAF5F0',
-  },
+  serviceCardActive: { borderColor: '#8B6F5C', background: '#FAF5F0' },
   serviceName: { fontWeight: 600, color: '#5C3D2E', marginBottom: 4 },
   serviceInfo: {
     display: 'flex', justifyContent: 'space-between',
@@ -325,9 +348,9 @@ const styles = {
   formGroup: { marginBottom: '1.2rem' },
   label: { display: 'block', fontSize: '0.9rem', color: '#5C3D2E', marginBottom: 6, fontWeight: 500 },
   input: {
-    width: '100%', padding: '12px 14px', border: '1.5px solid #E8D5C4',
-    borderRadius: 8, fontSize: '1rem', background: '#FFF', color: '#4A3728',
-    outline: 'none',
+    width: '100%', boxSizing: 'border-box', padding: '12px 14px',
+    border: '1.5px solid #E8D5C4', borderRadius: 8, fontSize: '1rem',
+    background: '#FFF', color: '#4A3728', outline: 'none',
   },
   summaryCard: {
     background: '#FFF', borderRadius: 12, padding: '1.5rem',
@@ -341,12 +364,11 @@ const styles = {
   navButtons: {
     display: 'flex', justifyContent: 'space-between', gap: '1rem',
     padding: '1rem 1.5rem', borderTop: '1px solid #E8D5C4',
-    maxWidth: 500, margin: '0 auto', width: '100%',
+    maxWidth: 500, margin: '0 auto', width: '100%', boxSizing: 'border-box',
   },
   btnBack: {
     padding: '12px 24px', background: 'transparent', color: '#8B6F5C',
-    border: '1.5px solid #D4C4B0', borderRadius: 8, cursor: 'pointer',
-    fontSize: '0.95rem',
+    border: '1.5px solid #D4C4B0', borderRadius: 8, cursor: 'pointer', fontSize: '0.95rem',
   },
   btnNext: {
     padding: '12px 24px', background: '#8B6F5C', color: '#FFF',
