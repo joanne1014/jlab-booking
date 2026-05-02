@@ -180,15 +180,10 @@ export default function BookingPage(){
     <div style={{background:BG,minHeight:'100vh',fontFamily:ff,color:TX,maxWidth:480,margin:'0 auto',
       position:'relative',fontWeight:300}}>
       {/* Header */}
-{/* Header */}
       <header style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'14px 22px',
         position:'sticky',top:0,background:BG,zIndex:10,borderBottom:`1px solid ${DV}`}}>
         <div style={{fontFamily:fp,fontSize:'1.1rem',fontWeight:500,color:TM,letterSpacing:'0.04em',
           fontStyle:'italic'}}>J.LAB</div>
-        <button onClick={() => window.location.href = '/admin'}
-          style={{padding:'5px 16px',borderRadius:2,border:`1px solid ${CB}`,background:CD,
-            fontSize:'0.6rem',color:TL,cursor:'pointer',fontFamily:ff,fontWeight:300,letterSpacing:'0.06em'}}>
-          店主入口</button>
       </header>
 
       <div style={{padding:'0 16px 60px'}}>
@@ -574,10 +569,11 @@ export default function BookingPage(){
         </div>
       </div>
 
-      {/* Footer */}
+    {/* Footer */}
       <div style={{background:'#1a1814',padding:'28px 22px',textAlign:'center'}}>
-        <div style={{fontFamily:fp,fontSize:'0.9rem',fontWeight:500,color:P,letterSpacing:'0.06em',
-          fontStyle:'italic'}}>J.LAB</div>
+        <div onClick={() => window.location.href = '/admin'}
+          style={{fontFamily:fp,fontSize:'0.9rem',fontWeight:500,color:P,letterSpacing:'0.06em',
+            fontStyle:'italic',cursor:'default'}}>J.LAB</div>
         <div style={{fontFamily:fc,fontSize:'0.5rem',letterSpacing:'0.2em',color:'#665e52',
           marginTop:8,fontStyle:'italic'}}>LASH & BEAUTY STUDIO</div>
       </div>
