@@ -1,4 +1,4 @@
-import ThemeEditor from '../components/ThemeEditor';
+import ThemeEditor from './components/ThemeEditor';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 
 /* ═══ Module-level ═══ */
