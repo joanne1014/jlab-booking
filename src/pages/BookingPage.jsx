@@ -1,4 +1,4 @@
-// src/pages/BookingPage.jsx — 完整版（使用 buildTheme 動態主題系統）
+// src/pages/BookingPage.jsx — 完整版（buildTheme + 即時預覽）
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Check, ChevronUp, MessageCircle, Clock, User } from 'lucide-react';
@@ -18,33 +18,33 @@ const api = async (action, payload = {}) => {
 };
 
 // ═══ 動態載入 Google Font ═══
+const FONT_FAMILY_MAP = {
+  'notosan': 'Noto+Sans+TC:wght@300;400;500;600',
+  'notoser': 'Noto+Serif+TC:wght@300;400;500;600',
+  'shippori': 'Shippori+Mincho:wght@400;500;600',
+  'hina': 'Hina+Mincho',
+  'kaisei': 'Kaisei+Decol:wght@400;700',
+  'biz': 'BIZ+UDPMincho',
+  'lxgw': 'LXGW+WenKai+TC:wght@300;400;700',
+  'zcoolkl': 'ZCOOL+KuaiLe',
+  'nunito': 'Nunito:wght@300;400;500;600',
+  'mashan': 'Ma+Shan+Zheng',
+  'zhimang': 'Zhi+Mang+Xing',
+  'corm': 'Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300;1,400',
+  'play': 'Playfair+Display:ital,wght@0,400;0,500;0,600;1,400',
+  'lora': 'Lora:ital,wght@0,400;0,500;1,400',
+  'cinzel': 'Cinzel:wght@400;500;600',
+  'raleway': 'Raleway:wght@300;400;500;600',
+  'jose': 'Josefin+Sans:wght@300;400;500',
+  'mont': 'Montserrat:wght@300;400;500;600',
+  'dm': 'DM+Sans:wght@300;400;500',
+};
+
 function loadFont(fontObj) {
   if (!fontObj || fontObj.id === 'sys') return;
   const id = `gf-${fontObj.id}`;
   if (document.getElementById(id)) return;
-  // 建構 Google Fonts URL
-  const familyMap = {
-    'notosan': 'Noto+Sans+TC:wght@300;400;500;600',
-    'notoser': 'Noto+Serif+TC:wght@300;400;500;600',
-    'shippori': 'Shippori+Mincho:wght@400;500;600',
-    'hina': 'Hina+Mincho',
-    'kaisei': 'Kaisei+Decol:wght@400;700',
-    'biz': 'BIZ+UDPMincho',
-    'lxgw': 'LXGW+WenKai+TC:wght@300;400;700',
-    'zcoolkl': 'ZCOOL+KuaiLe',
-    'nunito': 'Nunito:wght@300;400;500;600',
-    'mashan': 'Ma+Shan+Zheng',
-    'zhimang': 'Zhi+Mang+Xing',
-    'corm': 'Cormorant+Garamond:ital,wght@0,300;0,400;0,500;1,300;1,400',
-    'play': 'Playfair+Display:ital,wght@0,400;0,500;0,600;1,400',
-    'lora': 'Lora:ital,wght@0,400;0,500;1,400',
-    'cinzel': 'Cinzel:wght@400;500;600',
-    'raleway': 'Raleway:wght@300;400;500;600',
-    'jose': 'Josefin+Sans:wght@300;400;500',
-    'mont': 'Montserrat:wght@300;400;500;600',
-    'dm': 'DM+Sans:wght@300;400;500',
-  };
-  const family = familyMap[fontObj.id];
+  const family = FONT_FAMILY_MAP[fontObj.id];
   if (!family) return;
   const l = document.createElement('link');
   l.id = id;
@@ -53,7 +53,22 @@ function loadFont(fontObj) {
   document.head.appendChild(l);
 }
 
+function loadCustomFont(url) {
+  if (!url) return;
+  const id = 'custom-font-link';
+  if (document.getElementById(id)) {
+    document.getElementById(id).href = url;
+    return;
+  }
+  const l = document.createElement('link');
+  l.id = id;
+  l.rel = 'stylesheet';
+  l.href = url;
+  document.head.appendChild(l);
+}
+
 export default function BookingPage() {
+  // ═══ State ═══
   const [services, setServices] = useState([]);
   const [addons, setAddons] = useState([]);
   const [staffList, setStaffList] = useState([]);
@@ -82,6 +97,10 @@ export default function BookingPage() {
 
   // ★ 主題設定
   const [themeSettings, setThemeSettings] = useState(null);
+  // ★ 預覽模式（由 postMessage 觸發）
+  const [previewMode, setPreviewMode] = useState(false);
+  const [previewServices, setPreviewServices] = useState(null);
+  const [previewAddons, setPreviewAddons] = useState(null);
 
   const r2 = useRef(null), r3 = useRef(null), r4 = useRef(null), r5 = useRef(null), r6 = useRef(null), rS = useRef(null);
   const refs = { 2: r2, 3: r3, 4: r4, 5: r5, 6: r6, 7: rS };
@@ -89,18 +108,54 @@ export default function BookingPage() {
   // ★ 用 buildTheme 建立完整主題
   const th = useMemo(() => buildTheme(themeSettings), [themeSettings]);
 
+  // ★ 監聽 postMessage（Admin iframe 即時預覽）
+  useEffect(() => {
+    const handler = (e) => {
+      if (!e.data || !e.data.type) return;
+      switch (e.data.type) {
+        case 'theme-preview':
+          setThemeSettings(e.data.settings);
+          setPreviewMode(true);
+          break;
+        case 'services-preview':
+          setPreviewServices(e.data.services);
+          setPreviewMode(true);
+          break;
+        case 'addons-preview':
+          setPreviewAddons(e.data.addons);
+          setPreviewMode(true);
+          break;
+        case 'preview-reset':
+          setPreviewMode(false);
+          setPreviewServices(null);
+          setPreviewAddons(null);
+          break;
+        default:
+          break;
+      }
+    };
+    window.addEventListener('message', handler);
+    return () => window.removeEventListener('message', handler);
+  }, []);
+
   // ★ 載入字體
   useEffect(() => {
     if (th.fnt) loadFont(th.fnt);
-    // 額外載入 display font（如果主字體唔係 serif 類）
+    // 額外載入 display / accent fonts
     const corm = FS.find(f => f.id === 'corm');
     const play = FS.find(f => f.id === 'play');
     if (corm) loadFont(corm);
     if (play) loadFont(play);
-    // 中文 fallback
     const notoSer = FS.find(f => f.id === 'notoser');
     if (notoSer) loadFont(notoSer);
   }, [th.fnt]);
+
+  // ★ 自訂字體 URL
+  useEffect(() => {
+    if (themeSettings?.custom_font_url) {
+      loadCustomFont(themeSettings.custom_font_url);
+    }
+  }, [themeSettings?.custom_font_url]);
 
   // ★ 載入資料 + 主題設定
   useEffect(() => {
@@ -121,8 +176,13 @@ export default function BookingPage() {
     })();
   }, []);
 
+  // ═══ 最終使用嘅資料（預覽 override 真實資料）═══
+  const displayServices = previewServices || services;
+  const displayAddons = previewAddons || addons;
+
   // ═══ Helper functions ═══
   const fetchDates = useCallback(async (staffId) => {
+    if (previewMode) return; // 預覽模式唔 fetch
     setDatesLoading(true);
     setAvailDates([]);
     setSelDate(null);
@@ -133,9 +193,10 @@ export default function BookingPage() {
       setAvailDates(r.dates || []);
     } catch (e) { console.error(e); }
     setDatesLoading(false);
-  }, []);
+  }, [previewMode]);
 
   const fetchSlots = useCallback(async (date, staffId) => {
+    if (previewMode) return;
     setSlotsLoading(true);
     setTimeSlots([]);
     setSelTime(null);
@@ -144,15 +205,16 @@ export default function BookingPage() {
       if (!r.blocked) setTimeSlots(r.slots || []);
     } catch (e) { console.error(e); }
     setSlotsLoading(false);
-  }, []);
+  }, [previewMode]);
 
-  const sv = services.find(s => s.id === sid);
+  // ═══ Computed ═══
+  const sv = displayServices.find(s => s.id === sid);
   const sp = useMemo(() => {
     if (!sv) return 0;
     if (sv.variants && sv.variants.length > 0) return sv.variants[vi[sid] || 0]?.price || sv.base_price || 0;
     return sv.base_price || 0;
   }, [sv, vi, sid]);
-  const selAddons = addons.filter(a => ao.includes(a.id));
+  const selAddons = displayAddons.filter(a => ao.includes(a.id));
   const ap = selAddons.reduce((s, a) => s + (a.price || 0), 0);
   const total = sp + ap;
   const canGo = sid !== null && selStaff && selDate && selTime && nm.trim() && ph.trim();
@@ -191,7 +253,7 @@ export default function BookingPage() {
   };
 
   const handleSubmit = async () => {
-    if (!canGo || submitLoading) return;
+    if (!canGo || submitLoading || previewMode) return;
     setSubmitLoading(true); setSubmitError('');
     try {
       await api('submit-booking', {
@@ -209,17 +271,30 @@ export default function BookingPage() {
   };
 
   // ═══ 主題衍生值 ═══
-  const ff = th.f;                           // 主字體
-  const fp = '"Playfair Display",serif';     // Display font
-  const fc = '"Cormorant Garamond",serif';   // Accent font
-  const radius = th.r;                       // 圓角值
-  const pad = th.padScale;                   // 密度倍率
-  const ls = th.lsMap;                       // 字距
+  const ff = themeSettings?.custom_font_family
+    ? `'${themeSettings.custom_font_family}', ${th.f}`
+    : th.f;
+  const fp = '"Playfair Display", serif';
+  const fc = '"Cormorant Garamond", serif';
+  const radius = th.r;
+  const pad = th.padScale;
+  const ls = th.lsMap;
 
-  // 按鈕樣式
+  // Logo
+  const logoUrl = themeSettings?.logo_url || '';
+  const logoShape = themeSettings?.logo_shape || 'circle';
+  const logoSize = themeSettings?.logo_size || 'md';
+  const logoSizeMap = { sm: 28, md: 38, lg: 50 };
+  const logoRadiusMap = { circle: '50%', square: '0', rounded: '20%', none: '0' };
+
+  // ═══ 按鈕樣式 ═══
   const btnPrimary = (enabled = true) => {
-    const base = { fontFamily: ff, fontSize: '0.82rem', fontWeight: 400, letterSpacing: ls, cursor: enabled ? 'pointer' : 'not-allowed', borderRadius: radius, transition: 'all 0.2s' };
-    if (!enabled) return { ...base, background: th.ter, border: `1px solid ${th.brd}`, color: th.t3 };
+    const base = {
+      fontFamily: ff, fontSize: '0.82rem', fontWeight: 400,
+      letterSpacing: ls, cursor: enabled ? 'pointer' : 'not-allowed',
+      borderRadius: radius, transition: 'all 0.2s',
+    };
+    if (!enabled) return { ...base, background: th.ter, border: `1px solid ${th.brd}`, color: th.t3, opacity: 0.6 };
     switch (th.btnStyle) {
       case 'outline': return { ...base, background: 'transparent', border: `2px solid ${th.pri}`, color: th.pri };
       case 'ghost': return { ...base, background: 'transparent', border: 'none', color: th.pri, textDecoration: 'underline' };
@@ -235,17 +310,17 @@ export default function BookingPage() {
     }
   };
 
-  // Divider
+  // ═══ Divider ═══
   const divider = () => {
     switch (th.dividerStyle) {
-      case 'dots': return { borderTop: `2px dotted ${th.brd}` };
-      case 'fade': return { height: 1, background: `linear-gradient(90deg, transparent, ${th.brd}, transparent)` };
-      case 'none': return { border: 'none', height: 0 };
-      default: return { borderTop: `1px solid ${th.brd2}` };
+      case 'dots': return { borderTop: `2px dotted ${th.brd}`, margin: '12px 0' };
+      case 'fade': return { height: 1, background: `linear-gradient(90deg, transparent, ${th.brd}, transparent)`, margin: '12px 0' };
+      case 'none': return { border: 'none', height: 0, margin: 0 };
+      default: return { borderTop: `1px solid ${th.brd2}`, margin: '12px 0' };
     }
   };
 
-  // Card style
+  // ═══ Card style ═══
   const crd = (vis = true) => ({
     background: th.card,
     borderRadius: radius,
@@ -260,28 +335,33 @@ export default function BookingPage() {
     transition: 'opacity 0.3s',
   });
 
-  // Input style
+  // ═══ Input style ═══
   const inputStyle = {
     width: '100%', padding: `${13 * pad}px ${16 * pad}px`, borderRadius: radius,
-    border: `1px solid ${th.brd}`, background: th.cardInner, fontSize: '0.76rem',
-    fontFamily: ff, fontWeight: 300, outline: 'none', boxSizing: 'border-box',
-    color: th.t, letterSpacing: ls,
+    border: `1px solid ${th.brd}`, background: th.cardInner || (th.dk ? 'rgba(255,255,255,0.03)' : '#fafaf8'),
+    fontSize: '0.76rem', fontFamily: ff, fontWeight: 300, outline: 'none',
+    boxSizing: 'border-box', color: th.t, letterSpacing: ls,
+    transition: 'border-color 0.2s',
   };
 
-  // Date item colors
+  // ═══ Date item colors ═══
   const getDC = s => {
     if (s === 'few') return { bg: th.sec + '20', bd: th.sec + '60', tx: th.t2 };
     if (s === 'full') return { bg: th.ter + '30', bd: th.brd, tx: th.t3 };
     return { bg: th.ter + '15', bd: th.brd, tx: th.t2 };
   };
 
-  // ═══ Background texture + image ═══
-  const bgTexStyle = th.bgTex !== 'none' ? texCss(th.bgTex, th.bgTexOp) : {};
+  // ═══ Background texture ═══
+  const bgTexStyle = th.bgTex && th.bgTex !== 'none' ? texCss(th.bgTex, th.bgTexOp) : {};
 
-  // ═══ Loading ═══
+  // ═══════════════════════════════════════════════════
+  // RENDER
+  // ═══════════════════════════════════════════════════
+
   if (loading) return (
-    <div style={{ background: th.bg, minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: ff, filter: th.colorFilter }}>
+    <div style={{ background: th.bg, minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: ff, filter: th.colorFilter || undefined }}>
       <div style={{ textAlign: 'center' }}>
+        {logoUrl && <img src={logoUrl} alt="" style={{ width: 50, height: 50, borderRadius: logoRadiusMap[logoShape], objectFit: 'cover', margin: '0 auto 12px' }} />}
         <div style={{ fontFamily: fp, fontSize: '1.3rem', color: th.t2, marginBottom: 16, fontStyle: 'italic' }}>{th.brandName}</div>
         <div style={{ color: th.t3, fontSize: '0.8rem' }}>載入中...</div>
       </div>
@@ -289,12 +369,19 @@ export default function BookingPage() {
   );
 
   return (
-    <div style={{ background: th.bg, minHeight: '100vh', fontFamily: ff, color: th.t, maxWidth: 480, margin: '0 auto', position: 'relative', fontWeight: 300, letterSpacing: ls, filter: th.colorFilter, ...bgTexStyle }}>
+    <div style={{ background: th.bg, minHeight: '100vh', fontFamily: ff, color: th.t, maxWidth: 480, margin: '0 auto', position: 'relative', fontWeight: 300, letterSpacing: ls, filter: th.colorFilter || undefined, ...bgTexStyle }}>
 
       {/* ═══ Background Image Layer ═══ */}
       {th.bgImg && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 0, pointerEvents: 'none' }}>
-          <img src={th.bgImg} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: th.bgImgOp, filter: th.bgImgBlur ? `blur(${th.bgImgBlur}px)` : undefined }} />
+          <img src={th.bgImg} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: th.bgImgOp || 0.3, filter: th.bgImgBlur ? `blur(${th.bgImgBlur}px)` : undefined }} />
+        </div>
+      )}
+
+      {/* ═══ Preview Mode Badge ═══ */}
+      {previewMode && (
+        <div style={{ position: 'fixed', top: 8, left: '50%', transform: 'translateX(-50%)', background: th.pri, color: '#fff', fontSize: '0.5rem', padding: '4px 14px', borderRadius: 20, zIndex: 999, fontWeight: 500, letterSpacing: '0.08em', opacity: 0.85 }}>
+          預覽模式 PREVIEW
         </div>
       )}
 
@@ -302,8 +389,28 @@ export default function BookingPage() {
       <div style={{ position: 'relative', zIndex: 1 }}>
 
         {/* ═══ Header ═══ */}
-        <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: `${14 * pad}px ${22 * pad}px`, position: 'sticky', top: 0, background: th.bg, zIndex: 10, borderBottom: `1px solid ${th.brd2}`, backdropFilter: th.bgImg ? 'blur(12px)' : undefined }}>
-          <div style={{ fontFamily: fp, fontSize: '1.1rem', fontWeight: 500, color: th.t2, letterSpacing: '0.04em', fontStyle: 'italic' }}>{th.brandName}</div>
+        <header style={{
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          padding: `${14 * pad}px ${22 * pad}px`,
+          position: 'sticky', top: 0,
+          background: th.bgImg ? (th.dk ? 'rgba(20,20,20,0.85)' : 'rgba(255,255,255,0.88)') : th.bg,
+          zIndex: 10, borderBottom: `1px solid ${th.brd2}`,
+          backdropFilter: th.bgImg ? 'blur(12px)' : undefined,
+          WebkitBackdropFilter: th.bgImg ? 'blur(12px)' : undefined,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            {logoUrl && (
+              <img src={logoUrl} alt="" style={{
+                width: logoSizeMap[logoSize],
+                height: logoSizeMap[logoSize],
+                borderRadius: logoRadiusMap[logoShape],
+                objectFit: 'cover',
+              }} />
+            )}
+            <div style={{ fontFamily: fp, fontSize: '1.1rem', fontWeight: 500, color: th.t2, letterSpacing: '0.04em', fontStyle: 'italic' }}>
+              {th.brandName}
+            </div>
+          </div>
         </header>
 
         <div style={{ padding: `0 16px ${60 * pad}px` }}>
@@ -312,17 +419,26 @@ export default function BookingPage() {
           <div style={{ textAlign: 'center', padding: `${36 * pad}px 0 ${28 * pad}px` }}>
             <div style={{ fontFamily: fc, fontSize: '0.58rem', letterSpacing: '0.3em', color: th.pri, fontWeight: 400 }}>BOOKING</div>
             <div style={{ fontSize: '1.3rem', fontWeight: 500, margin: '10px 0 6px', letterSpacing: '0.08em' }}>線上預約系統</div>
-            <div style={{ fontFamily: fc, fontSize: '0.56rem', letterSpacing: '0.22em', color: th.t3, fontStyle: 'italic' }}>ONLINE BOOKING SYSTEM</div>
+            {th.brandSubtitle && (
+              <div style={{ fontFamily: fc, fontSize: '0.56rem', letterSpacing: '0.22em', color: th.t3, fontStyle: 'italic' }}>{th.brandSubtitle}</div>
+            )}
           </div>
 
-          {/* ═══ Progress ═══ */}
+          {/* ═══ Progress Bar ═══ */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0, marginBottom: 28 * pad, padding: '0 6px' }}>
             {[1, 2, 3, 4, 5, 6].map((n, i) => {
               const active = step >= n;
               return (
                 <React.Fragment key={n}>
-                  <div style={{ width: 20, height: 20, borderRadius: '50%', background: active ? th.pri : 'transparent', border: `1.5px solid ${active ? th.pri : th.brd}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.44rem', fontFamily: fp, fontWeight: 500, color: active ? '#fff' : th.t3, transition: 'all 0.3s' }}>
-                    {active && step > n ? <Check size={9} strokeWidth={3} /> : n}
+                  <div style={{
+                    width: 22, height: 22, borderRadius: '50%',
+                    background: active ? th.pri : 'transparent',
+                    border: `1.5px solid ${active ? th.pri : th.brd}`,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: '0.44rem', fontFamily: fp, fontWeight: 500,
+                    color: active ? '#fff' : th.t3, transition: 'all 0.3s',
+                  }}>
+                    {active && step > n ? <Check size={10} strokeWidth={3} /> : n}
                   </div>
                   {i < 5 && <div style={{ flex: 1, height: 1, background: step > n ? th.sec : th.brd2, transition: 'all 0.3s' }} />}
                 </React.Fragment>
@@ -332,15 +448,29 @@ export default function BookingPage() {
 
           {/* ═══ Step 1: Service ═══ */}
           <div style={crd()}>
-            <SH n="1" z="選擇預約項目" e="SELECT SERVICE" th={th} fp={fp} fc={fc} />
-            {services.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '20px 0', color: th.t3, fontSize: '0.76rem' }}>暫無可預約服務</div>
-            ) : services.map(s => {
+            <SH n="1" z="選擇預約項目" e="SELECT SERVICE" th={th} fp={fp} fc={fc} ls={ls} />
+            {displayServices.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '24px 0', color: th.t3, fontSize: '0.76rem' }}>暫無可預約服務</div>
+            ) : displayServices.map(s => {
               const sel = sid === s.id;
               return (
-                <div key={s.id} onClick={() => pick(s.id)}
-                  style={{ border: `1px solid ${sel ? th.pri : th.brd}`, borderRadius: radius, padding: `${18 * pad}px ${16 * pad}px`, marginBottom: 12, cursor: 'pointer', position: 'relative', overflow: 'hidden', background: sel ? (th.dk ? 'rgba(255,255,255,0.04)' : th.ter + '30') : (th.dk ? 'rgba(255,255,255,0.02)' : '#fff'), transition: 'all 0.25s' }}>
-                  {s.category && <div style={{ position: 'absolute', top: 0, right: 0, background: th.pri, color: '#fff', fontSize: '0.42rem', padding: '3px 10px', letterSpacing: '0.08em', fontWeight: 400, borderRadius: `0 ${radius}px 0 ${radius}px` }}>{s.category}</div>}
+                <motion.div key={s.id} whileTap={{ scale: 0.98 }} onClick={() => pick(s.id)}
+                  style={{
+                    border: `1px solid ${sel ? th.pri : th.brd}`, borderRadius: radius,
+                    padding: `${18 * pad}px ${16 * pad}px`, marginBottom: 12,
+                    cursor: 'pointer', position: 'relative', overflow: 'hidden',
+                    background: sel ? (th.dk ? 'rgba(255,255,255,0.04)' : th.ter + '30') : (th.dk ? 'rgba(255,255,255,0.02)' : '#fff'),
+                    transition: 'all 0.25s',
+                    boxShadow: sel ? `0 0 0 1px ${th.pri}` : 'none',
+                  }}>
+                  {s.category && (
+                    <div style={{
+                      position: 'absolute', top: 0, right: 0,
+                      background: th.pri, color: '#fff', fontSize: '0.42rem',
+                      padding: '3px 10px', letterSpacing: '0.08em', fontWeight: 400,
+                      borderRadius: `0 ${radius}px 0 ${radius}px`,
+                    }}>{s.category}</div>
+                  )}
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, paddingRight: s.category ? 50 : 0 }}>
                     <div style={{ fontWeight: 500, fontSize: '0.8rem', lineHeight: 1.5, flex: 1 }}>{s.name}</div>
                     <div style={{ fontFamily: fp, fontWeight: 500, color: th.t2, fontSize: '0.88rem', flexShrink: 0 }}>
@@ -352,48 +482,73 @@ export default function BookingPage() {
                     <Clock size={11} color={th.t3} strokeWidth={1.5} />
                     <span style={{ fontSize: '0.56rem', color: th.t3, fontWeight: 300 }}>約 {s.duration_minutes || 60} 分鐘</span>
                   </div>
-                  {s.variants && s.variants.length > 0 && sel && (
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 14 }}>
-                      {s.variants.map((v, idx) => {
-                        const vs = (vi[s.id] || 0) === idx;
-                        return (
-                          <button key={v.id || idx} onClick={e => { e.stopPropagation(); setVi(p => ({ ...p, [s.id]: idx })); }}
-                            style={{ padding: '8px 18px', borderRadius: radius, fontSize: '0.62rem', fontFamily: ff, fontWeight: vs ? 500 : 300, letterSpacing: '0.04em', border: `1px solid ${vs ? th.pri : th.brd}`, background: vs ? th.pri : (th.dk ? 'rgba(255,255,255,0.03)' : '#fff'), color: vs ? '#fff' : th.t, cursor: 'pointer', transition: 'all 0.2s' }}>
-                            {v.label} ${v.price}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
+                  {/* Variants */}
+                  <AnimatePresence>
+                    {s.variants && s.variants.length > 0 && sel && (
+                      <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }}
+                        style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 14, overflow: 'hidden' }}>
+                        {s.variants.map((v, idx) => {
+                          const vs = (vi[s.id] || 0) === idx;
+                          return (
+                            <button key={v.id || idx} onClick={e => { e.stopPropagation(); setVi(p => ({ ...p, [s.id]: idx })); }}
+                              style={{
+                                padding: `${8 * pad}px ${18 * pad}px`, borderRadius: radius,
+                                fontSize: '0.62rem', fontFamily: ff, fontWeight: vs ? 500 : 300,
+                                letterSpacing: '0.04em',
+                                border: `1px solid ${vs ? th.pri : th.brd}`,
+                                background: vs ? th.pri : (th.dk ? 'rgba(255,255,255,0.03)' : '#fff'),
+                                color: vs ? '#fff' : th.t, cursor: 'pointer', transition: 'all 0.2s',
+                              }}>
+                              {v.label} ${v.price}
+                            </button>
+                          );
+                        })}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </motion.div>
               );
             })}
           </div>
 
           {/* ═══ Step 2: Add-ons ═══ */}
           <div ref={r2} style={crd(step >= 2)}>
-            <SH n="2" z="可選加購項目" e="OPTIONAL ADD-ONS" th={th} fp={fp} fc={fc} />
+            <SH n="2" z="可選加購項目" e="OPTIONAL ADD-ONS" th={th} fp={fp} fc={fc} ls={ls} />
             <div style={{ fontSize: '0.6rem', color: th.t3, marginBottom: 16, fontWeight: 300, lineHeight: 1.7 }}>可根據需要加選以下附加服務，非必選項目。</div>
-            {addons.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '10px 0', color: th.t3, fontSize: '0.68rem' }}>暫無附加項目</div>
-            ) : addons.map(a => {
+            {displayAddons.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '14px 0', color: th.t3, fontSize: '0.68rem' }}>暫無附加項目</div>
+            ) : displayAddons.map(a => {
               const on = ao.includes(a.id);
               return (
-                <div key={a.id} onClick={() => tao(a.id)}
-                  style={{ display: 'flex', alignItems: 'center', gap: 12, padding: `${14 * pad}px ${14 * pad}px`, border: `1px solid ${on ? th.sec : th.brd}`, borderRadius: radius, marginBottom: 10, cursor: 'pointer', background: on ? (th.dk ? 'rgba(255,255,255,0.04)' : th.ter + '30') : (th.dk ? 'rgba(255,255,255,0.02)' : '#fff'), transition: 'all 0.2s' }}>
-                  <div style={{ width: 20, height: 20, borderRadius: '50%', border: `1.5px solid ${on ? th.pri : th.brd}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, background: on ? th.pri : 'transparent', transition: 'all 0.2s' }}>
+                <motion.div key={a.id} whileTap={{ scale: 0.98 }} onClick={() => tao(a.id)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 12,
+                    padding: `${14 * pad}px ${14 * pad}px`,
+                    border: `1px solid ${on ? th.sec : th.brd}`, borderRadius: radius,
+                    marginBottom: 10, cursor: 'pointer',
+                    background: on ? (th.dk ? 'rgba(255,255,255,0.04)' : th.ter + '30') : (th.dk ? 'rgba(255,255,255,0.02)' : '#fff'),
+                    transition: 'all 0.2s',
+                  }}>
+                  <div style={{
+                    width: 20, height: 20, borderRadius: '50%',
+                    border: `1.5px solid ${on ? th.pri : th.brd}`,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+                    background: on ? th.pri : 'transparent', transition: 'all 0.2s',
+                  }}>
                     {on && <Check size={11} color="#fff" strokeWidth={2.5} />}
                   </div>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontSize: '0.72rem', fontWeight: on ? 500 : 300 }}>{a.name}</div>
-                    {a.description && <div style={{ fontSize: '0.58rem', color: th.t3, marginTop: 2 }}>{a.description}</div>}
+                    {a.description && <div style={{ fontSize: '0.58rem', color: th.t3, marginTop: 2, lineHeight: 1.5 }}>{a.description}</div>}
                   </div>
-                  <div style={{ fontFamily: fp, fontWeight: 500, color: th.t2, fontSize: '0.72rem' }}>+${a.price}</div>
-                </div>
+                  <div style={{ fontFamily: fp, fontWeight: 500, color: th.t2, fontSize: '0.72rem', flexShrink: 0 }}>+${a.price}</div>
+                </motion.div>
               );
             })}
             <div style={{ textAlign: 'right', marginTop: 8 }}>
-              <span style={{ fontSize: '0.56rem', color: th.t3, fontWeight: 300 }}>已選 {ao.length} 項 {ao.length > 0 && <span style={{ fontFamily: fp }}>+${ap}</span>}</span>
+              <span style={{ fontSize: '0.56rem', color: th.t3, fontWeight: 300 }}>
+                已選 {ao.length} 項 {ao.length > 0 && <span style={{ fontFamily: fp, color: th.t2 }}>+${ap}</span>}
+              </span>
             </div>
             {step === 2 && (
               <motion.button whileTap={{ scale: 0.97 }} onClick={goStep3}
@@ -405,11 +560,23 @@ export default function BookingPage() {
 
           {/* ═══ Step 3: Technician ═══ */}
           <div ref={r3} style={crd(step >= 3)}>
-            <SH n="3" z="選擇技師" e="SELECT TECHNICIAN" th={th} fp={fp} fc={fc} />
+            <SH n="3" z="選擇技師" e="SELECT TECHNICIAN" th={th} fp={fp} fc={fc} ls={ls} />
             {/* 不指定 */}
-            <div onClick={() => pickStaff('any', '不指定技師')}
-              style={{ display: 'flex', alignItems: 'center', gap: 12, padding: `${16 * pad}px ${14 * pad}px`, border: `1px solid ${selStaff === 'any' ? th.pri : th.brd}`, borderRadius: radius, marginBottom: 10, cursor: 'pointer', background: selStaff === 'any' ? (th.dk ? 'rgba(255,255,255,0.04)' : th.ter + '30') : (th.dk ? 'rgba(255,255,255,0.02)' : '#fff'), transition: 'all 0.2s' }}>
-              <div style={{ width: 36, height: 36, borderRadius: '50%', background: selStaff === 'any' ? th.pri : th.ter, display: 'flex', alignItems: 'center', justifyContent: 'center', border: `1.5px solid ${selStaff === 'any' ? th.pri : th.brd}` }}>
+            <motion.div whileTap={{ scale: 0.98 }} onClick={() => pickStaff('any', '不指定技師')}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 12,
+                padding: `${16 * pad}px ${14 * pad}px`,
+                border: `1px solid ${selStaff === 'any' ? th.pri : th.brd}`, borderRadius: radius,
+                marginBottom: 10, cursor: 'pointer',
+                background: selStaff === 'any' ? (th.dk ? 'rgba(255,255,255,0.04)' : th.ter + '30') : (th.dk ? 'rgba(255,255,255,0.02)' : '#fff'),
+                transition: 'all 0.2s',
+              }}>
+              <div style={{
+                width: 36, height: 36, borderRadius: '50%',
+                background: selStaff === 'any' ? th.pri : th.ter,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                border: `1.5px solid ${selStaff === 'any' ? th.pri : th.brd}`,
+              }}>
                 <User size={16} color={selStaff === 'any' ? '#fff' : th.t3} strokeWidth={1.5} />
               </div>
               <div style={{ flex: 1 }}>
@@ -417,58 +584,99 @@ export default function BookingPage() {
                 <div style={{ fontSize: '0.54rem', color: th.t3, marginTop: 2 }}>系統自動安排可用技師</div>
               </div>
               {selStaff === 'any' && <Check size={16} color={th.pri} strokeWidth={2} />}
-            </div>
+            </motion.div>
+            {/* Staff list */}
             {staffList.map(s => {
               const sel = selStaff === s.id;
               return (
-                <div key={s.id} onClick={() => pickStaff(s.id, s.name)}
-                  style={{ display: 'flex', alignItems: 'center', gap: 12, padding: `${16 * pad}px ${14 * pad}px`, border: `1px solid ${sel ? th.pri : th.brd}`, borderRadius: radius, marginBottom: 10, cursor: 'pointer', background: sel ? (th.dk ? 'rgba(255,255,255,0.04)' : th.ter + '30') : (th.dk ? 'rgba(255,255,255,0.02)' : '#fff'), transition: 'all 0.2s' }}>
-                  <div style={{ width: 36, height: 36, borderRadius: '50%', background: sel ? th.pri : th.ter, display: 'flex', alignItems: 'center', justifyContent: 'center', border: `1.5px solid ${sel ? th.pri : th.brd}`, fontFamily: fp, fontSize: '0.72rem', fontWeight: 500, color: sel ? '#fff' : th.t2 }}>
-                    {s.name?.charAt(0) || '?'}
+                <motion.div key={s.id} whileTap={{ scale: 0.98 }} onClick={() => pickStaff(s.id, s.name)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 12,
+                    padding: `${16 * pad}px ${14 * pad}px`,
+                    border: `1px solid ${sel ? th.pri : th.brd}`, borderRadius: radius,
+                    marginBottom: 10, cursor: 'pointer',
+                    background: sel ? (th.dk ? 'rgba(255,255,255,0.04)' : th.ter + '30') : (th.dk ? 'rgba(255,255,255,0.02)' : '#fff'),
+                    transition: 'all 0.2s',
+                  }}>
+                  <div style={{
+                    width: 36, height: 36, borderRadius: '50%',
+                    background: sel ? th.pri : th.ter,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    border: `1.5px solid ${sel ? th.pri : th.brd}`,
+                    fontFamily: fp, fontSize: '0.72rem', fontWeight: 500,
+                    color: sel ? '#fff' : th.t2,
+                  }}>
+                    {s.avatar_url
+                      ? <img src={s.avatar_url} alt="" style={{ width: '100%', height: '100%', borderRadius: '50%', objectFit: 'cover' }} />
+                      : (s.name?.charAt(0) || '?')
+                    }
                   </div>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontSize: '0.76rem', fontWeight: sel ? 500 : 300 }}>{s.name}</div>
+                    {s.title && <div style={{ fontSize: '0.52rem', color: th.t3, marginTop: 2 }}>{s.title}</div>}
                   </div>
                   {sel && <Check size={16} color={th.pri} strokeWidth={2} />}
-                </div>
+                </motion.div>
               );
             })}
-            {staffList.length === 0 && <div style={{ textAlign: 'center', padding: '10px 0', color: th.t3, fontSize: '0.68rem' }}>暫無可選技師</div>}
+            {staffList.length === 0 && (
+              <div style={{ textAlign: 'center', padding: '14px 0', color: th.t3, fontSize: '0.68rem' }}>暫無可選技師</div>
+            )}
           </div>
 
           {/* ═══ Step 4: Date ═══ */}
           <div ref={r4} style={crd(step >= 4)}>
-            <SH n="4" z="選擇日期" e="SELECT DATE" th={th} fp={fp} fc={fc} />
+            <SH n="4" z="選擇日期" e="SELECT DATE" th={th} fp={fp} fc={fc} ls={ls} />
             {selStaff && (
-              <div style={{ fontSize: '0.58rem', color: th.pri, marginBottom: 16, fontWeight: 400, background: th.dk ? 'rgba(255,255,255,0.04)' : th.ter + '30', padding: `${10 * pad}px ${14 * pad}px`, borderRadius: radius, border: `1px solid ${th.sec}` }}>
-                已選技師：{selStaffLabel}
+              <div style={{
+                fontSize: '0.58rem', color: th.pri, marginBottom: 16, fontWeight: 400,
+                background: th.dk ? 'rgba(255,255,255,0.04)' : th.ter + '30',
+                padding: `${10 * pad}px ${14 * pad}px`, borderRadius: radius,
+                border: `1px solid ${th.sec}40`,
+              }}>
+                ✓ 已選技師：{selStaffLabel}
               </div>
             )}
             {datesLoading ? (
-              <div style={{ textAlign: 'center', padding: '30px 0', color: th.t3, fontSize: '0.76rem' }}>載入可預約日期...</div>
+              <div style={{ textAlign: 'center', padding: '30px 0', color: th.t3, fontSize: '0.76rem' }}>
+                <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1.2, ease: 'linear' }}
+                  style={{ width: 20, height: 20, border: `2px solid ${th.brd}`, borderTopColor: th.pri, borderRadius: '50%', margin: '0 auto 12px' }} />
+                載入可預約日期...
+              </div>
             ) : availDates.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '20px 0', color: th.t3, fontSize: '0.72rem' }}>
+              <div style={{ textAlign: 'center', padding: '24px 0', color: th.t3, fontSize: '0.72rem' }}>
                 {selStaff ? '此技師暫無可預約日期' : '請先選擇技師'}
               </div>
             ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 7 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 7 }}>
                 {availDates.map(d => {
                   const sel = selDate === d.date;
                   const dO = new Date(d.date + 'T00:00:00');
                   const day = dO.getDate(), month = dO.getMonth() + 1, wd = dO.getDay();
                   const c = getDC(d.status);
+                  const isFull = d.status === 'full';
                   return (
-                    <motion.div key={d.date} whileTap={{ scale: 0.94 }} onClick={() => pickDate(d.date)}
-                      style={{ textAlign: 'center', padding: `${9 * pad}px 4px`, borderRadius: radius, cursor: 'pointer', background: sel ? th.pri : c.bg, border: `1px solid ${sel ? th.pri : c.bd}`, transition: 'all 0.2s' }}>
+                    <motion.div key={d.date} whileTap={!isFull ? { scale: 0.94 } : {}}
+                      onClick={() => !isFull && pickDate(d.date)}
+                      style={{
+                        textAlign: 'center', padding: `${9 * pad}px 4px`, borderRadius: radius,
+                        cursor: isFull ? 'not-allowed' : 'pointer',
+                        background: sel ? th.pri : c.bg,
+                        border: `1px solid ${sel ? th.pri : c.bd}`,
+                        transition: 'all 0.2s',
+                        opacity: isFull ? 0.4 : 1,
+                      }}>
                       <div style={{ fontSize: '0.42rem', color: sel ? 'rgba(255,255,255,0.65)' : c.tx, letterSpacing: '0.03em' }}>{month}月</div>
                       <div style={{ fontFamily: fp, fontSize: '1.05rem', fontWeight: 500, color: sel ? '#fff' : th.t, lineHeight: 1.4 }}>{day}</div>
                       <div style={{ fontSize: '0.38rem', color: sel ? 'rgba(255,255,255,0.65)' : c.tx }}>週{WDN[wd]}</div>
-                      {d.status === 'few' && !sel && <div style={{ fontSize: '0.36rem', color: th.sec, marginTop: 2 }}>僅剩</div>}
+                      {d.status === 'few' && !sel && <div style={{ fontSize: '0.36rem', color: th.sec, marginTop: 2, fontWeight: 500 }}>僅剩</div>}
+                      {isFull && <div style={{ fontSize: '0.36rem', color: th.t3, marginTop: 2 }}>已滿</div>}
                     </motion.div>
                   );
                 })}
               </div>
             )}
+            {/* Legend */}
             <div style={{ display: 'flex', gap: 14, marginTop: 14, justifyContent: 'center', flexWrap: 'wrap' }}>
               {[['充裕', th.ter + '15', th.brd], ['僅剩少量', th.sec + '20', th.sec + '60']].map(([l, bg, bd]) => (
                 <span key={l} style={{ fontSize: '0.42rem', color: th.t3, display: 'flex', alignItems: 'center', gap: 4 }}>
@@ -481,33 +689,55 @@ export default function BookingPage() {
 
           {/* ═══ Step 5: Time ═══ */}
           <div ref={r5} style={crd(step >= 5)}>
-            <SH n="5" z="選擇時段" e="SELECT TIME" th={th} fp={fp} fc={fc} />
+            <SH n="5" z="選擇時段" e="SELECT TIME" th={th} fp={fp} fc={fc} ls={ls} />
             {selDate && (
-              <div style={{ fontSize: '0.58rem', color: th.pri, marginBottom: 16, fontWeight: 400, background: th.dk ? 'rgba(255,255,255,0.04)' : th.ter + '30', padding: `${10 * pad}px ${14 * pad}px`, borderRadius: radius, border: `1px solid ${th.sec}` }}>
-                已選日期：<span style={{ fontFamily: fp }}>{selDate}</span>（週{WDN[dateWd]}）
+              <div style={{
+                fontSize: '0.58rem', color: th.pri, marginBottom: 16, fontWeight: 400,
+                background: th.dk ? 'rgba(255,255,255,0.04)' : th.ter + '30',
+                padding: `${10 * pad}px ${14 * pad}px`, borderRadius: radius,
+                border: `1px solid ${th.sec}40`,
+              }}>
+                ✓ 已選日期：<span style={{ fontFamily: fp }}>{selDate}</span>（週{WDN[dateWd]}）
               </div>
             )}
             {slotsLoading ? (
-              <div style={{ textAlign: 'center', padding: '30px 0', color: th.t3, fontSize: '0.76rem' }}>載入可用時段...</div>
+              <div style={{ textAlign: 'center', padding: '30px 0', color: th.t3, fontSize: '0.76rem' }}>
+                <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1.2, ease: 'linear' }}
+                  style={{ width: 20, height: 20, border: `2px solid ${th.brd}`, borderTopColor: th.pri, borderRadius: '50%', margin: '0 auto 12px' }} />
+                載入可用時段...
+              </div>
             ) : timeSlots.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '20px 0', color: th.t3, fontSize: '0.72rem' }}>
+              <div style={{ textAlign: 'center', padding: '24px 0', color: th.t3, fontSize: '0.72rem' }}>
                 {selDate ? '此日期暫無可用時段' : '請先選擇日期'}
               </div>
             ) : (
               timeSlots.map(ss => (
                 <div key={ss.staffId} style={{ marginBottom: 20 }}>
                   {(selStaff === 'any' || timeSlots.length > 1) && (
-                    <div style={{ fontSize: '0.62rem', color: th.t2, fontWeight: 500, marginBottom: 10, padding: `${6 * pad}px ${10 * pad}px`, background: th.cardInner, borderRadius: radius, border: `1px solid ${th.brd2}` }}>
+                    <div style={{
+                      fontSize: '0.62rem', color: th.t2, fontWeight: 500, marginBottom: 10,
+                      padding: `${6 * pad}px ${10 * pad}px`,
+                      background: th.cardInner || (th.dk ? 'rgba(255,255,255,0.03)' : '#fafaf8'),
+                      borderRadius: radius, border: `1px solid ${th.brd2}`,
+                    }}>
                       👤 {ss.staffName}
                     </div>
                   )}
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 7 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 7 }}>
                     {ss.slots.map(t => {
                       const selected = selTime === t && bookStaffId === ss.staffId;
                       return (
                         <motion.div key={`${ss.staffId}-${t}`} whileTap={{ scale: 0.96 }}
                           onClick={() => pickTime(t, ss.staffId, ss.staffName)}
-                          style={{ textAlign: 'center', padding: `${13 * pad}px 6px`, borderRadius: radius, fontFamily: fc, fontSize: '0.88rem', letterSpacing: '0.06em', fontWeight: selected ? 500 : 400, border: `1px solid ${selected ? th.pri : th.brd}`, cursor: 'pointer', background: selected ? th.pri : (th.dk ? 'rgba(255,255,255,0.02)' : '#fff'), color: selected ? '#fff' : th.t, transition: 'all 0.2s' }}>
+                          style={{
+                            textAlign: 'center', padding: `${13 * pad}px 6px`,
+                            borderRadius: radius, fontFamily: fc, fontSize: '0.88rem',
+                            letterSpacing: '0.06em', fontWeight: selected ? 500 : 400,
+                            border: `1px solid ${selected ? th.pri : th.brd}`,
+                            cursor: 'pointer',
+                            background: selected ? th.pri : (th.dk ? 'rgba(255,255,255,0.02)' : '#fff'),
+                            color: selected ? '#fff' : th.t, transition: 'all 0.2s',
+                          }}>
                           {t}
                         </motion.div>
                       );
@@ -520,19 +750,26 @@ export default function BookingPage() {
 
           {/* ═══ Step 6: Contact ═══ */}
           <div ref={r6} style={crd(step >= 6)}>
-            <SH n="6" z="聯絡資料" e="CONTACT INFORMATION" th={th} fp={fp} fc={fc} />
+            <SH n="6" z="聯絡資料" e="CONTACT INFORMATION" th={th} fp={fp} fc={fc} ls={ls} />
             <div style={{ marginBottom: 18 }}>
-              <div style={{ fontSize: '0.6rem', color: th.t3, marginBottom: 8, letterSpacing: '0.04em', fontWeight: 300 }}>您的姓名 <span style={{ color: th.pri }}>*</span></div>
-              <input value={nm} onChange={e => setNm(e.target.value)} placeholder="e.g. Miss Chan" style={inputStyle} />
+              <div style={{ fontSize: '0.6rem', color: th.t3, marginBottom: 8, letterSpacing: '0.04em', fontWeight: 300 }}>
+                您的姓名 <span style={{ color: th.pri }}>*</span>
+              </div>
+              <input value={nm} onChange={e => setNm(e.target.value)} placeholder="e.g. Miss Chan"
+                style={inputStyle} onFocus={e => e.target.style.borderColor = th.pri} onBlur={e => e.target.style.borderColor = th.brd} />
             </div>
             <div style={{ marginBottom: 18 }}>
-              <div style={{ fontSize: '0.6rem', color: th.t3, marginBottom: 8, letterSpacing: '0.04em', fontWeight: 300 }}>WhatsApp 電話 <span style={{ color: th.pri }}>*</span></div>
-              <input value={ph} onChange={e => setPh(e.target.value)} placeholder="e.g. 6000 0000" type="tel" style={inputStyle} />
+              <div style={{ fontSize: '0.6rem', color: th.t3, marginBottom: 8, letterSpacing: '0.04em', fontWeight: 300 }}>
+                WhatsApp 電話 <span style={{ color: th.pri }}>*</span>
+              </div>
+              <input value={ph} onChange={e => setPh(e.target.value)} placeholder="e.g. 6000 0000" type="tel"
+                style={inputStyle} onFocus={e => e.target.style.borderColor = th.pri} onBlur={e => e.target.style.borderColor = th.brd} />
             </div>
             <div style={{ marginBottom: 4 }}>
               <div style={{ fontSize: '0.6rem', color: th.t3, marginBottom: 8, letterSpacing: '0.04em', fontWeight: 300 }}>備註（選填）</div>
               <textarea value={rk} onChange={e => setRk(e.target.value)} placeholder="如有特別需要，請在此處註明..." rows={3}
-                style={{ ...inputStyle, resize: 'vertical', lineHeight: 1.6 }} />
+                style={{ ...inputStyle, resize: 'vertical', lineHeight: 1.6 }}
+                onFocus={e => e.target.style.borderColor = th.pri} onBlur={e => e.target.style.borderColor = th.brd} />
             </div>
           </div>
 
@@ -542,7 +779,11 @@ export default function BookingPage() {
               <div style={{ fontFamily: fc, fontSize: '0.54rem', letterSpacing: '0.24em', color: th.pri, fontWeight: 400 }}>ORDER SUMMARY</div>
               <div style={{ fontSize: '1.05rem', fontWeight: 500, marginTop: 6, letterSpacing: '0.06em' }}>預約摘要</div>
             </div>
-            <div style={{ background: th.cardInner, borderRadius: radius, padding: `${18 * pad}px ${16 * pad}px`, border: `1px solid ${th.brd2}`, marginBottom: 18 }}>
+            <div style={{
+              background: th.cardInner || (th.dk ? 'rgba(255,255,255,0.03)' : '#fafaf8'),
+              borderRadius: radius, padding: `${18 * pad}px ${16 * pad}px`,
+              border: `1px solid ${th.brd2}`, marginBottom: 18,
+            }}>
               {/* Service */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
                 <div>
@@ -554,18 +795,22 @@ export default function BookingPage() {
               </div>
               {/* Addons */}
               {selAddons.length > 0 && (
-                <div style={{ ...divider(), paddingTop: 12, marginBottom: 12 }}>
-                  <div style={{ fontSize: '0.56rem', color: th.t3, fontWeight: 300, marginBottom: 8, paddingTop: 12 }}>加購項目</div>
-                  {selAddons.map(a => (
-                    <div key={a.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.68rem', marginBottom: 6, fontWeight: 300 }}>
-                      <span>{a.name}</span><span style={{ fontFamily: fp, fontWeight: 500 }}>+${a.price}</span>
-                    </div>
-                  ))}
-                </div>
+                <>
+                  <div style={divider()} />
+                  <div style={{ marginBottom: 12 }}>
+                    <div style={{ fontSize: '0.56rem', color: th.t3, fontWeight: 300, marginBottom: 8 }}>加購項目</div>
+                    {selAddons.map(a => (
+                      <div key={a.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.68rem', marginBottom: 6, fontWeight: 300 }}>
+                        <span>{a.name}</span><span style={{ fontFamily: fp, fontWeight: 500 }}>+${a.price}</span>
+                      </div>
+                    ))}
+                  </div>
+                </>
               )}
               {/* Technician + Date + Time */}
-              <div style={{ ...divider(), paddingTop: 12, marginBottom: 12 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.68rem', marginBottom: 8, paddingTop: 12 }}>
+              <div style={divider()} />
+              <div style={{ marginBottom: 12 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.68rem', marginBottom: 8 }}>
                   <span style={{ color: th.t3, fontWeight: 300 }}>技師</span>
                   <span style={{ fontSize: '0.66rem' }}>{bookStaffName || selStaffLabel || '待分配'}</span>
                 </div>
@@ -581,18 +826,21 @@ export default function BookingPage() {
                 </div>
               </div>
               {/* Contact */}
-              <div style={{ ...divider(), paddingTop: 12 }}>
-                <div style={{ fontSize: '0.56rem', color: th.t3, fontWeight: 300, marginBottom: 8, paddingTop: 12 }}>聯絡資料</div>
+              <div style={divider()} />
+              <div>
+                <div style={{ fontSize: '0.56rem', color: th.t3, fontWeight: 300, marginBottom: 8 }}>聯絡資料</div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.68rem', marginBottom: 6 }}>
                   <span style={{ color: th.t3, fontWeight: 300 }}>姓名</span><span style={{ fontWeight: 400 }}>{nm || '—'}</span>
                 </div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.68rem', marginBottom: 6 }}>
                   <span style={{ color: th.t3, fontWeight: 300 }}>電話</span><span style={{ fontWeight: 400 }}>{ph || '—'}</span>
                 </div>
-                {rk && <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.68rem' }}>
-                  <span style={{ color: th.t3, fontWeight: 300 }}>備註</span>
-                  <span style={{ fontWeight: 300, maxWidth: '60%', textAlign: 'right', fontSize: '0.64rem' }}>{rk}</span>
-                </div>}
+                {rk && (
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.68rem' }}>
+                    <span style={{ color: th.t3, fontWeight: 300 }}>備註</span>
+                    <span style={{ fontWeight: 300, maxWidth: '60%', textAlign: 'right', fontSize: '0.64rem', lineHeight: 1.5 }}>{rk}</span>
+                  </div>
+                )}
               </div>
             </div>
             {/* Total */}
@@ -605,62 +853,139 @@ export default function BookingPage() {
             </div>
           </div>
 
-          {/* Error */}
-          {submitError && <div style={{ padding: '12px 16px', background: th.dk ? 'rgba(200,60,60,0.15)' : '#fde8e8', border: `1px solid ${th.dk ? 'rgba(200,60,60,0.4)' : '#e8b4b4'}`, borderRadius: radius, marginBottom: 14, fontSize: '0.72rem', color: th.dk ? '#ff9090' : '#8a3030', textAlign: 'center' }}>❌ {submitError}</div>}
+          {/* ═══ Error ═══ */}
+          <AnimatePresence>
+            {submitError && (
+              <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+                style={{
+                  padding: '12px 16px',
+                  background: th.dk ? 'rgba(200,60,60,0.15)' : '#fde8e8',
+                  border: `1px solid ${th.dk ? 'rgba(200,60,60,0.4)' : '#e8b4b4'}`,
+                  borderRadius: radius, marginBottom: 14, fontSize: '0.72rem',
+                  color: th.dk ? '#ff9090' : '#8a3030', textAlign: 'center',
+                }}>
+                ❌ {submitError}
+              </motion.div>
+            )}
+          </AnimatePresence>
 
-          {!canGo && step >= 6 && <div style={{ textAlign: 'center', fontSize: '0.58rem', color: th.sec, marginBottom: 14, fontWeight: 300 }}>請確保已填寫所有必填項目（*）</div>}
+          {!canGo && step >= 6 && (
+            <div style={{ textAlign: 'center', fontSize: '0.58rem', color: th.sec, marginBottom: 14, fontWeight: 300 }}>
+              請確保已填寫所有必填項目（*）
+            </div>
+          )}
 
-          {/* Submit */}
-          <motion.button whileTap={canGo && !submitLoading ? { scale: 0.97 } : {}} onClick={handleSubmit} disabled={!canGo || submitLoading}
-            style={{ width: '100%', padding: `${20 * pad}px`, ...btnPrimary(canGo && !submitLoading), marginBottom: 10, lineHeight: 2 }}>
-            {submitLoading ? '提交中...' : '確認並發送預約'}<br />
-            <span style={{ fontFamily: fc, fontSize: '0.54rem', fontWeight: 300, letterSpacing: '0.2em', fontStyle: 'italic', opacity: 0.7 }}>CONFIRM & SEND BOOKING REQUEST</span>
+          {/* ═══ Submit Button ═══ */}
+          <motion.button whileTap={canGo && !submitLoading ? { scale: 0.97 } : {}}
+            onClick={handleSubmit} disabled={!canGo || submitLoading || previewMode}
+            style={{
+              width: '100%', padding: `${20 * pad}px`,
+              ...btnPrimary(canGo && !submitLoading && !previewMode),
+              marginBottom: 10, lineHeight: 2, display: 'block',
+            }}>
+            {submitLoading ? '提交中...' : previewMode ? '預覽模式（不可提交）' : '確認並發送預約'}<br />
+            <span style={{ fontFamily: fc, fontSize: '0.54rem', fontWeight: 300, letterSpacing: '0.2em', fontStyle: 'italic', opacity: 0.7 }}>
+              CONFIRM & SEND BOOKING REQUEST
+            </span>
           </motion.button>
 
-          <div style={{ textAlign: 'center', fontSize: '0.48rem', color: th.t3, lineHeight: 1.8, marginTop: 8, fontWeight: 300 }}>提交後我們將透過 WhatsApp 與您確認預約</div>
+          <div style={{ textAlign: 'center', fontSize: '0.48rem', color: th.t3, lineHeight: 1.8, marginTop: 8, fontWeight: 300 }}>
+            提交後我們將透過 WhatsApp 與您確認預約
+          </div>
         </div>
 
         {/* ═══ Footer ═══ */}
-        <div style={{ background: th.dk ? 'rgba(0,0,0,0.3)' : '#1a1814', padding: '28px 22px', textAlign: 'center' }}>
-          <div onClick={() => window.location.href = '/admin'}
-            style={{ fontFamily: fp, fontSize: '0.9rem', fontWeight: 500, color: th.pri, letterSpacing: '0.06em', fontStyle: 'italic', cursor: 'default' }}>{th.brandName}</div>
-          <div style={{ fontFamily: fc, fontSize: '0.5rem', letterSpacing: '0.2em', color: th.dk ? 'rgba(255,255,255,0.25)' : '#665e52', marginTop: 8, fontStyle: 'italic' }}>{th.brandSubtitle}</div>
+        <div style={{
+          background: th.dk ? 'rgba(0,0,0,0.3)' : '#1a1814',
+          padding: `${28 * pad}px ${22 * pad}px`, textAlign: 'center',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, marginBottom: 6 }}>
+            {logoUrl && (
+              <img src={logoUrl} alt="" style={{
+                width: 24, height: 24,
+                borderRadius: logoRadiusMap[logoShape],
+                objectFit: 'cover', opacity: 0.8,
+              }} />
+            )}
+            <div onClick={() => window.location.href = '/admin'}
+              style={{ fontFamily: fp, fontSize: '0.9rem', fontWeight: 500, color: th.pri, letterSpacing: '0.06em', fontStyle: 'italic', cursor: 'default' }}>
+              {th.brandName}
+            </div>
+          </div>
+          <div style={{ fontFamily: fc, fontSize: '0.5rem', letterSpacing: '0.2em', color: th.dk ? 'rgba(255,255,255,0.25)' : '#665e52', marginTop: 4, fontStyle: 'italic' }}>
+            {th.brandSubtitle}
+          </div>
         </div>
 
         {/* ═══ Success Modal ═══ */}
         <AnimatePresence>
           {done && (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(6px)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}
+              style={{
+                position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)',
+                backdropFilter: 'blur(6px)', WebkitBackdropFilter: 'blur(6px)',
+                zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20,
+              }}
               onClick={() => setDone(false)}>
               <motion.div initial={{ scale: 0.92, y: 16 }} animate={{ scale: 1, y: 0 }}
                 transition={{ type: 'spring', damping: 24, stiffness: 240 }}
                 onClick={e => e.stopPropagation()}
-                style={{ background: th.dk ? th.bg : th.card, borderRadius: radius, padding: `${32 * pad}px ${24 * pad}px`, maxWidth: 360, width: '100%', textAlign: 'center', border: `1px solid ${th.brd}`, maxHeight: '90vh', overflowY: 'auto', boxShadow: th.sh2 }}>
-                <div style={{ width: 50, height: 50, borderRadius: '50%', background: th.pri, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 18px' }}>
+                style={{
+                  background: th.dk ? th.bg : th.card, borderRadius: radius,
+                  padding: `${32 * pad}px ${24 * pad}px`, maxWidth: 360, width: '100%',
+                  textAlign: 'center', border: `1px solid ${th.brd}`,
+                  maxHeight: '90vh', overflowY: 'auto', boxShadow: th.sh2,
+                }}>
+                {/* Success icon */}
+                <div style={{
+                  width: 50, height: 50, borderRadius: '50%', background: th.pri,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 18px',
+                }}>
                   <Check size={22} color="#fff" strokeWidth={2} />
                 </div>
                 <div style={{ fontSize: '1.05rem', fontWeight: 500, marginBottom: 5, letterSpacing: '0.06em', color: th.t }}>預約已送出！</div>
                 <div style={{ fontFamily: fc, fontSize: '0.66rem', color: th.t3, marginBottom: 22, fontStyle: 'italic' }}>Booking request submitted successfully</div>
-                <div style={{ background: th.cardInner, borderRadius: radius, padding: '16px', textAlign: 'left', fontSize: '0.66rem', color: th.t2, lineHeight: 2.2, marginBottom: 22, fontWeight: 300, border: `1px solid ${th.brd2}` }}>
+                
+                {/* Booking details */}
+                <div style={{
+                  background: th.cardInner || (th.dk ? 'rgba(255,255,255,0.03)' : '#fafaf8'),
+                  borderRadius: radius, padding: '16px', textAlign: 'left',
+                  fontSize: '0.66rem', color: th.t2, lineHeight: 2.2, marginBottom: 22,
+                  fontWeight: 300, border: `1px solid ${th.brd2}`,
+                }}>
                   <div><span style={{ fontWeight: 500 }}>服務：</span>{sv?.name}</div>
                   {sv?.variants?.length > 0 && <div><span style={{ fontWeight: 500 }}>類型：</span>{sv.variants[vi[sid] || 0]?.label}</div>}
                   {selAddons.length > 0 && <div><span style={{ fontWeight: 500 }}>加購：</span>{selAddons.map(a => a.name).join('、')}</div>}
                   <div><span style={{ fontWeight: 500 }}>技師：</span>{bookStaffName || '待分配'}</div>
                   <div><span style={{ fontWeight: 500 }}>日期：</span>{selDate}（週{WDN[dateWd]}）</div>
                   <div><span style={{ fontWeight: 500 }}>時段：</span>{selTime}</div>
-                  <div style={{ ...divider(), marginTop: 6, paddingTop: 6 }} />
-                  <div style={{ paddingTop: 6 }}><span style={{ fontWeight: 500 }}>姓名：</span>{nm}</div>
+                  <div style={divider()} />
+                  <div><span style={{ fontWeight: 500 }}>姓名：</span>{nm}</div>
                   <div><span style={{ fontWeight: 500 }}>電話：</span>{ph}</div>
                   {rk && <div><span style={{ fontWeight: 500 }}>備註：</span>{rk}</div>}
-                  <div style={{ ...divider(), marginTop: 6, paddingTop: 6 }}>
-                    <span style={{ fontWeight: 500, paddingTop: 6 }}>總額：</span><span style={{ fontFamily: fp, fontSize: '1rem', fontWeight: 500 }}>${total}</span>
+                  <div style={divider()} />
+                  <div>
+                    <span style={{ fontWeight: 500 }}>總額：</span>
+                    <span style={{ fontFamily: fp, fontSize: '1rem', fontWeight: 500 }}>${total}</span>
                   </div>
                 </div>
-                <div style={{ fontSize: '0.56rem', color: th.t3, marginBottom: 20, lineHeight: 1.7, fontWeight: 300 }}>我們將透過 WhatsApp 確認您的預約</div>
+
+                <div style={{ fontSize: '0.56rem', color: th.t3, marginBottom: 20, lineHeight: 1.7, fontWeight: 300 }}>
+                  我們將透過 WhatsApp 確認您的預約
+                </div>
+
+                {/* Action buttons */}
                 <div style={{ display: 'flex', gap: 10 }}>
-                  <button onClick={() => { setDone(false); setSid(null); setAo([]); setSelStaff(null); setSelStaffLabel(''); setSelDate(null); setSelTime(null); setBookStaffId(null); setBookStaffName(''); setNm(''); setPh(''); setRk(''); setStep(1); setSubmitError(''); window.scrollTo({ top: 0 }); }}
-                    style={{ flex: 1, padding: '12px', borderRadius: radius, ...btnSecondary(), fontSize: '0.68rem', fontFamily: ff, cursor: 'pointer' }}>再預約一次</button>
+                  <button onClick={() => {
+                    setDone(false); setSid(null); setAo([]); setSelStaff(null);
+                    setSelStaffLabel(''); setSelDate(null); setSelTime(null);
+                    setBookStaffId(null); setBookStaffName(''); setNm(''); setPh('');
+                    setRk(''); setStep(1); setSubmitError('');
+                    window.scrollTo({ top: 0 });
+                  }}
+                    style={{ flex: 1, padding: '12px', borderRadius: radius, ...btnSecondary(), fontSize: '0.68rem', fontFamily: ff, cursor: 'pointer' }}>
+                    再預約一次
+                  </button>
                   <button onClick={() => {
                     let msg = `Hi ${th.brandName} 🌙\n\n我想確認預約：\n服務：${sv?.name}`;
                     if (sv?.variants?.length > 0) msg += `\n類型：${sv.variants[vi[sid] || 0]?.label}`;
@@ -670,10 +995,17 @@ export default function BookingPage() {
                     if (rk) msg += `\n備註：${rk}`;
                     msg += `\n\n總額：$${total}\n\n請確認，謝謝！`;
                     const waNumber = themeSettings?.whatsapp_number || '';
-                    const waUrl = waNumber ? `https://wa.me/${waNumber}?text=${encodeURIComponent(msg)}` : `https://wa.me/?text=${encodeURIComponent(msg)}`;
+                    const waUrl = waNumber
+                      ? `https://wa.me/${waNumber}?text=${encodeURIComponent(msg)}`
+                      : `https://wa.me/?text=${encodeURIComponent(msg)}`;
                     window.open(waUrl, '_blank');
                   }}
-                    style={{ flex: 1, padding: '12px', borderRadius: radius, ...btnPrimary(), fontSize: '0.68rem', fontFamily: ff, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, letterSpacing: '0.04em' }}>
+                    style={{
+                      flex: 1, padding: '12px', borderRadius: radius, ...btnPrimary(),
+                      fontSize: '0.68rem', fontFamily: ff, cursor: 'pointer',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                      letterSpacing: '0.04em',
+                    }}>
                     <MessageCircle size={13} strokeWidth={1.5} />WhatsApp
                   </button>
                 </div>
@@ -684,7 +1016,12 @@ export default function BookingPage() {
 
         {/* ═══ Scroll to top ═══ */}
         <motion.div whileTap={{ scale: 0.9 }} onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
-          style={{ position: 'fixed', bottom: 24, right: 20, width: 38, height: 38, borderRadius: '50%', background: th.card, border: `1px solid ${th.brd}`, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', boxShadow: th.sh, zIndex: 20 }}>
+          style={{
+            position: 'fixed', bottom: 24, right: 20, width: 38, height: 38,
+            borderRadius: '50%', background: th.card, border: `1px solid ${th.brd}`,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            cursor: 'pointer', boxShadow: th.sh, zIndex: 20,
+          }}>
           <ChevronUp size={16} color={th.t2} strokeWidth={1.5} />
         </motion.div>
 
@@ -694,12 +1031,16 @@ export default function BookingPage() {
 }
 
 /* ═══ Section Header Component ═══ */
-function SH({ n, z, e, th, fp, fc }) {
+function SH({ n, z, e, th, fp, fc, ls }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
-      <div style={{ width: 3, height: 20, background: th.pri, borderRadius: 1 }} />
-      <span style={{ fontWeight: 500, fontSize: '0.92rem', color: th.t }}><span style={{ fontFamily: fp }}>{n}.</span> {z}</span>
-      <span style={{ fontFamily: fc, fontSize: '0.58rem', letterSpacing: '0.12em', color: th.t3, fontStyle: 'italic' }}>{e}</span>
+      <div style={{ width: 3, height: 22, background: th.pri, borderRadius: 2 }} />
+      <div style={{ flex: 1 }}>
+        <div style={{ fontWeight: 500, fontSize: '0.92rem', color: th.t, letterSpacing: ls }}>
+          <span style={{ fontFamily: fp, marginRight: 4 }}>{n}.</span>{z}
+        </div>
+        <div style={{ fontFamily: fc, fontSize: '0.5rem', letterSpacing: '0.14em', color: th.t3, fontStyle: 'italic', marginTop: 2 }}>{e}</div>
+      </div>
     </div>
   );
 }
