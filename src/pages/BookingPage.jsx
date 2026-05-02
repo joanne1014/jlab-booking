@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 
-const SUPABASE_URL = 'https://vqyfbwnkdpncwvdonbcz.supabase.co'
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZxeWZid25rZHBuY3d2ZG9uYmN6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDUxMTYyMDEsImV4cCI6MjA2MDY5MjIwMX0.jM21dYzEpHOtQMIRaOPe0fwdQMRz0vfMibgRB5BjLdE'
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
+const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
 
 export default function BookingPage() {
   const [step, setStep] = useState(1)
