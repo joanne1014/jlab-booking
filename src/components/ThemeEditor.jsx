@@ -1,9 +1,15 @@
+// components/ThemeEditor.jsx
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Check, Upload, Trash2, Eye, EyeOff, RotateCcw, Save, Palette, Type, Image, Settings, Diamond, Monitor, Sun, Moon, ChevronDown, ChevronUp, X, ExternalLink, Smartphone } from 'lucide-react';
+import {
+  Check, Upload, Trash2, Eye, EyeOff, RotateCcw, Save,
+  Palette, Type, Image, Settings, Diamond, Monitor,
+  Sun, Moon, ChevronDown, ChevronUp, X, ExternalLink,
+  Smartphone, Loader2
+} from 'lucide-react';
 
 // ═══════════════════════════════════════════════════════
-// themeConfig 內嵌版（正式項目用 import）
+// themeConfig（同你原本一樣，唔改）
 // ═══════════════════════════════════════════════════════
 
 const PG = [
@@ -122,7 +128,7 @@ function buildTheme(s) {
   let colorFilter = '';
   if (hue !== 0) colorFilter += `hue-rotate(${hue}deg) `;
   if (sat !== 100) colorFilter += `saturate(${sat}%) `;
-  if (brt !== 0) colorFilter += brt > 0 ? `brightness(${100 + brt}%) ` : `brightness(${100 + brt}%) `;
+  if (brt !== 0) colorFilter += `brightness(${100 + brt}%) `;
   colorFilter = colorFilter.trim() || 'none';
 
   const glass = s.glass_card || false;
@@ -145,7 +151,7 @@ function buildTheme(s) {
 }
 
 // ═══════════════════════════════════════════════════════
-// 子組件
+// 子組件（同你原本一樣）
 // ═══════════════════════════════════════════════════════
 
 const Sec = ({ title, icon, children, th, defaultOpen = true }) => {
@@ -174,10 +180,18 @@ const Sec = ({ title, icon, children, th, defaultOpen = true }) => {
 const Slider = ({ label, value, min, max, step, onChange, suffix = '', th }) => (
   <div style={{ marginBottom: 12 }}>
     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: th.t3, marginBottom: 4 }}>
-      <span>{label}</span><span style={{ fontFamily: 'monospace', fontWeight: 500 }}>{typeof value === 'number' ? (Number.isInteger(value) ? value : value.toFixed(2)) : value}{suffix}</span>
+      <span>{label}</span>
+      <span style={{ fontFamily: 'monospace', fontWeight: 500 }}>
+        {typeof value === 'number' ? (Number.isInteger(value) ? value : value.toFixed(2)) : value}{suffix}
+      </span>
     </div>
-    <input type="range" min={min} max={max} step={step} value={value} onChange={e => onChange(parseFloat(e.target.value))}
-      style={{ width: '100%', height: 5, appearance: 'none', background: `linear-gradient(90deg, ${th.pri} ${((value - min) / (max - min)) * 100}%, ${th.brd} ${((value - min) / (max - min)) * 100}%)`, borderRadius: 3, outline: 'none', cursor: 'pointer' }} />
+    <input type="range" min={min} max={max} step={step} value={value}
+      onChange={e => onChange(parseFloat(e.target.value))}
+      style={{
+        width: '100%', height: 5, appearance: 'none',
+        background: `linear-gradient(90deg, ${th.pri} ${((value - min) / (max - min)) * 100}%, ${th.brd} ${((value - min) / (max - min)) * 100}%)`,
+        borderRadius: 3, outline: 'none', cursor: 'pointer'
+      }} />
   </div>
 );
 
@@ -275,9 +289,67 @@ export default function ThemeEditor() {
   const [showPreview, setShowPreview] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [uploadTarget, setUploadTarget] = useState('');
+  const [loading, setLoading] = useState(true);
 
   const iframeRef = useRef(null);
   const fileInputRef = useRef(null);
+
+  // ══════════════════════════════════════════════
+  // ★ 新增：開頁自動載入已儲存設定
+  // ══════════════════════════════════════════════
+  useEffect(() => {
+    loadSettings();
+  }, []);
+
+  const loadSettings = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/booking', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'get-frontend-settings' }),
+      });
+      const data = await res.json();
+      const s = data.settings;
+      if (s) {
+        // 逐個設定（有值先 set，避免 undefined 覆蓋預設值）
+        if (s.palette_id) sPid(s.palette_id);
+        if (s.font_id) sFid(s.font_id);
+        if (s.radius_id) sRid(s.radius_id);
+        if (s.dark_mode !== undefined) sDk(s.dark_mode);
+        if (s.card_opacity !== undefined) sOp(Number(s.card_opacity));
+        if (s.custom_primary) sCustomPri(s.custom_primary);
+        if (s.custom_secondary) sCustomSec(s.custom_secondary);
+        if (s.custom_tertiary) sCustomTer(s.custom_tertiary);
+        if (s.hue_shift !== undefined) setHueShift(Number(s.hue_shift));
+        if (s.saturation_adj !== undefined) setSatAdj(Number(s.saturation_adj));
+        if (s.brightness_adj !== undefined) setBrightAdj(Number(s.brightness_adj));
+        if (s.bg_texture) sBgTex(s.bg_texture);
+        if (s.bg_texture_opacity !== undefined) sBgTexOp(Number(s.bg_texture_opacity));
+        if (s.bg_image) sBgImg(s.bg_image);
+        if (s.bg_image_opacity !== undefined) sBgImgOp(Number(s.bg_image_opacity));
+        if (s.bg_image_blur !== undefined) sBgImgBlur(Number(s.bg_image_blur));
+        if (s.glass_card !== undefined) sGlassCard(s.glass_card);
+        if (s.btn_style) setBtnStyle(s.btn_style);
+        if (s.shadow_depth) setShadowDepth(s.shadow_depth);
+        if (s.density) setDensity(s.density);
+        if (s.letter_spacing) setLetterSpc(s.letter_spacing);
+        if (s.divider_style) setDividerStyle(s.divider_style);
+        if (s.logo_url) setLogoUrl(s.logo_url);
+        if (s.logo_shape) setLogoShape(s.logo_shape);
+        if (s.logo_size) setLogoSize(s.logo_size);
+        if (s.custom_font_url) setCustomFontUrl(s.custom_font_url);
+        if (s.custom_font_family) setCustomFontFamily(s.custom_font_family);
+        if (s.brand_name) setBrandName(s.brand_name);
+        if (s.brand_subtitle) setBrandSub(s.brand_subtitle);
+        if (s.whatsapp) setWhatsapp(s.whatsapp);
+        if (s.notify_email) setNotifyEmail(s.notify_email);
+      }
+    } catch (err) {
+      console.error('載入主題設定失敗:', err);
+    }
+    setLoading(false);
+  };
 
   // ═══ Build theme ═══
   const currentSettings = useMemo(() => ({
@@ -295,24 +367,74 @@ export default function ThemeEditor() {
 
   const th = useMemo(() => buildTheme(currentSettings), [currentSettings]);
 
-  // ═══ 發送 preview 訊息到 iframe ═══
+  // 發送 preview 訊息到 iframe
   useEffect(() => {
     if (iframeRef.current && iframeRef.current.contentWindow) {
       iframeRef.current.contentWindow.postMessage({ type: 'theme-preview', settings: currentSettings }, '*');
     }
   }, [currentSettings]);
 
-  // ═══ Mock Save ═══
+  // ══════════════════════════════════════════════
+  // ★ 修改：真正儲存到 Supabase
+  // ══════════════════════════════════════════════
   const handleSave = async () => {
-    setSaving(true); setSaveMsg('');
-    await new Promise(r => setTimeout(r, 800));
-    setSaveMsg('✅ 主題已儲存');
+    setSaving(true);
+    setSaveMsg('');
+    try {
+      const res = await fetch('/api/booking', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'update-frontend-settings',
+          palette_id: pid,
+          font_id: fid,
+          radius_id: rid,
+          dark_mode: dk,
+          card_opacity: op,
+          custom_primary: customPri,
+          custom_secondary: customSec,
+          custom_tertiary: customTer,
+          hue_shift: hueShift,
+          saturation_adj: satAdj,
+          brightness_adj: brightAdj,
+          bg_texture: bgTex,
+          bg_texture_opacity: bgTexOp,
+          bg_image: bgImg,
+          bg_image_opacity: bgImgOp,
+          bg_image_blur: bgImgBlur,
+          glass_card: glassCard,
+          btn_style: btnStyle,
+          shadow_depth: shadowDepth,
+          density: density,
+          letter_spacing: letterSpc,
+          divider_style: dividerStyle,
+          logo_url: logoUrl,
+          logo_shape: logoShape,
+          logo_size: logoSize,
+          custom_font_url: customFontUrl,
+          custom_font_family: customFontFamily,
+          brand_name: brandName,
+          brand_subtitle: brandSub,
+          whatsapp: whatsapp,
+          notify_email: notifyEmail,
+        }),
+      });
+      const data = await res.json();
+      if (data.error) {
+        setSaveMsg('❌ 儲存失敗: ' + data.error);
+      } else {
+        setSaveMsg('✅ 主題已儲存');
+      }
+    } catch (err) {
+      setSaveMsg('❌ 儲存失敗: ' + err.message);
+    }
     setSaving(false);
-    setTimeout(() => setSaveMsg(''), 3000);
+    setTimeout(() => setSaveMsg(''), 4000);
   };
 
   // ═══ Reset ═══
   const handleReset = () => {
+    if (!confirm('確定要重設所有主題設定？')) return;
     sPid('rosemorn'); sFid('corm'); sRid('sm'); sDk(false); sOp(0.9);
     sCustomPri(''); sCustomSec(''); sCustomTer('');
     setHueShift(0); setSatAdj(100); setBrightAdj(0);
@@ -321,27 +443,76 @@ export default function ThemeEditor() {
     setDensity('normal'); setLetterSpc('normal'); setDividerStyle('line');
     setLogoUrl(''); setLogoShape('circle'); setLogoSize('md');
     setCustomFontUrl(''); setCustomFontFamily('');
+    setBrandName('J.LAB'); setBrandSub('LASH & BEAUTY STUDIO');
   };
 
-  // ═══ Upload handler (mock) ═══
+  // ══════════════════════════════════════════════
+  // ★ 修改：真正上傳到 Supabase Storage
+  // ══════════════════════════════════════════════
   const handleUpload = (target) => {
     setUploadTarget(target);
     fileInputRef.current?.click();
   };
-  const onFileSelect = (e) => {
+
+  const onFileSelect = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    // 驗證
+    if (!file.type.startsWith('image/')) {
+      alert('請選擇圖片檔案（JPG、PNG、SVG）');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      alert('檔案太大，最大 5MB');
+      return;
+    }
+
     setUploading(true);
-    // Mock upload - 喺正式版用 Supabase Storage
+
+    // 先做本地預覽（立即顯示）
     const reader = new FileReader();
     reader.onload = () => {
-      setTimeout(() => {
-        if (uploadTarget === 'bgImg') sBgImg(reader.result);
-        if (uploadTarget === 'logo') setLogoUrl(reader.result);
-        setUploading(false);
-      }, 500);
+      if (uploadTarget === 'bgImg') sBgImg(reader.result);
+      if (uploadTarget === 'logo') setLogoUrl(reader.result);
     };
     reader.readAsDataURL(file);
+
+    // 上傳到 Supabase Storage
+    try {
+      const folder = uploadTarget === 'logo' ? 'logos' : 'backgrounds';
+      const oldUrl = uploadTarget === 'logo' ? logoUrl : bgImg;
+
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('folder', folder);
+      fd.append('old_url', (oldUrl && oldUrl.startsWith('http')) ? oldUrl : '');
+
+      const res = await fetch('/api/upload', {
+        method: 'POST',
+        body: fd,
+      });
+
+      const data = await res.json();
+
+      if (data.url) {
+        // 用真正嘅 Supabase URL 取代本地 DataURL
+        if (uploadTarget === 'bgImg') sBgImg(data.url);
+        if (uploadTarget === 'logo') setLogoUrl(data.url);
+        console.log('✅ 上傳成功:', data.url);
+      } else {
+        alert('上傳失敗: ' + (data.error || '未知錯誤'));
+        // 上傳失敗就清除本地預覽
+        if (uploadTarget === 'bgImg') sBgImg('');
+        if (uploadTarget === 'logo') setLogoUrl('');
+      }
+    } catch (err) {
+      alert('上傳失敗: ' + err.message);
+      if (uploadTarget === 'bgImg') sBgImg('');
+      if (uploadTarget === 'logo') setLogoUrl('');
+    }
+
+    setUploading(false);
     e.target.value = '';
   };
 
@@ -354,6 +525,23 @@ export default function ThemeEditor() {
     { id: 'brand', icon: <Diamond size={14} />, label: '品牌' },
   ];
 
+  // ═══ Loading 狀態 ═══
+  if (loading) {
+    return (
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        height: '100vh', background: '#f8f7f6',
+        fontFamily: '-apple-system, sans-serif',
+      }}>
+        <div style={{ textAlign: 'center' }}>
+          <Loader2 size={28} color="#9e6b5a" style={{ animation: 'spin 1s linear infinite' }} />
+          <div style={{ marginTop: 12, fontSize: 13, color: '#888' }}>載入主題設定...</div>
+        </div>
+        <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+      </div>
+    );
+  }
+
   // ═══════════════════════════════════════
   // RENDER
   // ═══════════════════════════════════════
@@ -363,7 +551,7 @@ export default function ThemeEditor() {
       <input ref={fileInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={onFileSelect} />
 
       {/* ═══ LEFT: Editor Panel ═══ */}
-      <div style={{ width: showPreview ? '55%' : '100%', minWidth: 380, display: 'flex', flexDirection: 'column', transition: 'width 0.3s', borderRight: `1px solid #e8e4e0` }}>
+      <div style={{ width: showPreview ? '55%' : '100%', minWidth: 380, display: 'flex', flexDirection: 'column', transition: 'width 0.3s', borderRight: '1px solid #e8e4e0' }}>
 
         {/* Top bar */}
         <div style={{ padding: '12px 20px', borderBottom: '1px solid #e8e4e0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#fff' }}>
@@ -401,12 +589,10 @@ export default function ThemeEditor() {
           {/* ═══ 配色 Tab ═══ */}
           {tab === 'palette' && (
             <div>
-              {/* Dark mode */}
               <div style={{ marginBottom: 18, padding: '12px 14px', background: '#fff', borderRadius: 10, border: '1px solid #e8e4e0' }}>
                 <Toggle value={dk} onChange={sDk} th={th} label={dk ? '🌙 深色模式' : '☀️ 淺色模式'} />
               </div>
 
-              {/* 色盤群組 */}
               <div style={{ display: 'flex', gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
                 {PG.map(g => (
                   <button key={g.id} onClick={() => setPalGroup(g.id)}
@@ -421,7 +607,6 @@ export default function ThemeEditor() {
                 ))}
               </div>
 
-              {/* 色盤選項 */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10, marginBottom: 20 }}>
                 {(PG.find(g => g.id === palGroup)?.items || []).map(p => {
                   const c = dk ? p.d : p.l;
@@ -446,12 +631,10 @@ export default function ThemeEditor() {
                 })}
               </div>
 
-              {/* 透明度 */}
               <Sec title="卡片透明度" icon="◻️" th={th}>
                 <Slider label="不透明度" value={op} min={0.5} max={1} step={0.05} onChange={sOp} th={th} />
               </Sec>
 
-              {/* 色調微調 */}
               <Sec title="色彩氛圍微調" icon="🎛️" th={th} defaultOpen={false}>
                 <Slider label="色相偏移" value={hueShift} min={-180} max={180} step={5} onChange={setHueShift} suffix="°" th={th} />
                 <Slider label="飽和度" value={satAdj} min={50} max={150} step={5} onChange={setSatAdj} suffix="%" th={th} />
@@ -464,7 +647,6 @@ export default function ThemeEditor() {
                 )}
               </Sec>
 
-              {/* 自訂顏色覆蓋 */}
               <Sec title="自訂顏色覆蓋" icon="🎯" th={th} defaultOpen={false}>
                 <div style={{ display: 'grid', gap: 12 }}>
                   <ColorInput label="主色 Primary" value={customPri} onChange={sCustomPri} placeholder={th.pri} th={th} />
@@ -478,7 +660,6 @@ export default function ThemeEditor() {
           {/* ═══ 字體 Tab ═══ */}
           {tab === 'font' && (
             <div>
-              {/* 字體群組 */}
               <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
                 {FGRP.map(g => (
                   <button key={g.id} onClick={() => setFontGroup(g.id)}
@@ -493,7 +674,6 @@ export default function ThemeEditor() {
                 ))}
               </div>
 
-              {/* 字體選項 */}
               <div style={{ display: 'grid', gap: 8, marginBottom: 20 }}>
                 {(FGRP.find(g => g.id === fontGroup)?.items || []).map(f => {
                   const sel = fid === f.id;
@@ -515,7 +695,6 @@ export default function ThemeEditor() {
                 })}
               </div>
 
-              {/* 自訂字體 URL */}
               <Sec title="自訂字體 URL" icon="🔗" th={th} defaultOpen={false}>
                 <div style={{ marginBottom: 10 }}>
                   <div style={{ fontSize: 10, color: '#888', marginBottom: 4 }}>Google Fonts CSS URL</div>
@@ -526,7 +705,7 @@ export default function ThemeEditor() {
                 <div>
                   <div style={{ fontSize: 10, color: '#888', marginBottom: 4 }}>字體名稱（CSS font-family）</div>
                   <input type="text" value={customFontFamily} onChange={e => setCustomFontFamily(e.target.value)}
-                    placeholder='e.g. "Noto Sans TC"'
+                    placeholder='"Noto Sans TC"'
                     style={{ width: '100%', padding: '8px 12px', fontSize: 11, border: '1px solid #e0dcd8', borderRadius: 6, background: '#fff', color: '#333', boxSizing: 'border-box', outline: 'none' }} />
                 </div>
                 <div style={{ fontSize: 9, color: '#aaa', marginTop: 8, lineHeight: 1.6 }}>
@@ -534,7 +713,6 @@ export default function ThemeEditor() {
                 </div>
               </Sec>
 
-              {/* 圓角 */}
               <Sec title="圓角" icon="⬜" th={th}>
                 <OptGroup options={RS} value={rid} onChange={sRid} th={th} />
                 <div style={{ display: 'flex', gap: 8, marginTop: 12, justifyContent: 'center' }}>
@@ -544,7 +722,6 @@ export default function ThemeEditor() {
                 </div>
               </Sec>
 
-              {/* 字距 */}
               <Sec title="字距" icon="↔️" th={th}>
                 <OptGroup options={[
                   { id: 'tight', n: '緊湊 -0.01em' }, { id: 'normal', n: '正常 0.02em' }, { id: 'wide', n: '寬鬆 0.06em' }
@@ -556,7 +733,6 @@ export default function ThemeEditor() {
           {/* ═══ 背景 Tab ═══ */}
           {tab === 'bg' && (
             <div>
-              {/* 材質 */}
               <Sec title="背景材質紋理" icon="🧶" th={th}>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 12 }}>
                   {TX.map(t => {
@@ -579,13 +755,22 @@ export default function ThemeEditor() {
                 )}
               </Sec>
 
-              {/* 背景圖片 */}
               <Sec title="背景圖片" icon="🖼️" th={th}>
                 <div style={{ marginBottom: 12 }}>
                   <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
                     <motion.button whileTap={{ scale: 0.95 }} onClick={() => handleUpload('bgImg')}
-                      style={{ flex: 1, padding: '12px', borderRadius: 8, border: `1.5px dashed ${th.brd}`, background: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, fontSize: 11, color: '#666' }}>
-                      <Upload size={14} /> {uploading && uploadTarget === 'bgImg' ? '上傳中...' : '上傳圖片'}
+                      disabled={uploading && uploadTarget === 'bgImg'}
+                      style={{
+                        flex: 1, padding: '12px', borderRadius: 8, border: `1.5px dashed ${th.brd}`,
+                        background: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center',
+                        justifyContent: 'center', gap: 6, fontSize: 11, color: '#666',
+                        opacity: (uploading && uploadTarget === 'bgImg') ? 0.6 : 1,
+                      }}>
+                      {uploading && uploadTarget === 'bgImg' ? (
+                        <><Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> 上傳中...</>
+                      ) : (
+                        <><Upload size={14} /> 上傳圖片</>
+                      )}
                     </motion.button>
                   </div>
                   <div style={{ fontSize: 10, color: '#888', marginBottom: 6 }}>或貼入網址：</div>
@@ -620,15 +805,16 @@ export default function ThemeEditor() {
                 <OptGroup options={[
                   { id: 'solid', n: '實心填色' }, { id: 'outline', n: '描邊' }, { id: 'soft', n: '柔色底' }, { id: 'ghost', n: '無框文字' }
                 ]} value={btnStyle} onChange={setBtnStyle} th={th} />
-                {/* 預覽 */}
                 <div style={{ display: 'flex', gap: 12, marginTop: 14, padding: '16px', background: th.bg, borderRadius: 8, justifyContent: 'center', border: '1px solid #e8e4e0' }}>
-                  {[
-                    { style: btnStyle === 'solid' ? { background: th.pri, color: '#fff' } : btnStyle === 'outline' ? { border: `2px solid ${th.pri}`, color: th.pri, background: 'transparent' } : btnStyle === 'soft' ? { background: th.pri + '20', color: th.pri } : { color: th.pri, background: 'transparent' }, label: '主按鈕' },
-                  ].map((b, i) => (
-                    <div key={i} style={{ padding: '10px 24px', borderRadius: th.r, fontSize: 11, fontWeight: 500, letterSpacing: '0.05em', ...b.style }}>
-                      {b.label}
-                    </div>
-                  ))}
+                  <div style={{
+                    padding: '10px 24px', borderRadius: th.r, fontSize: 11, fontWeight: 500, letterSpacing: '0.05em',
+                    ...(btnStyle === 'solid' ? { background: th.pri, color: '#fff' } :
+                      btnStyle === 'outline' ? { border: `2px solid ${th.pri}`, color: th.pri, background: 'transparent' } :
+                      btnStyle === 'soft' ? { background: th.pri + '20', color: th.pri } :
+                      { color: th.pri, background: 'transparent' }),
+                  }}>
+                    主按鈕
+                  </div>
                 </div>
               </Sec>
 
@@ -648,7 +834,6 @@ export default function ThemeEditor() {
                 <OptGroup options={[
                   { id: 'none', n: '無' }, { id: 'line', n: '實線' }, { id: 'dots', n: '點線' }, { id: 'fade', n: '漸淡' }
                 ]} value={dividerStyle} onChange={setDividerStyle} th={th} />
-                {/* 預覽 */}
                 <div style={{ marginTop: 12, padding: '8px 0' }}>
                   {dividerStyle === 'line' && <div style={{ height: 1, background: th.brd }} />}
                   {dividerStyle === 'dots' && <div style={{ borderBottom: `2px dotted ${th.brd}` }} />}
@@ -666,8 +851,10 @@ export default function ThemeEditor() {
               <Sec title="店舖 Logo" icon="🏪" th={th}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 14 }}>
                   <div style={{
-                    width: 64, height: 64, borderRadius: logoShape === 'circle' ? '50%' : logoShape === 'rounded' ? 12 : 0,
-                    background: logoUrl ? 'transparent' : '#f0ede8', border: `2px dashed ${logoUrl ? 'transparent' : '#ccc'}`,
+                    width: 64, height: 64,
+                    borderRadius: logoShape === 'circle' ? '50%' : logoShape === 'rounded' ? 12 : 0,
+                    background: logoUrl ? 'transparent' : '#f0ede8',
+                    border: `2px dashed ${logoUrl ? 'transparent' : '#ccc'}`,
                     display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
                   }}>
                     {logoUrl ? (
@@ -678,12 +865,26 @@ export default function ThemeEditor() {
                   </div>
                   <div>
                     <motion.button whileTap={{ scale: 0.95 }} onClick={() => handleUpload('logo')}
-                      style={{ padding: '8px 16px', fontSize: 10, borderRadius: 6, border: '1px solid #ddd', background: '#fff', cursor: 'pointer', marginBottom: 6, display: 'block' }}>
-                      {uploading && uploadTarget === 'logo' ? '上傳中...' : '📤 上傳 Logo'}
+                      disabled={uploading && uploadTarget === 'logo'}
+                      style={{
+                        padding: '8px 16px', fontSize: 10, borderRadius: 6, border: '1px solid #ddd',
+                        background: '#fff', cursor: 'pointer', marginBottom: 6, display: 'flex',
+                        alignItems: 'center', gap: 4,
+                        opacity: (uploading && uploadTarget === 'logo') ? 0.6 : 1,
+                      }}>
+                      {uploading && uploadTarget === 'logo' ? (
+                        <><Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} /> 上傳中...</>
+                      ) : (
+                        '📤 上傳 Logo'
+                      )}
                     </motion.button>
                     {logoUrl && (
-                      <button onClick={() => setLogoUrl('')} style={{ fontSize: 9, color: '#c44', background: 'none', border: 'none', cursor: 'pointer' }}>✕ 移除</button>
+                      <button onClick={() => setLogoUrl('')}
+                        style={{ fontSize: 9, color: '#c44', background: 'none', border: 'none', cursor: 'pointer' }}>
+                        ✕ 移除
+                      </button>
                     )}
+                    <div style={{ fontSize: 9, color: '#aaa', marginTop: 4 }}>支援 JPG、PNG、SVG（最大 5MB）</div>
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: 16 }}>
@@ -742,9 +943,14 @@ export default function ThemeEditor() {
               padding: '10px 28px', borderRadius: 8, border: 'none',
               background: saving ? '#ccc' : th.pri, color: '#fff',
               fontSize: 12, fontWeight: 600, cursor: saving ? 'not-allowed' : 'pointer',
-              display: 'flex', alignItems: 'center', gap: 6, boxShadow: `0 2px 12px ${th.pri}30`,
+              display: 'flex', alignItems: 'center', gap: 6,
+              boxShadow: `0 2px 12px ${th.pri}30`,
             }}>
-            <Save size={14} /> {saving ? '儲存中...' : '儲存主題'}
+            {saving ? (
+              <><Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> 儲存中...</>
+            ) : (
+              <><Save size={14} /> 儲存主題</>
+            )}
           </motion.button>
 
           <motion.button whileTap={{ scale: 0.97 }} onClick={handleReset}
@@ -766,7 +972,6 @@ export default function ThemeEditor() {
       {/* ═══ RIGHT: Live Preview ═══ */}
       {showPreview && (
         <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#e8e4e0', alignItems: 'center', justifyContent: 'center', padding: 20, minWidth: 320 }}>
-          {/* Phone mockup */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
             <Smartphone size={14} color="#888" />
             <span style={{ fontSize: 11, color: '#888', fontWeight: 500 }}>客戶端即時預覽</span>
@@ -775,18 +980,15 @@ export default function ThemeEditor() {
             width: 320, height: 580, borderRadius: 32, background: '#111',
             padding: 8, boxShadow: '0 20px 60px rgba(0,0,0,0.3)', position: 'relative',
           }}>
-            {/* Notch */}
             <div style={{ position: 'absolute', top: 8, left: '50%', transform: 'translateX(-50%)', width: 80, height: 20, background: '#111', borderRadius: '0 0 12px 12px', zIndex: 2 }} />
-            {/* Screen */}
             <div style={{ width: '100%', height: '100%', borderRadius: 24, overflow: 'hidden', background: th.bg, position: 'relative' }}>
-              {/* Mini preview content */}
               <div style={{
                 width: '100%', height: '100%', overflowY: 'auto', padding: 0,
-                fontFamily: th.f, color: th.t, filter: th.colorFilter !== 'none' ? th.colorFilter : undefined,
+                fontFamily: th.f, color: th.t,
+                filter: th.colorFilter !== 'none' ? th.colorFilter : undefined,
                 ...(bgTex !== 'none' ? texCss(bgTex, bgTexOp) : {}),
                 position: 'relative',
               }}>
-                {/* BG Image */}
                 {bgImg && (
                   <div style={{ position: 'absolute', inset: 0, zIndex: 0 }}>
                     <img src={bgImg} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: bgImgOp, filter: bgImgBlur ? `blur(${bgImgBlur}px)` : undefined }} />
@@ -817,52 +1019,34 @@ export default function ThemeEditor() {
 
                   {/* Cards */}
                   <div style={{ padding: '0 14px' }}>
-                    {/* Card 1 - Normal */}
-                    <div style={{
-                      background: th.card, borderRadius: th.r, padding: `${12 * th.padScale}px ${14 * th.padScale}px`,
-                      marginBottom: 10, border: `1px solid ${th.brd}`, boxShadow: th.sh,
-                      backdropFilter: th.blur || undefined,
-                    }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <div>
-                          <div style={{ fontSize: 11, fontWeight: 500, color: th.t, letterSpacing: th.lsMap }}>經典單根嫁接</div>
-                          <div style={{ fontSize: 8, color: th.t3, marginTop: 3 }}>自然款 · 約 90 分鐘</div>
-                        </div>
-                        <div style={{ fontSize: 12, fontWeight: 500, color: th.t2 }}>$680</div>
-                      </div>
-                    </div>
-
-                    {/* Card 2 - Selected */}
-                    <div style={{
-                      background: th.card, borderRadius: th.r, padding: `${12 * th.padScale}px ${14 * th.padScale}px`,
-                      marginBottom: 10, border: `2px solid ${th.pri}`, boxShadow: th.sh2,
-                      backdropFilter: th.blur || undefined,
-                    }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <div>
-                          <div style={{ fontSize: 11, fontWeight: 600, color: th.pri, letterSpacing: th.lsMap }}>日式輕盈束感</div>
-                          <div style={{ fontSize: 8, color: th.t3, marginTop: 3 }}>人氣款 · 約 120 分鐘</div>
-                        </div>
-                        <div style={{ width: 18, height: 18, borderRadius: '50%', background: th.pri, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                          <Check size={10} color="#fff" strokeWidth={3} />
+                    {[
+                      { name: '經典單根嫁接', sub: '自然款 · 約 90 分鐘', price: '$680', sel: false },
+                      { name: '日式輕盈束感', sub: '人氣款 · 約 120 分鐘', price: '$880', sel: true },
+                      { name: '濃密貴婦款', sub: '豪華款 · 約 150 分鐘', price: '$1280', sel: false },
+                    ].map((card, i) => (
+                      <div key={i} style={{
+                        background: th.card, borderRadius: th.r,
+                        padding: `${12 * th.padScale}px ${14 * th.padScale}px`,
+                        marginBottom: 10,
+                        border: card.sel ? `2px solid ${th.pri}` : `1px solid ${th.brd}`,
+                        boxShadow: card.sel ? th.sh2 : th.sh,
+                        backdropFilter: th.blur || undefined,
+                      }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <div>
+                            <div style={{ fontSize: 11, fontWeight: card.sel ? 600 : 500, color: card.sel ? th.pri : th.t, letterSpacing: th.lsMap }}>{card.name}</div>
+                            <div style={{ fontSize: 8, color: th.t3, marginTop: 3 }}>{card.sub}</div>
+                          </div>
+                          {card.sel ? (
+                            <div style={{ width: 18, height: 18, borderRadius: '50%', background: th.pri, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                              <Check size={10} color="#fff" strokeWidth={3} />
+                            </div>
+                          ) : (
+                            <div style={{ fontSize: 12, fontWeight: 500, color: th.t2 }}>{card.price}</div>
+                          )}
                         </div>
                       </div>
-                    </div>
-
-                    {/* Card 3 */}
-                    <div style={{
-                      background: th.card, borderRadius: th.r, padding: `${12 * th.padScale}px ${14 * th.padScale}px`,
-                      marginBottom: 14, border: `1px solid ${th.brd}`, boxShadow: th.sh,
-                      backdropFilter: th.blur || undefined,
-                    }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <div>
-                          <div style={{ fontSize: 11, fontWeight: 500, color: th.t, letterSpacing: th.lsMap }}>濃密貴婦款</div>
-                          <div style={{ fontSize: 8, color: th.t3, marginTop: 3 }}>豪華款 · 約 150 分鐘</div>
-                        </div>
-                        <div style={{ fontSize: 12, fontWeight: 500, color: th.t2 }}>$1280</div>
-                      </div>
-                    </div>
+                    ))}
 
                     {/* Divider */}
                     <div style={{ margin: '12px 0' }}>
@@ -871,7 +1055,7 @@ export default function ThemeEditor() {
                       {dividerStyle === 'fade' && <div style={{ height: 1, background: `linear-gradient(90deg, transparent, ${th.brd}, transparent)` }} />}
                     </div>
 
-                    {/* Date grid mini */}
+                    {/* Date grid */}
                     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 5, marginBottom: 14 }}>
                       {[12, 13, 14, 15].map((d, i) => (
                         <div key={d} style={{
@@ -925,6 +1109,9 @@ export default function ThemeEditor() {
           </div>
         </div>
       )}
+
+      {/* Spin animation */}
+      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 }
