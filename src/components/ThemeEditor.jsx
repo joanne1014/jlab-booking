@@ -1,271 +1,580 @@
-// src/components/ThemeEditor.jsx — 前台主題設定面板
-import React, { useState, useEffect } from 'react';
+// src/components/ThemeEditor.jsx — 完整版（配合 themeConfig.js + API）
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { PG, PS, FGRP, FS, RS, TX, texCss, buildTheme, R } from '../themeConfig';
 
-const ADMIN_API = '/api/admin';
-const token = () => {
-  try { return sessionStorage.getItem('jlab_token') || ''; }
-  catch (_) { return ''; }
+const api = async (action, payload = {}) => {
+  const r = await fetch('/api/booking', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, payload }),
+  });
+  const d = await r.json();
+  if (!r.ok) throw new Error(d.error || 'API error');
+  return d;
 };
 
-async function apiCall(action, payload = {}) {
-  const res = await fetch(ADMIN_API, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token()}` },
-    body: JSON.stringify({ action, payload })
-  });
-  return res.json();
-}
+// ═══ 面板區段標題 ═══
+const Sec = ({ title, icon, children, th }) => (
+  <div style={{ marginBottom: 16 }}>
+    <div style={{ fontSize: 10, fontWeight: 700, color: th.t2, letterSpacing: 1, marginBottom: 8, display: 'flex', alignItems: 'center', gap: 5 }}>
+      <span>{icon}</span><span>{title}</span>
+    </div>
+    {children}
+  </div>
+);
 
-const COLOR_FIELDS = [
-  { key: 'primary_color', label: '主色調', desc: '按鈕、標記、進度條' },
-  { key: 'primary_dark', label: '主色（深）', desc: '選中狀態邊框' },
-  { key: 'primary_light', label: '主色（淺）', desc: '選中背景邊框' },
-  { key: 'primary_bg', label: '主色背景', desc: '選中卡片背景' },
-  { key: 'button_color', label: '按鈕色', desc: '確認按鈕、操作按鈕' },
-  { key: 'background_color', label: '頁面背景', desc: '整體背景色' },
-  { key: 'card_bg', label: '卡片背景', desc: '白色卡片區域' },
-  { key: 'text_color', label: '主文字色', desc: '標題、正文' },
-];
+// ═══ 滑桿 ═══
+const Slider = ({ label, value, min, max, step, onChange, suffix, th }) => (
+  <div style={{ marginBottom: 10 }}>
+    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, color: th.t3, marginBottom: 3 }}>
+      <span>{label}</span><span>{value}{suffix || ''}</span>
+    </div>
+    <input type="range" min={min} max={max} step={step} value={value} onChange={e => onChange(parseFloat(e.target.value))}
+      style={{ width: '100%', height: 4, appearance: 'none', background: th.brd, borderRadius: 2, outline: 'none', cursor: 'pointer' }} />
+  </div>
+);
 
-const TEXT_FIELDS = [
-  { key: 'brand_name', label: '品牌名稱', placeholder: 'J.LAB' },
-  { key: 'brand_subtitle', label: '副標題', placeholder: 'LASH & BEAUTY STUDIO' },
-  { key: 'booking_title', label: '預約頁標題', placeholder: '線上預約系統' },
-  { key: 'success_message', label: '成功訊息', placeholder: '預約已送出！' },
-  { key: 'footer_note', label: '底部提示文字', placeholder: '提交後我們將透過 WhatsApp 與您確認預約' },
-];
-
-const NOTIFY_FIELDS = [
-  { key: 'shop_phone', label: '店舖電話', placeholder: '6000 0000' },
-  { key: 'notification_email', label: '通知 Email', placeholder: 'you@example.com', desc: '新預約會發送通知到此 Email' },
-  { key: 'whatsapp_number', label: 'WhatsApp 號碼（含區碼）', placeholder: '85260000000', desc: '用於自動通知，格式：85261234567' },
-];
+// ═══ 選項按鈕組 ═══
+const OptGroup = ({ options, value, onChange, th }) => (
+  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 8 }}>
+    {options.map(o => (
+      <button key={o.id} onClick={() => onChange(o.id)}
+        style={{
+          padding: '4px 10px', fontSize: 9, borderRadius: 4, cursor: 'pointer',
+          border: value === o.id ? `1.5px solid ${th.pri}` : `1px solid ${th.brd}`,
+          background: value === o.id ? th.pri + '18' : 'transparent',
+          color: value === o.id ? th.pri : th.t3, fontWeight: value === o.id ? 600 : 400,
+        }}>
+        {o.n || o.name}
+      </button>
+    ))}
+  </div>
+);
 
 export default function ThemeEditor() {
-  const [settings, setSettings] = useState(null);
-  const [loading, setLoading] = useState(true);
+  // ═══ State ═══
+  const [pid, sPid] = useState('rosemorn');
+  const [fid, sFid] = useState('corm');
+  const [rid, sRid] = useState('sm');
+  const [dk, sDk] = useState(false);
+  const [op, sOp] = useState(0.9);
+  const [customPri, sCustomPri] = useState('');
+  const [customSec, sCustomSec] = useState('');
+  const [customTer, sCustomTer] = useState('');
+  const [hueShift, setHueShift] = useState(0);
+  const [satAdj, setSatAdj] = useState(100);
+  const [brightAdj, setBrightAdj] = useState(0);
+  const [bgTex, sBgTex] = useState('none');
+  const [bgTexOp, sBgTexOp] = useState(0.7);
+  const [bgImg, sBgImg] = useState('');
+  const [bgImgOp, sBgImgOp] = useState(0.12);
+  const [bgImgBlur, sBgImgBlur] = useState(0);
+  const [glassCard, sGlassCard] = useState(false);
+  const [btnStyle, setBtnStyle] = useState('solid');
+  const [shadowDepth, setShadowDepth] = useState('normal');
+  const [density, setDensity] = useState('normal');
+  const [letterSpc, setLetterSpc] = useState('normal');
+  const [dividerStyle, setDividerStyle] = useState('line');
+
+  // 品牌
+  const [brandName, setBrandName] = useState('J.LAB');
+  const [brandSub, setBrandSub] = useState('LASH & BEAUTY STUDIO');
+  const [whatsapp, setWhatsapp] = useState('');
+  const [notifyEmail, setNotifyEmail] = useState('');
+
+  // UI State
+  const [tab, setTab] = useState('palette');
   const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [error, setError] = useState('');
-  const [activeTab, setActiveTab] = useState('colors');
+  const [saveMsg, setSaveMsg] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [palGroup, setPalGroup] = useState('floral');
+  const [fontGroup, setFontGroup] = useState('serif');
 
-  useEffect(() => { loadSettings(); }, []);
+  // ═══ 載入設定 ═══
+  useEffect(() => {
+    (async () => {
+      try {
+        const { settings } = await api('get-frontend-settings');
+        if (settings) {
+          if (settings.palette_id) sPid(settings.palette_id);
+          if (settings.font_id) sFid(settings.font_id);
+          if (settings.radius_id) sRid(settings.radius_id);
+          if (settings.dark_mode !== undefined) sDk(settings.dark_mode);
+          if (settings.card_opacity !== undefined) sOp(Number(settings.card_opacity));
+          if (settings.custom_primary) sCustomPri(settings.custom_primary);
+          if (settings.custom_secondary) sCustomSec(settings.custom_secondary);
+          if (settings.custom_tertiary) sCustomTer(settings.custom_tertiary);
+          if (settings.hue_shift !== undefined) setHueShift(Number(settings.hue_shift));
+          if (settings.saturation_adj !== undefined) setSatAdj(Number(settings.saturation_adj));
+          if (settings.brightness_adj !== undefined) setBrightAdj(Number(settings.brightness_adj));
+          if (settings.bg_texture) sBgTex(settings.bg_texture);
+          if (settings.bg_texture_opacity !== undefined) sBgTexOp(Number(settings.bg_texture_opacity));
+          if (settings.bg_image_url) sBgImg(settings.bg_image_url);
+          if (settings.bg_image_opacity !== undefined) sBgImgOp(Number(settings.bg_image_opacity));
+          if (settings.bg_image_blur !== undefined) sBgImgBlur(Number(settings.bg_image_blur));
+          if (settings.glass_card !== undefined) sGlassCard(settings.glass_card);
+          if (settings.btn_style) setBtnStyle(settings.btn_style);
+          if (settings.shadow_depth) setShadowDepth(settings.shadow_depth);
+          if (settings.density) setDensity(settings.density);
+          if (settings.letter_spacing) setLetterSpc(settings.letter_spacing);
+          if (settings.divider_style) setDividerStyle(settings.divider_style);
+          if (settings.brand_name) setBrandName(settings.brand_name);
+          if (settings.brand_subtitle) setBrandSub(settings.brand_subtitle);
+          if (settings.whatsapp_number) setWhatsapp(settings.whatsapp_number);
+          if (settings.notification_email) setNotifyEmail(settings.notification_email);
+        }
+      } catch (e) {
+        console.error('Failed to load theme settings:', e);
+      }
+      setLoading(false);
+    })();
+  }, []);
 
-  const loadSettings = async () => {
-    setLoading(true);
-    try {
-      const res = await apiCall('get-frontend-settings');
-      if (res.settings) setSettings(res.settings);
-      else setSettings({});
-    } catch (e) {
-      setError('載入失敗');
-    }
-    setLoading(false);
-  };
+  // ═══ 建立 theme ═══
+  const currentSettings = useMemo(() => ({
+    palette_id: pid, font_id: fid, radius_id: rid, dark_mode: dk, card_opacity: op,
+    custom_primary: customPri, custom_secondary: customSec, custom_tertiary: customTer,
+    hue_shift: hueShift, saturation_adj: satAdj, brightness_adj: brightAdj,
+    bg_texture: bgTex, bg_texture_opacity: bgTexOp,
+    bg_image_url: bgImg, bg_image_opacity: bgImgOp, bg_image_blur: bgImgBlur,
+    glass_card: glassCard, btn_style: btnStyle, shadow_depth: shadowDepth,
+    density, letter_spacing: letterSpc, divider_style: dividerStyle,
+    brand_name: brandName, brand_subtitle: brandSub,
+  }), [pid, fid, rid, dk, op, customPri, customSec, customTer, hueShift, satAdj, brightAdj, bgTex, bgTexOp, bgImg, bgImgOp, bgImgBlur, glassCard, btnStyle, shadowDepth, density, letterSpc, dividerStyle, brandName, brandSub]);
 
+  const th = useMemo(() => buildTheme(currentSettings), [currentSettings]);
+
+  // ═══ 儲存 ═══
   const handleSave = async () => {
     setSaving(true);
-    setSaved(false);
-    setError('');
+    setSaveMsg('');
     try {
-      const res = await apiCall('save-frontend-settings', { settings });
-      if (res.error) throw new Error(res.error);
-      setSaved(true);
-      setTimeout(() => setSaved(false), 3000);
+      await api('save-frontend-settings', {
+        settings: {
+          ...currentSettings,
+          whatsapp_number: whatsapp,
+          notification_email: notifyEmail,
+        }
+      });
+      setSaveMsg('✅ 已儲存');
+      setTimeout(() => setSaveMsg(''), 3000);
     } catch (e) {
-      setError(e.message || '儲存失敗');
+      setSaveMsg('❌ ' + e.message);
     }
     setSaving(false);
   };
 
-  const update = (key, val) => {
-    setSettings(prev => ({ ...prev, [key]: val }));
-    setSaved(false);
+  // ═══ 重設 ═══
+  const handleReset = () => {
+    sPid('rosemorn'); sFid('corm'); sRid('sm'); sDk(false); sOp(0.9);
+    sCustomPri(''); sCustomSec(''); sCustomTer('');
+    setHueShift(0); setSatAdj(100); setBrightAdj(0);
+    sBgTex('none'); sBgTexOp(0.7); sBgImg(''); sBgImgOp(0.12); sBgImgBlur(0);
+    sGlassCard(false); setBtnStyle('solid'); setShadowDepth('normal');
+    setDensity('normal'); setLetterSpc('normal'); setDividerStyle('line');
   };
 
-  if (loading) return <div style={{ padding: 40, textAlign: 'center', color: '#888' }}>載入設定中...</div>;
+  // ═══ Tab List ═══
+  const TABS = [
+    { id: 'palette', icon: '🎨', label: '配色' },
+    { id: 'font', icon: '✍️', label: '字體' },
+    { id: 'bg', icon: '🖼️', label: '背景' },
+    { id: 'detail', icon: '⚙️', label: '細節' },
+    { id: 'brand', icon: '💎', label: '品牌' },
+    { id: 'preview', icon: '👁️', label: '預覽' },
+  ];
 
-  const s = settings || {};
+  if (loading) return (
+    <div style={{ padding: 60, textAlign: 'center', color: '#888', fontSize: 13 }}>載入主題設定中...</div>
+  );
 
   return (
-    <div style={{ maxWidth: 700, margin: '0 auto' }}>
-      {/* Tabs */}
-      <div style={{ display: 'flex', gap: 0, marginBottom: 24, borderBottom: '2px solid #e5e0d8' }}>
-        {[
-          { id: 'colors', label: '🎨 配色' },
-          { id: 'text', label: '✍️ 文字' },
-          { id: 'notify', label: '🔔 通知' },
-          { id: 'preview', label: '👁️ 預覽' },
-        ].map(tab => (
-          <button key={tab.id} onClick={() => setActiveTab(tab.id)}
+    <div style={{ maxWidth: 780, margin: '0 auto', fontFamily: '"Noto Sans TC", sans-serif' }}>
+      {/* ═══ Tab 導航 ═══ */}
+      <div style={{ display: 'flex', gap: 0, marginBottom: 20, borderBottom: `2px solid ${th.brd}`, overflowX: 'auto' }}>
+        {TABS.map(t => (
+          <button key={t.id} onClick={() => setTab(t.id)}
             style={{
-              padding: '10px 20px', border: 'none', borderBottom: activeTab === tab.id ? '2px solid #8a7c68' : '2px solid transparent',
-              background: 'none', fontSize: '0.82rem', fontWeight: activeTab === tab.id ? 600 : 400,
-              color: activeTab === tab.id ? '#3a3430' : '#999', cursor: 'pointer', marginBottom: -2
+              padding: '10px 16px', border: 'none', background: 'none', cursor: 'pointer',
+              borderBottom: tab === t.id ? `2px solid ${th.pri}` : '2px solid transparent',
+              color: tab === t.id ? th.t : th.t3, fontSize: 12, fontWeight: tab === t.id ? 600 : 400,
+              marginBottom: -2, whiteSpace: 'nowrap',
             }}>
-            {tab.label}
+            {t.icon} {t.label}
           </button>
         ))}
       </div>
 
-      {/* Colors Tab */}
-      {activeTab === 'colors' && (
+      {/* ═══════════════════ 配色 TAB ═══════════════════ */}
+      {tab === 'palette' && (
         <div>
-          <p style={{ fontSize: '0.78rem', color: '#888', marginBottom: 20 }}>
-            修改配色後，客人嘅預約頁面會即時套用新配色。
-          </p>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
-            {COLOR_FIELDS.map(f => (
-              <div key={f.key} style={{ padding: 14, background: '#faf6f0', borderRadius: 6, border: '1px solid #e5e0d8' }}>
-                <div style={{ fontSize: '0.72rem', fontWeight: 600, marginBottom: 4 }}>{f.label}</div>
-                <div style={{ fontSize: '0.6rem', color: '#999', marginBottom: 10 }}>{f.desc}</div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <input type="color" value={s[f.key] || '#000000'}
-                    onChange={e => update(f.key, e.target.value)}
-                    style={{ width: 40, height: 32, border: '1px solid #ddd', borderRadius: 4, cursor: 'pointer', padding: 0 }} />
-                  <input type="text" value={s[f.key] || ''}
-                    onChange={e => update(f.key, e.target.value)}
-                    style={{ flex: 1, padding: '6px 10px', border: '1px solid #ddd', borderRadius: 4, fontSize: '0.72rem', fontFamily: 'monospace' }} />
-                </div>
-              </div>
+          {/* 色盤群組選擇 */}
+          <div style={{ display: 'flex', gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
+            {PG.map(g => (
+              <button key={g.id} onClick={() => setPalGroup(g.id)}
+                style={{
+                  padding: '5px 12px', fontSize: 11, borderRadius: 14, cursor: 'pointer',
+                  border: palGroup === g.id ? `1.5px solid ${th.pri}` : `1px solid ${th.brd}`,
+                  background: palGroup === g.id ? th.pri + '15' : 'transparent',
+                  color: palGroup === g.id ? th.pri : th.t3,
+                }}>
+                {g.n}
+              </button>
             ))}
           </div>
 
-          {/* Preset themes */}
-          <div style={{ marginTop: 24 }}>
-            <div style={{ fontSize: '0.76rem', fontWeight: 600, marginBottom: 12 }}>快速套用預設主題</div>
-            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-              {[
-                { name: '奶茶金（預設）', colors: { primary_color: '#b0a08a', primary_dark: '#90806a', primary_light: '#c8b8a0', primary_bg: '#eae0d0', button_color: '#8a7c68', background_color: '#f4ede4', card_bg: '#faf6f0', text_color: '#3a3430' } },
-                { name: '玫瑰粉', colors: { primary_color: '#c4919b', primary_dark: '#a06e78', primary_light: '#dbb4bc', primary_bg: '#f5e5e8', button_color: '#96676f', background_color: '#faf0f2', card_bg: '#fff8f9', text_color: '#3a2e30' } },
-                { name: '薄荷綠', colors: { primary_color: '#8aab9e', primary_dark: '#6a8b7e', primary_light: '#a8c8ba', primary_bg: '#e0f0e8', button_color: '#607a6e', background_color: '#f0f8f4', card_bg: '#f8fdfb', text_color: '#2e3a34' } },
-                { name: '暮光紫', colors: { primary_color: '#9e90b0', primary_dark: '#7e7090', primary_light: '#b8a8c8', primary_bg: '#e8e0f0', button_color: '#6e6080', background_color: '#f4f0f8', card_bg: '#faf8fd', text_color: '#34303a' } },
-                { name: '經典黑金', colors: { primary_color: '#c8a870', primary_dark: '#a88850', primary_light: '#dcc090', primary_bg: '#f0e8d4', button_color: '#2a2420', background_color: '#f8f4ee', card_bg: '#fffcf8', text_color: '#1a1814' } },
-              ].map(theme => (
-                <button key={theme.name} onClick={() => setSettings(prev => ({ ...prev, ...theme.colors }))}
+          {/* 色盤選項 */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 10, marginBottom: 20 }}>
+            {(PG.find(g => g.id === palGroup)?.items || []).map(p => {
+              const c = dk ? p.d : p.l;
+              const sel = pid === p.id;
+              return (
+                <motion.div key={p.id} whileTap={{ scale: 0.96 }} onClick={() => sPid(p.id)}
                   style={{
-                    padding: '8px 16px', borderRadius: 20, border: '1px solid #ddd', fontSize: '0.68rem',
-                    cursor: 'pointer', background: '#fff', display: 'flex', alignItems: 'center', gap: 6
+                    padding: 10, borderRadius: 8, cursor: 'pointer',
+                    border: sel ? `2px solid ${c.pri}` : `1px solid ${th.brd}`,
+                    background: sel ? c.bg : 'transparent',
                   }}>
-                  <span style={{ width: 14, height: 14, borderRadius: '50%', background: theme.colors.primary_color, display: 'inline-block', border: '1px solid rgba(0,0,0,0.1)' }} />
-                  {theme.name}
-                </button>
+                  <div style={{ display: 'flex', gap: 3, marginBottom: 6 }}>
+                    {[c.pri, c.sec, c.ter].map((clr, i) => (
+                      <div key={i} style={{ width: 16, height: 16, borderRadius: 3, background: clr }} />
+                    ))}
+                  </div>
+                  <div style={{ fontSize: 10, fontWeight: sel ? 600 : 400, color: sel ? c.pri : th.t2 }}>{p.n}</div>
+                </motion.div>
+              );
+            })}
+          </div>
+
+          {/* Dark Mode Toggle */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16, padding: 12, background: th.card, borderRadius: 8, border: `1px solid ${th.brd}` }}>
+            <span style={{ fontSize: 11, color: th.t2, flex: 1 }}>🌙 深色模式</span>
+            <motion.div onClick={() => sDk(!dk)} whileTap={{ scale: 0.9 }}
+              style={{ width: 40, height: 22, borderRadius: 11, background: dk ? th.pri : th.brd, cursor: 'pointer', position: 'relative', transition: 'background 0.2s' }}>
+              <motion.div animate={{ x: dk ? 19 : 1 }}
+                style={{ width: 18, height: 18, borderRadius: 9, background: '#fff', position: 'absolute', top: 2, boxShadow: '0 1px 3px rgba(0,0,0,0.2)' }} />
+            </motion.div>
+          </div>
+
+          {/* Card Opacity */}
+          <Slider label="卡片透明度" value={op} min={0.5} max={1} step={0.05} onChange={sOp} suffix="" th={th} />
+
+          {/* 色調微調 */}
+          <Sec title="色彩氛圍微調" icon="🎛️" th={th}>
+            <Slider label="色相偏移" value={hueShift} min={-180} max={180} step={5} onChange={setHueShift} suffix="°" th={th} />
+            <Slider label="飽和度" value={satAdj} min={50} max={150} step={5} onChange={setSatAdj} suffix="%" th={th} />
+            <Slider label="明度" value={brightAdj} min={-30} max={30} step={5} onChange={setBrightAdj} suffix="" th={th} />
+            {(hueShift !== 0 || satAdj !== 100 || brightAdj !== 0) && (
+              <button onClick={() => { setHueShift(0); setSatAdj(100); setBrightAdj(0); }}
+                style={{ fontSize: 9, color: th.pri, background: 'none', border: 'none', cursor: 'pointer', marginTop: 4 }}>
+                ↩ 重設氛圍
+              </button>
+            )}
+          </Sec>
+
+          {/* 自訂顏色覆蓋 */}
+          <Sec title="自訂顏色覆蓋（選填）" icon="🎯" th={th}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+              {[
+                { label: '主色', val: customPri, set: sCustomPri },
+                { label: '副色', val: customSec, set: sCustomSec },
+                { label: '第三色', val: customTer, set: sCustomTer },
+              ].map(({ label, val, set }) => (
+                <div key={label}>
+                  <div style={{ fontSize: 9, color: th.t3, marginBottom: 4 }}>{label}</div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <input type="color" value={val || th.pri} onChange={e => set(e.target.value)}
+                      style={{ width: 24, height: 24, border: `1px solid ${th.brd}`, borderRadius: 4, cursor: 'pointer', padding: 0 }} />
+                    <input type="text" value={val} onChange={e => set(e.target.value)} placeholder="留空用預設"
+                      style={{ flex: 1, padding: '4px 6px', fontSize: 9, border: `1px solid ${th.brd}`, borderRadius: 4, fontFamily: 'monospace', background: 'transparent', color: th.t2 }} />
+                  </div>
+                </div>
               ))}
             </div>
-          </div>
+            {(customPri || customSec || customTer) && (
+              <button onClick={() => { sCustomPri(''); sCustomSec(''); sCustomTer(''); }}
+                style={{ fontSize: 9, color: th.pri, background: 'none', border: 'none', cursor: 'pointer', marginTop: 6 }}>
+                ↩ 清除自訂顏色
+              </button>
+            )}
+          </Sec>
         </div>
       )}
 
-      {/* Text Tab */}
-      {activeTab === 'text' && (
+      {/* ═══════════════════ 字體 TAB ═══════════════════ */}
+      {tab === 'font' && (
         <div>
-          <p style={{ fontSize: '0.78rem', color: '#888', marginBottom: 20 }}>
-            自訂預約頁面上顯示嘅文字內容。
-          </p>
-          {TEXT_FIELDS.map(f => (
-            <div key={f.key} style={{ marginBottom: 18 }}>
-              <label style={{ fontSize: '0.72rem', fontWeight: 600, display: 'block', marginBottom: 6 }}>{f.label}</label>
-              <input type="text" value={s[f.key] || ''} placeholder={f.placeholder}
-                onChange={e => update(f.key, e.target.value)}
-                style={{ width: '100%', padding: '10px 14px', border: '1px solid #ddd', borderRadius: 6, fontSize: '0.8rem', boxSizing: 'border-box' }} />
-            </div>
-          ))}
-          <div style={{ marginBottom: 18 }}>
-            <label style={{ fontSize: '0.72rem', fontWeight: 600, display: 'block', marginBottom: 6 }}>最大可預約天數</label>
-            <input type="number" value={s.max_booking_days || 60}
-              onChange={e => update('max_booking_days', parseInt(e.target.value) || 60)}
-              style={{ width: 120, padding: '10px 14px', border: '1px solid #ddd', borderRadius: 6, fontSize: '0.8rem' }} />
-            <span style={{ fontSize: '0.68rem', color: '#999', marginLeft: 10 }}>日</span>
+          {/* 字體群組 */}
+          <div style={{ display: 'flex', gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
+            {FGRP.map(g => (
+              <button key={g.id} onClick={() => setFontGroup(g.id)}
+                style={{
+                  padding: '5px 12px', fontSize: 11, borderRadius: 14, cursor: 'pointer',
+                  border: fontGroup === g.id ? `1.5px solid ${th.pri}` : `1px solid ${th.brd}`,
+                  background: fontGroup === g.id ? th.pri + '15' : 'transparent',
+                  color: fontGroup === g.id ? th.pri : th.t3,
+                }}>
+                {g.n}
+              </button>
+            ))}
           </div>
+
+          {/* 字體選項 */}
+          <div style={{ display: 'grid', gap: 8, marginBottom: 20 }}>
+            {(FGRP.find(g => g.id === fontGroup)?.items || []).map(f => {
+              const sel = fid === f.id;
+              return (
+                <motion.div key={f.id} whileTap={{ scale: 0.98 }} onClick={() => sFid(f.id)}
+                  style={{
+                    padding: '12px 14px', borderRadius: 8, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    border: sel ? `2px solid ${th.pri}` : `1px solid ${th.brd}`,
+                    background: sel ? th.pri + '10' : 'transparent',
+                  }}>
+                  <div>
+                    <div style={{ fontSize: 11, fontWeight: sel ? 600 : 400, color: sel ? th.pri : th.t2, marginBottom: 2 }}>{f.n}</div>
+                    <div style={{ fontSize: 9, color: th.t3 }}>{f.cat} · {f.e}</div>
+                  </div>
+                  <div style={{ fontFamily: f.v, fontSize: 18, color: sel ? th.pri : th.t3 }}>{f.demo}</div>
+                </motion.div>
+              );
+            })}
+          </div>
+
+          {/* 圓角 */}
+          <Sec title="圓角" icon="⬜" th={th}>
+            <OptGroup options={RS} value={rid} onChange={sRid} th={th} />
+          </Sec>
+
+          {/* 字距 */}
+          <Sec title="字距" icon="↔️" th={th}>
+            <OptGroup options={[
+              { id: 'tight', n: '緊湊' }, { id: 'normal', n: '正常' }, { id: 'wide', n: '寬鬆' }
+            ]} value={letterSpc} onChange={setLetterSpc} th={th} />
+          </Sec>
         </div>
       )}
 
-      {/* Notify Tab */}
-      {activeTab === 'notify' && (
+      {/* ═══════════════════ 背景 TAB ═══════════════════ */}
+      {tab === 'bg' && (
         <div>
-          <p style={{ fontSize: '0.78rem', color: '#888', marginBottom: 20 }}>
-            設定新預約通知方式。每次有客人預約，系統會自動通知你。
-          </p>
-          {NOTIFY_FIELDS.map(f => (
-            <div key={f.key} style={{ marginBottom: 18 }}>
-              <label style={{ fontSize: '0.72rem', fontWeight: 600, display: 'block', marginBottom: 4 }}>{f.label}</label>
-              {f.desc && <div style={{ fontSize: '0.62rem', color: '#999', marginBottom: 6 }}>{f.desc}</div>}
-              <input type="text" value={s[f.key] || ''} placeholder={f.placeholder}
-                onChange={e => update(f.key, e.target.value)}
-                style={{ width: '100%', padding: '10px 14px', border: '1px solid #ddd', borderRadius: 6, fontSize: '0.8rem', boxSizing: 'border-box' }} />
+          {/* 材質 */}
+          <Sec title="背景材質" icon="🧶" th={th}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(70px, 1fr))', gap: 6, marginBottom: 10 }}>
+              {TX.map(t => {
+                const sel = bgTex === t.id;
+                const texStyle = t.id !== 'none' ? texCss(t.id, 0.8) : {};
+                return (
+                  <motion.div key={t.id} whileTap={{ scale: 0.93 }} onClick={() => sBgTex(t.id)}
+                    style={{
+                      padding: '10px 6px', borderRadius: 6, cursor: 'pointer', textAlign: 'center',
+                      border: sel ? `2px solid ${th.pri}` : `1px solid ${th.brd}`,
+                      background: sel ? th.pri + '12' : th.bg,
+                      ...texStyle,
+                    }}>
+                    <div style={{ fontSize: 9, color: sel ? th.pri : th.t3, fontWeight: sel ? 600 : 400 }}>{t.n}</div>
+                  </motion.div>
+                );
+              })}
             </div>
-          ))}
+            {bgTex !== 'none' && (
+              <Slider label="材質深度" value={bgTexOp} min={0.2} max={1} step={0.05} onChange={sBgTexOp} suffix="" th={th} />
+            )}
+          </Sec>
 
-          <div style={{ marginTop: 24, padding: 16, background: '#f0f8f4', border: '1px solid #c8e0d4', borderRadius: 8 }}>
-            <div style={{ fontSize: '0.76rem', fontWeight: 600, marginBottom: 8 }}>📬 通知方式說明</div>
-            <div style={{ fontSize: '0.68rem', color: '#555', lineHeight: 1.8 }}>
-              <div>✅ <b>Email 通知</b>：填寫 notification_email，新預約會自動發送 Email 到你信箱</div>
-              <div>✅ <b>WhatsApp 通知</b>：填寫 whatsapp_number，系統會生成通知連結</div>
-              <div style={{ marginTop: 8, color: '#888' }}>
-                💡 提示：如需自動 WhatsApp 訊息（唔使手動點），需要設定 WhatsApp Business API（進階功能）
+          {/* 背景圖片 */}
+          <Sec title="背景圖片" icon="🖼️" th={th}>
+            <input type="text" value={bgImg} onChange={e => sBgImg(e.target.value)} placeholder="貼入圖片網址..."
+              style={{ width: '100%', padding: '8px 12px', fontSize: 11, border: `1px solid ${th.brd}`, borderRadius: 6, background: 'transparent', color: th.t2, boxSizing: 'border-box', marginBottom: 8 }} />
+            {bgImg && (
+              <>
+                <Slider label="圖片透明度" value={bgImgOp} min={0.05} max={0.5} step={0.01} onChange={sBgImgOp} suffix="" th={th} />
+                <Slider label="模糊程度" value={bgImgBlur} min={0} max={20} step={1} onChange={sBgImgBlur} suffix="px" th={th} />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
+                  <span style={{ fontSize: 10, color: th.t3 }}>毛玻璃卡片</span>
+                  <motion.div onClick={() => sGlassCard(!glassCard)} whileTap={{ scale: 0.9 }}
+                    style={{ width: 32, height: 18, borderRadius: 9, background: glassCard ? th.pri : th.brd, cursor: 'pointer', position: 'relative' }}>
+                    <motion.div animate={{ x: glassCard ? 15 : 1 }}
+                      style={{ width: 14, height: 14, borderRadius: 7, background: '#fff', position: 'absolute', top: 2, boxShadow: '0 1px 2px rgba(0,0,0,0.2)' }} />
+                  </motion.div>
+                </div>
+                <button onClick={() => { sBgImg(''); sBgImgOp(0.12); sBgImgBlur(0); sGlassCard(false); }}
+                  style={{ fontSize: 9, color: '#c44', background: 'none', border: 'none', cursor: 'pointer', marginTop: 8 }}>
+                  ✕ 移除背景圖片
+                </button>
+              </>
+            )}
+          </Sec>
+        </div>
+      )}
+
+      {/* ═══════════════════ 細節 TAB ═══════════════════ */}
+      {tab === 'detail' && (
+        <div>
+          <Sec title="按鈕樣式" icon="🔘" th={th}>
+            <OptGroup options={[
+              { id: 'solid', n: '實心' }, { id: 'outline', n: '描邊' }, { id: 'soft', n: '柔色' }, { id: 'ghost', n: '無框' }
+            ]} value={btnStyle} onChange={setBtnStyle} th={th} />
+            {/* 按鈕預覽 */}
+            <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+              {btnStyle === 'solid' && <div style={{ padding: '6px 18px', borderRadius: th.r, background: th.pri, color: '#fff', fontSize: 10 }}>預覽按鈕</div>}
+              {btnStyle === 'outline' && <div style={{ padding: '6px 18px', borderRadius: th.r, border: `1.5px solid ${th.pri}`, color: th.pri, fontSize: 10 }}>預覽按鈕</div>}
+              {btnStyle === 'soft' && <div style={{ padding: '6px 18px', borderRadius: th.r, background: th.pri + '20', color: th.pri, fontSize: 10 }}>預覽按鈕</div>}
+              {btnStyle === 'ghost' && <div style={{ padding: '6px 18px', borderRadius: th.r, color: th.pri, fontSize: 10 }}>預覽按鈕</div>}
+            </div>
+          </Sec>
+
+          <Sec title="陰影深度" icon="🌓" th={th}>
+            <OptGroup options={[
+              { id: 'none', n: '無' }, { id: 'soft', n: '柔和' }, { id: 'normal', n: '正常' }, { id: 'deep', n: '深沉' }
+            ]} value={shadowDepth} onChange={setShadowDepth} th={th} />
+          </Sec>
+
+          <Sec title="密度" icon="📐" th={th}>
+            <OptGroup options={[
+              { id: 'compact', n: '緊湊' }, { id: 'normal', n: '正常' }, { id: 'airy', n: '寬鬆' }
+            ]} value={density} onChange={setDensity} th={th} />
+          </Sec>
+
+          <Sec title="分隔線" icon="➖" th={th}>
+            <OptGroup options={[
+              { id: 'none', n: '無' }, { id: 'line', n: '線條' }, { id: 'dot', n: '點線' }, { id: 'fade', n: '漸淡' }
+            ]} value={dividerStyle} onChange={setDividerStyle} th={th} />
+          </Sec>
+        </div>
+      )}
+
+      {/* ═══════════════════ 品牌 TAB ═══════════════════ */}
+      {tab === 'brand' && (
+        <div>
+          <Sec title="品牌資訊" icon="💎" th={th}>
+            {[
+              { label: '品牌名稱', val: brandName, set: setBrandName, ph: 'J.LAB' },
+              { label: '副標題', val: brandSub, set: setBrandSub, ph: 'LASH & BEAUTY STUDIO' },
+            ].map(f => (
+              <div key={f.label} style={{ marginBottom: 12 }}>
+                <div style={{ fontSize: 10, color: th.t3, marginBottom: 4 }}>{f.label}</div>
+                <input type="text" value={f.val} onChange={e => f.set(e.target.value)} placeholder={f.ph}
+                  style={{ width: '100%', padding: '8px 12px', fontSize: 12, border: `1px solid ${th.brd}`, borderRadius: 6, background: 'transparent', color: th.t, boxSizing: 'border-box' }} />
               </div>
+            ))}
+          </Sec>
+
+          <Sec title="通知設定" icon="🔔" th={th}>
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ fontSize: 10, color: th.t3, marginBottom: 4 }}>通知 Email</div>
+              <input type="email" value={notifyEmail} onChange={e => setNotifyEmail(e.target.value)} placeholder="you@example.com"
+                style={{ width: '100%', padding: '8px 12px', fontSize: 12, border: `1px solid ${th.brd}`, borderRadius: 6, background: 'transparent', color: th.t, boxSizing: 'border-box' }} />
+              <div style={{ fontSize: 9, color: th.t3, marginTop: 3 }}>新預約會自動發送通知到此信箱</div>
             </div>
-          </div>
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ fontSize: 10, color: th.t3, marginBottom: 4 }}>WhatsApp 號碼（含區碼）</div>
+              <input type="text" value={whatsapp} onChange={e => setWhatsapp(e.target.value)} placeholder="85261234567"
+                style={{ width: '100%', padding: '8px 12px', fontSize: 12, border: `1px solid ${th.brd}`, borderRadius: 6, background: 'transparent', color: th.t, boxSizing: 'border-box' }} />
+            </div>
+          </Sec>
         </div>
       )}
 
-      {/* Preview Tab */}
-      {activeTab === 'preview' && (
+      {/* ═══════════════════ 預覽 TAB ═══════════════════ */}
+      {tab === 'preview' && (
         <div>
-          <p style={{ fontSize: '0.78rem', color: '#888', marginBottom: 20 }}>
-            預覽客人預約頁面嘅外觀效果。
-          </p>
+          <div style={{ fontSize: 11, color: th.t3, marginBottom: 14 }}>以下係客人預約頁面嘅外觀預覽：</div>
           <div style={{
-            background: s.background_color || '#f4ede4',
-            borderRadius: 12, padding: 24, border: '1px solid #ddd',
-            maxWidth: 360, margin: '0 auto'
+            background: th.bg, borderRadius: 12, padding: 24, border: `1px solid ${th.brd}`,
+            maxWidth: 380, margin: '0 auto', position: 'relative', overflow: 'hidden',
+            filter: th.colorFilter, fontFamily: th.f, letterSpacing: th.lsMap,
+            ...(bgTex !== 'none' ? texCss(bgTex, bgTexOp) : {}),
           }}>
-            {/* Mini preview */}
-            <div style={{ textAlign: 'center', marginBottom: 20 }}>
-              <div style={{ fontFamily: "'Playfair Display',serif", fontSize: '1.1rem', fontStyle: 'italic', color: s.text_color || '#3a3430' }}>
-                {s.brand_name || 'J.LAB'}
+            {/* BG Image */}
+            {bgImg && (
+              <div style={{ position: 'absolute', inset: 0, backgroundImage: `url(${bgImg})`, backgroundSize: 'cover', backgroundPosition: 'center', opacity: bgImgOp, filter: bgImgBlur ? `blur(${bgImgBlur}px)` : undefined }} />
+            )}
+            <div style={{ position: 'relative', zIndex: 1 }}>
+              {/* Header */}
+              <div style={{ textAlign: 'center', marginBottom: 20 }}>
+                <div style={{ fontSize: 20, fontWeight: 300, fontStyle: 'italic', color: th.t }}>{brandName}</div>
+                <div style={{ fontSize: 8, letterSpacing: '0.2em', color: th.pri, marginTop: 4 }}>{brandSub}</div>
               </div>
-              <div style={{ fontSize: '0.5rem', letterSpacing: '0.2em', color: s.primary_color || '#b0a08a', marginTop: 4 }}>
-                {s.brand_subtitle || 'LASH & BEAUTY STUDIO'}
+
+              {/* Card - normal */}
+              <div style={{
+                background: th.card, borderRadius: th.r, padding: 14 * th.padScale, marginBottom: 10,
+                border: `1px solid ${th.brd}`, boxShadow: th.sh,
+                backdropFilter: th.blur,
+              }}>
+                <div style={{ fontSize: 12, fontWeight: 500, color: th.t, marginBottom: 4 }}>經典單根嫁接</div>
+                <div style={{ fontSize: 9, color: th.t3 }}>自然款 · 約 90 分鐘</div>
               </div>
-            </div>
-            <div style={{ fontSize: '1rem', fontWeight: 500, textAlign: 'center', color: s.text_color || '#3a3430', marginBottom: 16 }}>
-              {s.booking_title || '線上預約系統'}
-            </div>
-            {/* Fake card */}
-            <div style={{ background: s.card_bg || '#faf6f0', borderRadius: 6, padding: 16, marginBottom: 12, border: `1px solid ${s.primary_light || '#c8b8a0'}30` }}>
-              <div style={{ fontSize: '0.72rem', fontWeight: 500, color: s.text_color || '#3a3430', marginBottom: 8 }}>經典單根睫毛嫁接</div>
-              <div style={{ fontSize: '0.6rem', color: '#999' }}>約 90 分鐘</div>
-            </div>
-            {/* Fake selected card */}
-            <div style={{ background: s.primary_bg || '#eae0d0', borderRadius: 6, padding: 16, marginBottom: 12, border: `1px solid ${s.primary_color || '#b0a08a'}` }}>
-              <div style={{ fontSize: '0.72rem', fontWeight: 500, color: s.text_color || '#3a3430', marginBottom: 8 }}>日式輕盈束感</div>
-              <div style={{ fontSize: '0.6rem', color: '#999' }}>已選擇 ✓</div>
-            </div>
-            {/* Fake button */}
-            <div style={{ background: s.button_color || '#8a7c68', color: '#fff', padding: '12px 0', borderRadius: 4, textAlign: 'center', fontSize: '0.76rem', letterSpacing: '0.1em' }}>
-              確認並發送預約
+
+              {/* Card - selected */}
+              <div style={{
+                background: th.card, borderRadius: th.r, padding: 14 * th.padScale, marginBottom: 10,
+                border: `2px solid ${th.pri}`, boxShadow: th.sh2,
+                backdropFilter: th.blur,
+              }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 600, color: th.pri, marginBottom: 4 }}>日式輕盈束感</div>
+                    <div style={{ fontSize: 9, color: th.t3 }}>已選擇</div>
+                  </div>
+                  <div style={{ width: 18, height: 18, borderRadius: '50%', background: th.pri, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <span style={{ color: '#fff', fontSize: 10 }}>✓</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Divider */}
+              {dividerStyle === 'line' && <div style={{ height: 1, background: th.brd, margin: '14px 0' }} />}
+              {dividerStyle === 'dot' && <div style={{ borderBottom: `1px dashed ${th.brd}`, margin: '14px 0' }} />}
+              {dividerStyle === 'fade' && <div style={{ height: 1, background: `linear-gradient(90deg, transparent, ${th.brd}, transparent)`, margin: '14px 0' }} />}
+              {dividerStyle === 'none' && <div style={{ margin: '8px 0' }} />}
+
+              {/* Button */}
+              <div style={{
+                padding: '12px 0', borderRadius: th.r, textAlign: 'center', fontSize: 12,
+                fontWeight: 500, letterSpacing: '0.1em', cursor: 'pointer',
+                ...(btnStyle === 'solid' ? { background: th.pri, color: '#fff' } :
+                  btnStyle === 'outline' ? { border: `1.5px solid ${th.pri}`, color: th.pri, background: 'transparent' } :
+                  btnStyle === 'soft' ? { background: th.pri + '20', color: th.pri } :
+                  { color: th.pri, background: 'transparent' }),
+              }}>
+                確認並發送預約
+              </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* Save button */}
-      <div style={{ marginTop: 30, display: 'flex', alignItems: 'center', gap: 14 }}>
-        <button onClick={handleSave} disabled={saving}
+      {/* ═══ 底部操作列 ═══ */}
+      <div style={{ marginTop: 28, display: 'flex', alignItems: 'center', gap: 12, paddingTop: 16, borderTop: `1px solid ${th.brd}` }}>
+        <motion.button whileTap={{ scale: 0.97 }} onClick={handleSave} disabled={saving}
           style={{
             padding: '12px 32px', borderRadius: 6, border: 'none',
-            background: saving ? '#ccc' : '#8a7c68', color: '#fff',
-            fontSize: '0.82rem', fontWeight: 500, cursor: saving ? 'not-allowed' : 'pointer'
+            background: saving ? '#ccc' : th.pri, color: '#fff',
+            fontSize: 13, fontWeight: 500, cursor: saving ? 'not-allowed' : 'pointer', letterSpacing: 0.5,
           }}>
-          {saving ? '儲存中...' : '💾 儲存設定'}
-        </button>
-        {saved && <span style={{ fontSize: '0.76rem', color: '#4a9' }}>✅ 已儲存！</span>}
-        {error && <span style={{ fontSize: '0.76rem', color: '#c44' }}>❌ {error}</span>}
+          {saving ? '儲存中...' : '💾 儲存主題'}
+        </motion.button>
+
+        <motion.button whileTap={{ scale: 0.97 }} onClick={handleReset}
+          style={{
+            padding: '12px 20px', borderRadius: 6, border: `1px solid ${th.brd}`,
+            background: 'transparent', color: th.t3, fontSize: 12, cursor: 'pointer',
+          }}>
+          ↩ 重設
+        </motion.button>
+
+        {saveMsg && (
+          <motion.span initial={{ opacity: 0, x: -5 }} animate={{ opacity: 1, x: 0 }}
+            style={{ fontSize: 12, color: saveMsg.includes('✅') ? '#4a9' : '#c44' }}>
+            {saveMsg}
+          </motion.span>
+        )}
       </div>
 
-      <div style={{ marginTop: 16, fontSize: '0.66rem', color: '#aaa' }}>
-        儲存後，客人嘅預約頁面會自動套用新設定（毋需重新部署）。
+      <div style={{ marginTop: 10, fontSize: 10, color: th.t3 }}>
+        儲存後，客人嘅預約頁面會自動套用新主題（毋需重新部署）。
       </div>
     </div>
   );
