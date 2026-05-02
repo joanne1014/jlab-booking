@@ -7,17 +7,18 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'POST only' });
   }
 
+  // ═══ 環境變數檢查（放喺 createClient 之前）═══
+  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY) {
+    return res.status(500).json({ error: '伺服器設定錯誤：缺少 Supabase 環境變數' });
+  }
+
   // ═══ 初始化 Supabase ═══
   const supabase = createClient(
     process.env.SUPABASE_URL,
     process.env.SUPABASE_SERVICE_KEY
   );
 
-  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY) {
-    return res.status(500).json({ error: '伺服器設定錯誤：缺少 Supabase 環境變數' });
-  }
-
-  const { action, startDate, endDate, month } = req.body;
+  const { action, startDate, endDate, month } = req.body || {};
 
   if (!action) {
     return res.status(400).json({ error: '缺少 action 參數' });
@@ -45,26 +46,29 @@ export default async function handler(req, res) {
 
         // 並行查詢提升速度
         const [todayRes, thisMonthRes, lastMonthRes] = await Promise.all([
-          // 今日預約
           supabase
             .from('bookings')
             .select('id, status, total_price')
             .eq('booking_date', today),
 
-          // 本月所有預約（即時計算，唔依賴 view）
           supabase
             .from('bookings')
             .select('id, status, total_price, customer_phone')
             .gte('booking_date', thisMonthStart)
             .lte('booking_date', today),
 
-          // 上月所有預約
           supabase
             .from('bookings')
             .select('id, status, total_price')
             .gte('booking_date', lastMonthStart)
             .lte('booking_date', lastMonthEnd),
         ]);
+
+        // 檢查查詢錯誤
+        if (todayRes.error || thisMonthRes.error || lastMonthRes.error) {
+          const errMsg = todayRes.error?.message || thisMonthRes.error?.message || lastMonthRes.error?.message;
+          return res.status(500).json({ error: '查詢失敗: ' + errMsg });
+        }
 
         // 統一計算函數
         const calc = (arr) => {
@@ -86,7 +90,7 @@ export default async function handler(req, res) {
         const thisMonthCalc = calc(thisMonthRes.data);
         const lastMonthCalc = calc(lastMonthRes.data);
 
-        // 本月獨立客戶數（用 phone 去重）
+        // 本月獨立客戶數
         const uniquePhones = new Set(
           (thisMonthRes.data || [])
             .map(b => b.customer_phone)
@@ -110,7 +114,7 @@ export default async function handler(req, res) {
       }
 
       // ═══════════════════════════════════════
-      //  月度趨勢（圖表用，最多 12 個月）
+      //  月度趨勢
       // ═══════════════════════════════════════
       case 'get-monthly-trend': {
         const { data, error } = await supabase
@@ -123,7 +127,6 @@ export default async function handler(req, res) {
           console.error('monthly_revenue error:', error);
           return res.status(500).json({ error: '取得月度趨勢失敗: ' + error.message });
         }
-
         return res.status(200).json({ data: data || [] });
       }
 
@@ -131,7 +134,6 @@ export default async function handler(req, res) {
       //  技師業績
       // ═══════════════════════════════════════
       case 'get-staff-performance': {
-        // 預設本月，可傳入指定月份 (格式: '2026-05-01')
         const targetMonth = month || (new Date().toISOString().slice(0, 7) + '-01');
 
         const { data, error } = await supabase
@@ -144,12 +146,11 @@ export default async function handler(req, res) {
           console.error('staff_performance error:', error);
           return res.status(500).json({ error: '取得技師業績失敗: ' + error.message });
         }
-
         return res.status(200).json({ data: data || [] });
       }
 
       // ═══════════════════════════════════════
-      //  熱門服務 Top 10
+      //  熱門服務
       // ═══════════════════════════════════════
       case 'get-popular-services': {
         const { data, error } = await supabase
@@ -161,12 +162,11 @@ export default async function handler(req, res) {
           console.error('popular_services error:', error);
           return res.status(500).json({ error: '取得熱門服務失敗: ' + error.message });
         }
-
         return res.status(200).json({ data: data || [] });
       }
 
       // ═══════════════════════════════════════
-      //  客戶消費排行 Top 20
+      //  客戶消費排行
       // ═══════════════════════════════════════
       case 'get-top-customers': {
         const { data, error } = await supabase
@@ -178,7 +178,6 @@ export default async function handler(req, res) {
           console.error('top_customers error:', error);
           return res.status(500).json({ error: '取得客戶排行失敗: ' + error.message });
         }
-
         return res.status(200).json({ data: data || [] });
       }
 
@@ -195,7 +194,6 @@ export default async function handler(req, res) {
           console.error('hourly_distribution error:', error);
           return res.status(500).json({ error: '取得時段分布失敗: ' + error.message });
         }
-
         return res.status(200).json({ data: data || [] });
       }
 
@@ -212,12 +210,11 @@ export default async function handler(req, res) {
           console.error('weekday_distribution error:', error);
           return res.status(500).json({ error: '取得星期分布失敗: ' + error.message });
         }
-
         return res.status(200).json({ data: data || [] });
       }
 
       // ═══════════════════════════════════════
-      //  自訂日期範圍查詢（進階用）
+      //  自訂日期範圍查詢
       // ═══════════════════════════════════════
       case 'get-date-range': {
         if (!startDate || !endDate) {
@@ -235,7 +232,6 @@ export default async function handler(req, res) {
           return res.status(500).json({ error: '查詢失敗: ' + error.message });
         }
 
-        // 計算匯總
         const all = data || [];
         const completed = all.filter(b => b.status === 'completed');
         const revenue = completed.reduce((s, b) => s + (Number(b.total_price) || 0), 0);
@@ -255,14 +251,13 @@ export default async function handler(req, res) {
       }
 
       // ═══════════════════════════════════════
-      //  每日營收（用於日曆熱力圖，可選）
+      //  每日營收
       // ═══════════════════════════════════════
       case 'get-daily-revenue': {
         const targetMonth = month || new Date().toISOString().slice(0, 7);
         const monthStart = targetMonth + '-01';
-        // 計算月尾
-        const [y, m] = targetMonth.split('-').map(Number);
-        const monthEnd = new Date(y, m, 0).toISOString().split('T')[0];
+        const [y, m2] = targetMonth.split('-').map(Number);
+        const monthEnd = new Date(y, m2, 0).toISOString().split('T')[0];
 
         const { data, error } = await supabase
           .from('bookings')
@@ -275,7 +270,6 @@ export default async function handler(req, res) {
           return res.status(500).json({ error: '查詢失敗: ' + error.message });
         }
 
-        // 按日期分組
         const dailyMap = {};
         (data || []).forEach(b => {
           const d = b.booking_date;
@@ -284,13 +278,11 @@ export default async function handler(req, res) {
           dailyMap[d].count += 1;
         });
 
-        const dailyArray = Object.values(dailyMap).sort((a, b) => a.date.localeCompare(b.date));
-
-        return res.status(200).json({ data: dailyArray });
+        return res.status(200).json({
+          data: Object.values(dailyMap).sort((a, b) => a.date.localeCompare(b.date))
+        });
       }
 
-      // ═══════════════════════════════════════
-      //  未知 action
       // ═══════════════════════════════════════
       default:
         return res.status(400).json({ error: `未知嘅 action: ${action}` });
@@ -300,7 +292,7 @@ export default async function handler(req, res) {
     console.error('Reports API 錯誤:', err);
     return res.status(500).json({
       error: '伺服器內部錯誤',
-      detail: process.env.NODE_ENV === 'development' ? err.message : undefined,
+      detail: err.message,
     });
   }
 }
