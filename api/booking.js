@@ -1,3 +1,4 @@
+// api/booking.js — 完整版
 import { createClient } from '@supabase/supabase-js'
 
 const SB_URL = process.env.SUPABASE_URL
@@ -22,6 +23,55 @@ export default async function handler(req, res) {
   if (!action) return res.status(400).json({ error: 'Missing action' });
 
   try {
+
+    // ═══ 取得前台主題設定（公開） ═══
+    if (action === 'get-frontend-settings') {
+      const { data, error } = await supabase
+        .from('frontend_settings')
+        .select('*')
+        .limit(1)
+        .single();
+      if (error && error.code !== 'PGRST116') {
+        return res.status(500).json({ error: error.message });
+      }
+      return res.status(200).json({ settings: data || null });
+    }
+
+    // ═══ 儲存前台主題設定（管理員用） ═══
+    if (action === 'save-frontend-settings') {
+      const { settings } = payload;
+      if (!settings) return res.status(400).json({ error: 'Missing settings' });
+
+      // 檢查是否已有記錄
+      const { data: existing } = await supabase
+        .from('frontend_settings')
+        .select('id')
+        .limit(1)
+        .single();
+
+      let result;
+      if (existing) {
+        // 更新現有記錄
+        const { data, error } = await supabase
+          .from('frontend_settings')
+          .update({ ...settings, updated_at: new Date().toISOString() })
+          .eq('id', existing.id)
+          .select()
+          .single();
+        if (error) return res.status(500).json({ error: error.message });
+        result = data;
+      } else {
+        // 插入新記錄
+        const { data, error } = await supabase
+          .from('frontend_settings')
+          .insert([{ ...settings, created_at: new Date().toISOString(), updated_at: new Date().toISOString() }])
+          .select()
+          .single();
+        if (error) return res.status(500).json({ error: error.message });
+        result = data;
+      }
+      return res.status(200).json({ success: true, settings: result });
+    }
 
     // ═══ 取得所有上架中嘅服務 ═══
     if (action === 'get-services') {
@@ -153,9 +203,49 @@ export default async function handler(req, res) {
       }
       return res.status(200).json({ slots: result, blocked: false });
     }
-// ═══ 發送通知給店主 ═══
+
+    // ═══ 提交預約 ═══
+    if (action === 'submit-booking') {
+      const { serviceName, variantLabel, addonNames, bookingDate, bookingTime, technicianLabel, staffId, customerName, customerPhone, notes, totalPrice, durationMinutes } = payload;
+      if (!serviceName || !bookingDate || !bookingTime || !customerName || !customerPhone)
+        return res.status(400).json({ error: '請填寫所有必填欄位' });
+
+      const { data: isBlocked } = await supabase.from('blocked_dates').select('id').eq('date', bookingDate).limit(1);
+      if (isBlocked && isBlocked.length > 0) return res.status(409).json({ error: '此日期已關閉，無法預約' });
+
+      let conflictQuery = supabase.from('bookings').select('id')
+        .eq('booking_date', bookingDate).eq('booking_time', bookingTime).neq('status', 'cancelled');
+      if (technicianLabel) conflictQuery = conflictQuery.eq('technician_label', technicianLabel);
+      const { data: conflicts } = await conflictQuery;
+      if (conflicts && conflicts.length > 0) return res.status(409).json({ error: '此時段已被預約，請選擇其他時間' });
+
+      const { data: blacklisted } = await supabase
+        .from('customers').select('id, is_blacklisted').eq('phone', customerPhone).eq('is_blacklisted', true).limit(1);
+      if (blacklisted && blacklisted.length > 0) return res.status(403).json({ error: '無法預約，請聯絡店舖' });
+
+      const { data: newBooking, error: insertErr } = await supabase.from('bookings').insert([{
+        service_name: serviceName, variant_label: variantLabel || null, addon_names: addonNames || [],
+        booking_date: bookingDate, booking_time: bookingTime,
+        technician_label: technicianLabel || null, staff_id: staffId || null,
+        customer_name: customerName, customer_phone: customerPhone,
+        customer_notes: notes || null, notes: notes || null,
+        total_price: totalPrice || 0, duration_minutes: durationMinutes || 60, status: 'pending',
+      }]).select().single();
+      if (insertErr) return res.status(500).json({ error: insertErr.message });
+
+      // ═══ 自動建立客戶記錄 ═══
       try {
-        // 取得通知設定
+        const { data: existing } = await supabase.from('customers').select('id').eq('phone', customerPhone).limit(1);
+        if (!existing || existing.length === 0) {
+          await supabase.from('customers').insert([{
+            name: customerName, phone: customerPhone, total_visits: 0, total_spent: 0,
+            last_visit_date: bookingDate, tags: [], notes: '', is_blacklisted: false,
+          }]);
+        }
+      } catch (_) {}
+
+      // ═══ 發送通知給店主 ═══
+      try {
         const { data: settings } = await supabase
           .from('frontend_settings')
           .select('notification_email, whatsapp_number, brand_name')
@@ -163,7 +253,6 @@ export default async function handler(req, res) {
           .single();
 
         if (settings?.notification_email) {
-          // 發送 Email 通知（使用 Resend）
           const RESEND_KEY = process.env.RESEND_API_KEY;
           if (RESEND_KEY) {
             const emailBody = `
@@ -200,47 +289,8 @@ ${notes ? `備註：${notes}\n` : ''}
           }
         }
       } catch (notifyErr) {
-        // 通知失敗唔影響預約結果
         console.error('Notification failed:', notifyErr.message);
       }
-    // ═══ 提交預約 ═══
-    if (action === 'submit-booking') {
-      const { serviceName, variantLabel, addonNames, bookingDate, bookingTime, technicianLabel, staffId, customerName, customerPhone, notes, totalPrice, durationMinutes } = payload;
-      if (!serviceName || !bookingDate || !bookingTime || !customerName || !customerPhone)
-        return res.status(400).json({ error: '請填寫所有必填欄位' });
-
-      const { data: isBlocked } = await supabase.from('blocked_dates').select('id').eq('date', bookingDate).limit(1);
-      if (isBlocked && isBlocked.length > 0) return res.status(409).json({ error: '此日期已關閉，無法預約' });
-
-      let conflictQuery = supabase.from('bookings').select('id')
-        .eq('booking_date', bookingDate).eq('booking_time', bookingTime).neq('status', 'cancelled');
-      if (technicianLabel) conflictQuery = conflictQuery.eq('technician_label', technicianLabel);
-      const { data: conflicts } = await conflictQuery;
-      if (conflicts && conflicts.length > 0) return res.status(409).json({ error: '此時段已被預約，請選擇其他時間' });
-
-      const { data: blacklisted } = await supabase
-        .from('customers').select('id, is_blacklisted').eq('phone', customerPhone).eq('is_blacklisted', true).limit(1);
-      if (blacklisted && blacklisted.length > 0) return res.status(403).json({ error: '無法預約，請聯絡店舖' });
-
-      const { data: newBooking, error: insertErr } = await supabase.from('bookings').insert([{
-        service_name: serviceName, variant_label: variantLabel || null, addon_names: addonNames || [],
-        booking_date: bookingDate, booking_time: bookingTime,
-        technician_label: technicianLabel || null, staff_id: staffId || null,
-        customer_name: customerName, customer_phone: customerPhone,
-        customer_notes: notes || null, notes: notes || null,
-        total_price: totalPrice || 0, duration_minutes: durationMinutes || 60, status: 'pending',
-      }]).select().single();
-      if (insertErr) return res.status(500).json({ error: insertErr.message });
-
-      try {
-        const { data: existing } = await supabase.from('customers').select('id').eq('phone', customerPhone).limit(1);
-        if (!existing || existing.length === 0) {
-          await supabase.from('customers').insert([{
-            name: customerName, phone: customerPhone, total_visits: 0, total_spent: 0,
-            last_visit_date: bookingDate, tags: [], notes: '', is_blacklisted: false,
-          }]);
-        }
-      } catch (_) {}
 
       return res.status(200).json({ success: true, booking: newBooking, message: '預約已提交，我們將透過 WhatsApp 確認' });
     }
