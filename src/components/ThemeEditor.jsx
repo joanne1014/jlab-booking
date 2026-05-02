@@ -2,7 +2,10 @@
 import React, { useState, useEffect } from 'react';
 
 const ADMIN_API = '/api/admin';
-const token = () => localStorage.getItem('adminToken') || '';
+const token = () => {
+  try { return sessionStorage.getItem('jlab_token') || ''; }
+  catch (_) { return ''; }
+};
 
 async function apiCall(action, payload = {}) {
   const res = await fetch(ADMIN_API, {
