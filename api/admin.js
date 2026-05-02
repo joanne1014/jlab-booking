@@ -1,4 +1,4 @@
-// pages/api/admin.js
+// api/admin.js
 import { createClient } from '@supabase/supabase-js'
 
 const SB_URL = process.env.SUPABASE_URL
@@ -195,6 +195,65 @@ export default async function handler(req, res) {
     }
 
     /* ══════════════════════════════════════
+       前台設定
+       ══════════════════════════════════════ */
+
+    if (action === 'get-frontend-settings') {
+      const { data, error } = await supabase
+        .from('frontend_settings')
+        .select('*')
+        .limit(1)
+        .single();
+      if (error && error.code !== 'PGRST116') return res.status(500).json({ error: error.message });
+      return res.status(200).json({ settings: data || null });
+    }
+
+    if (action === 'save-frontend-settings') {
+      const { settings } = payload;
+      if (!settings) return res.status(400).json({ error: 'Missing settings' });
+
+      // 移除 id 欄位避免衝突
+      const { id: _removeId, ...settingsWithoutId } = settings;
+
+      // 先檢查是否已有記錄
+      const { data: existing } = await supabase
+        .from('frontend_settings')
+        .select('id')
+        .limit(1)
+        .single();
+
+      let result;
+      if (existing) {
+        const { data, error } = await supabase
+          .from('frontend_settings')
+          .update({ ...settingsWithoutId, updated_at: new Date().toISOString() })
+          .eq('id', existing.id)
+          .select()
+          .single();
+        if (error) return res.status(500).json({ error: error.message });
+        result = data;
+      } else {
+        const { data, error } = await supabase
+          .from('frontend_settings')
+          .insert([{ ...settingsWithoutId, updated_at: new Date().toISOString() }])
+          .select()
+          .single();
+        if (error) return res.status(500).json({ error: error.message });
+        result = data;
+      }
+
+      // 記錄審計日誌
+      await supabase.from('audit_logs').insert([{
+        action: 'frontend_settings_update',
+        target_type: 'settings',
+        target_id: result?.id || 'frontend_settings',
+        details: { updated_fields: Object.keys(settingsWithoutId) },
+      }]).catch(() => {});
+
+      return res.status(200).json({ success: true, settings: result });
+    }
+
+    /* ══════════════════════════════════════
        預約相關
        ══════════════════════════════════════ */
 
@@ -387,7 +446,6 @@ export default async function handler(req, res) {
     }
 
     if (action === 'refresh-customer-stats') {
-      // 1. 攞所有已確認/已完成嘅預約
       const { data: bookings, error: bErr } = await supabase
         .from('bookings')
         .select('*')
@@ -395,7 +453,6 @@ export default async function handler(req, res) {
 
       if (bErr) return res.status(500).json({ error: bErr.message });
 
-      // 2. 按電話號碼分組統計
       const phoneMap = {};
       for (const b of (bookings || [])) {
         const phone = b.customer_phone;
@@ -411,24 +468,20 @@ export default async function handler(req, res) {
           };
         }
 
-        // 計算次數同金額
         phoneMap[phone].total_visits++;
         phoneMap[phone].total_spent += (b.total_price || 0);
 
-        // 記錄最近一次日期
         if (b.booking_date) {
           if (!phoneMap[phone].last_visit_date || b.booking_date > phoneMap[phone].last_visit_date) {
             phoneMap[phone].last_visit_date = b.booking_date;
           }
         }
 
-        // 用最新嘅名
         if (b.customer_name) {
           phoneMap[phone].name = b.customer_name;
         }
       }
 
-      // 3. Upsert：有就 update，冇就 insert
       let created = 0;
       let updated = 0;
 
@@ -577,7 +630,7 @@ export default async function handler(req, res) {
       const tablesToBackup = [
         'staff','services','service_variants','service_addons',
         'enabled_timeslots','date_availability','blocked_dates',
-        'customers','notification_templates',
+        'customers','notification_templates','frontend_settings',
       ];
       for (const t of tablesToBackup) {
         try {
@@ -601,7 +654,7 @@ export default async function handler(req, res) {
 
     if (action === 'health') {
       const tables = {};
-      for (const t of ['staff','services','bookings','enabled_timeslots']) {
+      for (const t of ['staff','services','bookings','enabled_timeslots','frontend_settings']) {
         try {
           const { count } = await supabase.from(t).select('*', { count: 'exact', head: true });
           tables[t] = count;
