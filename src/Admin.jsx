@@ -1,3 +1,4 @@
+import ThemeEditor from '../components/ThemeEditor';
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 
 /* ═══ Module-level ═══ */
@@ -1008,7 +1009,7 @@ export default function Admin() {
         {/* ═══ FRONTEND TAB ═══ */}
         {tab === 'frontend' && (<>
           <div style={{ ...card, background: '#e8f5e9', border: '1px solid #a5d6a7', padding: 16 }}><div style={{ fontSize: 13, color: '#2e7d32', lineHeight: 1.8 }}>🎨 <b>前台管理：</b>喺呢度編輯客人睇到嘅服務項目、價錢、附加項目等。</div></div>
-          <div style={{ display: 'flex', gap: 0, marginBottom: 20 }}>{[['services', '🎨 服務項目'], ['addons', '➕ 附加項目']].map(([k, l]) => (<button key={k} onClick={() => setSvcSubTab(k)} style={{ padding: '10px 24px', border: 'none', cursor: 'pointer', fontSize: 13, fontFamily: font, fontWeight: svcSubTab === k ? 700 : 400, background: svcSubTab === k ? '#5c4a3a' : '#fff', color: svcSubTab === k ? '#fff' : '#5c4a3a', borderRadius: k === 'services' ? '10px 0 0 10px' : '0 10px 10px 0', boxShadow: '0 2px 8px rgba(0,0,0,0.05)' }}>{l}</button>))}</div>
+          <div style={{ display: 'flex', gap: 0, marginBottom: 20 }}>{[['services', '🎨 服務項目'], ['addons', '➕ 附加項目'], ['theme', '🖌️ 主題設定']].map(([k, l]) => (<button key={k} onClick={() => setSvcSubTab(k)} style={{ padding: '10px 24px', border: 'none', cursor: 'pointer', fontSize: 13, fontFamily: font, fontWeight: svcSubTab === k ? 700 : 400, background: svcSubTab === k ? '#5c4a3a' : '#fff', color: svcSubTab === k ? '#fff' : '#5c4a3a', borderRadius: k === 'services' ? '10px 0 0 10px' : k === 'theme' ? '0 10px 10px 0' : '0', boxShadow: '0 2px 8px rgba(0,0,0,0.05)' }}>{l}</button>))}</div>
           {svcSubTab === 'services' && (
             <div style={card}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}><h2 style={{ margin: 0, color: '#5c4a3a', fontSize: 17 }}>🎨 服務項目 ({svcList.length})</h2><div style={{ display: 'flex', gap: 8 }}><button onClick={fetchServices} style={{ padding: '8px 14px', borderRadius: 8, border: '1px solid #d0c8bc', background: '#faf6f0', color: '#5c4a3a', cursor: 'pointer', fontSize: 13, fontFamily: font }}>🔄</button><button onClick={() => openEditSvc(null)} style={{ padding: '8px 20px', borderRadius: 8, border: 'none', background: '#5c4a3a', color: '#fff', cursor: 'pointer', fontSize: 13, fontFamily: font, fontWeight: 600 }}>➕ 新增服務</button></div></div>
@@ -1037,6 +1038,11 @@ export default function Admin() {
                   </div>
                 ))}</div>
               )}
+            </div>
+          )}
+          {svcSubTab === 'theme' && (
+            <div style={card}>
+              <ThemeEditor />
             </div>
           )}
         </>)}
