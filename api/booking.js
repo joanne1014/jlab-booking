@@ -153,7 +153,56 @@ export default async function handler(req, res) {
       }
       return res.status(200).json({ slots: result, blocked: false });
     }
+// ═══ 發送通知給店主 ═══
+      try {
+        // 取得通知設定
+        const { data: settings } = await supabase
+          .from('frontend_settings')
+          .select('notification_email, whatsapp_number, brand_name')
+          .limit(1)
+          .single();
 
+        if (settings?.notification_email) {
+          // 發送 Email 通知（使用 Resend）
+          const RESEND_KEY = process.env.RESEND_API_KEY;
+          if (RESEND_KEY) {
+            const emailBody = `
+📋 新預約通知
+
+服務：${serviceName}${variantLabel ? ` (${variantLabel})` : ''}
+${addonNames?.length ? `加購：${addonNames.join('、')}\n` : ''}日期：${bookingDate}
+時段：${bookingTime}
+技師：${technicianLabel || '待分配'}
+
+客人資料：
+姓名：${customerName}
+電話：${customerPhone}
+${notes ? `備註：${notes}\n` : ''}
+總額：$${totalPrice}
+
+---
+此通知由 ${settings.brand_name || 'J.LAB'} 預約系統自動發送
+            `.trim();
+
+            await fetch('https://api.resend.com/emails', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${RESEND_KEY}`
+              },
+              body: JSON.stringify({
+                from: `${settings.brand_name || 'J.LAB'} Booking <onboarding@resend.dev>`,
+                to: [settings.notification_email],
+                subject: `🆕 新預約 - ${customerName} | ${bookingDate} ${bookingTime}`,
+                text: emailBody
+              })
+            });
+          }
+        }
+      } catch (notifyErr) {
+        // 通知失敗唔影響預約結果
+        console.error('Notification failed:', notifyErr.message);
+      }
     // ═══ 提交預約 ═══
     if (action === 'submit-booking') {
       const { serviceName, variantLabel, addonNames, bookingDate, bookingTime, technicianLabel, staffId, customerName, customerPhone, notes, totalPrice, durationMinutes } = payload;
