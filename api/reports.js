@@ -8,14 +8,14 @@ export default async function handler(req, res) {
   }
 
   // ═══ 環境變數檢查（放喺 createClient 之前）═══
-  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_KEY) {
+if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
     return res.status(500).json({ error: '伺服器設定錯誤：缺少 Supabase 環境變數' });
   }
 
   // ═══ 初始化 Supabase ═══
   const supabase = createClient(
     process.env.SUPABASE_URL,
-    process.env.SUPABASE_SERVICE_KEY
+    process.env.SUPABASE_SERVICE_ROLE_KEY
   );
 
   const { action, startDate, endDate, month } = req.body || {};
