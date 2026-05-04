@@ -181,8 +181,6 @@ export default function Admin() {
   const [showAddRecord, setShowAddRecord] = useState(false);
   const [newRecord, setNewRecord] = useState({});
   // ★ 月曆 + 營業時間 + 預覽
-  const [calMonth, setCalMonth] = useState(new Date().getMonth());
-  const [calYear, setCalYear] = useState(new Date().getFullYear());
   const [calSelectedDate, setCalSelectedDate] = useState(null);
   const [businessHours, setBusinessHours] = useState([]);
   const [bhEditing, setBhEditing] = useState(false);
@@ -335,11 +333,11 @@ const [previewUrl, setPreviewUrl] = useState('https://jlab-booking.vercel.app/bo
     for (let i = 1; i <= daysInMonth; i++) days.push(i);
     return days;
   };
-  const getBookingsForDate = (day) => {
-    if (!day) return [];
-    const dateStr = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-    return bookings.filter(b => b.date === dateStr);
-  };
+const getBookingsForDate = (day) => {
+  if (!day) return [];
+  const dateStr = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  return allBookings.filter(b => b.booking_date === dateStr && b.status !== 'cancelled');
+};
   const calMonthName = ['一月','二月','三月','四月','五月','六月','七月','八月','九月','十月','十一月','十二月'];
   const prevMonth = () => { if (calMonth === 0) { setCalMonth(11); setCalYear(y => y - 1); } else setCalMonth(m => m - 1); setCalSelectedDate(null); };
   const nextMonth = () => { if (calMonth === 11) { setCalMonth(0); setCalYear(y => y + 1); } else setCalMonth(m => m + 1); setCalSelectedDate(null); };
