@@ -180,6 +180,13 @@ export default function Admin() {
   const [custExpandedRecord, setCustExpandedRecord] = useState(null);
   const [showAddRecord, setShowAddRecord] = useState(false);
   const [newRecord, setNewRecord] = useState({});
+  // ★ 月曆 + 營業時間 + 預覽
+  const [calMonth, setCalMonth] = useState(new Date().getMonth());
+  const [calYear, setCalYear] = useState(new Date().getFullYear());
+  const [calSelectedDate, setCalSelectedDate] = useState(null);
+  const [businessHours, setBusinessHours] = useState([]);
+  const [bhEditing, setBhEditing] = useState(false);
+const [previewUrl, setPreviewUrl] = useState('https://jlab-booking.vercel.app/booking');
   const [allPackages, setAllPackages] = useState([]);
   const [packageTypes, setPackageTypes] = useState([]);
   const [pkgLoading, setPkgLoading] = useState(false);
@@ -280,9 +287,9 @@ export default function Admin() {
 
   const handleResetNewPw = async () => { setResetPwError(''); if (!resetNewPw || resetNewPw.length < 6) { setResetPwError('新密碼至少要 6 個字元'); return; } if (resetNewPw !== resetConfirmPw) { setResetPwError('兩次密碼不一致'); return; } setResetPwLoading(true); try { await apiCall('reset-via-token', { token: recoveryToken, newPassword: resetNewPw }); showToast('✅ 密碼已重設，請重新登入'); setShowResetForm(false); setRecoveryToken(''); setResetNewPw(''); setResetConfirmPw(''); } catch (err) { setResetPwError(err.message || '重設失敗'); } setResetPwLoading(false); };
 
-  const handleLogin = async (e) => { e.preventDefault(); setLoginError(''); setLoginLoading(true); try { const result = await apiCall('login', { email: loginEmail, password: pw }); authToken = result.access_token; try { sessionStorage.setItem('jlab_token', result.access_token); } catch (_) {} setAuth(true); try { const roles = await sbGet(`admin_users?email=eq.${encodeURIComponent(loginEmail)}`); if (roles && roles.length > 0) { setUserRole(roles[0].role || 'owner'); setUserStaffId(roles[0].staff_id || null); } else { setUserRole('owner'); } } catch (_) { setUserRole('owner'); } fetchBookings(); fetchBlocked(); fetchStaff(); fetchServices(); fetchAddons(); fetchLogs(); fetchCustomers(); fetchPackageTypes(); fetchAllPackages(); apiCall('auto-backup').catch(() => {}); } catch (err) { setLoginError(err.message || '帳號或密碼錯誤'); } setLoginLoading(false); };
+  const handleLogin = async (e) => { e.preventDefault(); setLoginError(''); setLoginLoading(true); try { const result = await apiCall('login', { email: loginEmail, password: pw }); authToken = result.access_token; try { sessionStorage.setItem('jlab_token', result.access_token); } catch (_) {} setAuth(true); try { const roles = await sbGet(`admin_users?email=eq.${encodeURIComponent(loginEmail)}`); if (roles && roles.length > 0) { setUserRole(roles[0].role || 'owner'); setUserStaffId(roles[0].staff_id || null); } else { setUserRole('owner'); } } catch (_) { setUserRole('owner'); } fetchBookings(); fetchBlocked(); fetchStaff(); fetchServices(); fetchAddons(); fetchLogs(); fetchCustomers(); fetchPackageTypes(); fetchAllPackages(); fetchBusinessHours();; apiCall('auto-backup').catch(() => {}); } catch (err) { setLoginError(err.message || '帳號或密碼錯誤'); } setLoginLoading(false); };
 
-  useEffect(() => { const saved = sessionStorage.getItem('jlab_token'); if (saved) { authToken = saved; apiCall('verify').then(() => { setAuth(true); fetchBookings(); fetchBlocked(); fetchStaff(); fetchServices(); fetchAddons(); fetchLogs(); fetchCustomers(); fetchPackageTypes(); fetchAllPackages(); apiCall('auto-backup').catch(() => {}); }).catch(() => { authToken = null; sessionStorage.removeItem('jlab_token'); }); } }, []);
+  useEffect(() => { const saved = sessionStorage.getItem('jlab_token'); if (saved) { authToken = saved; apiCall('verify').then(() => { setAuth(true); fetchBookings(); fetchBlocked(); fetchStaff(); fetchServices(); fetchAddons(); fetchLogs(); fetchCustomers();fetchPackageTypes(); fetchAllPackages(); fetchBusinessHours();; apiCall('auto-backup').catch(() => {}); }).catch(() => { authToken = null; sessionStorage.removeItem('jlab_token'); }); } }, []);
 
   const logChange = (text) => { const id = Date.now(); const ts = new Date().toLocaleTimeString('zh-HK', { hour: '2-digit', minute: '2-digit', second: '2-digit' }); setChangeLog(prev => [{ id, text, ts }, ...prev].slice(0, 30)); try { sbPost('admin_logs', [{ action: text, admin_email: loginEmail || 'admin' }]); } catch (e) { console.error('Log save failed:', e); } };
   const fetchLogs = async () => { setLogLoading(true); try { const data = await sbGet('admin_logs?order=created_at.desc&limit=100'); setDbLogs(data || []); } catch (e) { console.error(e); } setLogLoading(false); };
@@ -305,6 +312,37 @@ export default function Admin() {
     try { const pkgs = await sbGet(`customer_packages?customer_phone=eq.${encodeURIComponent(cust.phone)}&status=eq.active`); setCustPackages(pkgs || []); } catch (_) { setCustPackages([]); }
     try { const pts = await sbGet(`points_log?customer_phone=eq.${encodeURIComponent(cust.phone)}&order=created_at.desc&limit=20`); setCustPointsLog(pts || []); } catch (_) { setCustPointsLog([]); }
   };
+  // ★ 營業時間函數
+  const fetchBusinessHours = async () => {
+    try { const data = await sbGet('business_hours?order=day_of_week'); setBusinessHours(data || []); } catch (_) {}
+  };
+  const saveBusinessHours = async () => {
+    try {
+      for (const bh of businessHours) {
+        await sbPatch(`business_hours?id=eq.${bh.id}`, { is_open: bh.is_open, open_time: bh.open_time, close_time: bh.close_time });
+      }
+      showToast('✅ 營業時間已儲存');
+      setBhEditing(false);
+      logChange('🕐 更新營業時間');
+    } catch (e) { showToast('❌ 儲存失敗：' + e.message); }
+  };
+  // ★ 月曆輔助函數
+  const getCalendarDays = () => {
+    const firstDay = new Date(calYear, calMonth, 1).getDay();
+    const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
+    const days = [];
+    for (let i = 0; i < firstDay; i++) days.push(null);
+    for (let i = 1; i <= daysInMonth; i++) days.push(i);
+    return days;
+  };
+  const getBookingsForDate = (day) => {
+    if (!day) return [];
+    const dateStr = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    return bookings.filter(b => b.date === dateStr);
+  };
+  const calMonthName = ['一月','二月','三月','四月','五月','六月','七月','八月','九月','十月','十一月','十二月'];
+  const prevMonth = () => { if (calMonth === 0) { setCalMonth(11); setCalYear(y => y - 1); } else setCalMonth(m => m - 1); setCalSelectedDate(null); };
+  const nextMonth = () => { if (calMonth === 11) { setCalMonth(0); setCalYear(y => y + 1); } else setCalMonth(m => m + 1); setCalSelectedDate(null); };
   const fetchPackageTypes = async () => {
     try { const data = await sbGet('package_types?order=created_at'); setPackageTypes(data || []); } catch (_) {}
   };
@@ -584,11 +622,13 @@ const allTabs = [
   { key: 'bookings', label: `📋 預約${stats.pending > 0 ? ` (${stats.pending})` : ''}`, show: true },
   { key: 'timeslots', label: '🕐 時段', show: true },
   { key: 'customers', label: '👥 客戶', show: true },
+  { key: 'calendar', label: '📅 月曆', show: true },
   { key: 'packages', label: '🎫 套票', show: true },
   { key: 'reminders', label: '📱 提醒', show: true },
-  { key: 'reports', label: '📊 報表', show: isOwner },   // ← 加呢行
+  { key: 'reports', label: '📊 報表', show: isOwner }, 
   { key: 'frontend', label: '🎨 前台管理', show: isOwner },
   { key: 'templates', label: '📝 訊息模板', show: isOwner },
+  { key: 'hours', label: '🕐 營業時間', show: true },
 ].filter(t => t.show);
 
   // ★ NEW — 審計日誌 action 名稱中文化
@@ -1269,6 +1309,132 @@ const allTabs = [
             )}
           </div>
         )}
+        {/* ═══ CALENDAR TAB ═══ */}
+        {tab === 'calendar' && (
+          <div>
+            {/* 月份導航 */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, background: '#fff', padding: '14px 20px', borderRadius: 12, boxShadow: '0 2px 10px rgba(0,0,0,0.06)' }}>
+              <button onClick={prevMonth} style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid #d0c8bc', background: '#faf6f0', color: '#5c4a3a', cursor: 'pointer', fontSize: 14, fontFamily: font }}>◀ 上月</button>
+              <div style={{ fontSize: 20, fontWeight: 700, color: '#5c4a3a' }}>{calYear}年 {calMonthName[calMonth]}</div>
+              <button onClick={nextMonth} style={{ padding: '8px 16px', borderRadius: 8, border: '1px solid #d0c8bc', background: '#faf6f0', color: '#5c4a3a', cursor: 'pointer', fontSize: 14, fontFamily: font }}>下月 ▶</button>
+            </div>
+
+            {/* 月曆網格 */}
+            <div style={{ background: '#fff', borderRadius: 14, overflow: 'hidden', boxShadow: '0 2px 10px rgba(0,0,0,0.06)' }}>
+              {/* 星期標題 */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', borderBottom: '1px solid #eee' }}>
+                {['日','一','二','三','四','五','六'].map(d => (
+                  <div key={d} style={{ padding: '10px 0', textAlign: 'center', fontSize: 12, fontWeight: 600, color: '#999', background: '#f9f6f3' }}>{d}</div>
+                ))}
+              </div>
+              {/* 日期格 */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)' }}>
+                {getCalendarDays().map((day, idx) => {
+                  const dayBookings = day ? getBookingsForDate(day) : [];
+                  const isToday = day && calYear === new Date().getFullYear() && calMonth === new Date().getMonth() && day === new Date().getDate();
+                  const isSelected = day && calSelectedDate === day;
+                  return (
+                    <div key={idx} onClick={() => day && setCalSelectedDate(day === calSelectedDate ? null : day)} style={{ minHeight: 70, padding: 6, borderRight: '1px solid #f0ebe3', borderBottom: '1px solid #f0ebe3', cursor: day ? 'pointer' : 'default', background: isSelected ? '#FFF3E0' : isToday ? '#f0fdf4' : day ? '#fff' : '#fafafa', transition: 'background 0.2s' }}>
+                      {day && (
+                        <>
+                          <div style={{ fontSize: 13, fontWeight: isToday ? 700 : 500, color: isToday ? '#2e7d32' : '#5c4a3a', marginBottom: 4 }}>{day}</div>
+                          {dayBookings.length > 0 && (
+                            <div style={{ background: dayBookings.length > 3 ? '#FF9800' : '#5c4a3a', color: '#fff', borderRadius: 10, padding: '2px 6px', fontSize: 10, fontWeight: 600, display: 'inline-block' }}>{dayBookings.length} 單</div>
+                          )}
+                          {dayBookings.length > 0 && dayBookings.length <= 2 && dayBookings.map((b, i) => (
+                            <div key={i} style={{ fontSize: 9, color: '#888', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{b.time} {b.customer_name || ''}</div>
+                          ))}
+                        </>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* 選中日期嘅預約詳情 */}
+            {calSelectedDate && (
+              <div style={{ marginTop: 16, background: '#fff', borderRadius: 14, padding: 20, boxShadow: '0 2px 10px rgba(0,0,0,0.06)' }}>
+                <div style={{ fontSize: 16, fontWeight: 700, color: '#5c4a3a', marginBottom: 12 }}>📋 {calYear}/{calMonth + 1}/{calSelectedDate} 嘅預約</div>
+                {getBookingsForDate(calSelectedDate).length === 0 ? (
+                  <div style={{ color: '#999', fontSize: 13, padding: 20, textAlign: 'center' }}>呢日暫無預約</div>
+                ) : (
+                  getBookingsForDate(calSelectedDate).sort((a, b) => (a.time || '').localeCompare(b.time || '')).map((b, i) => (
+                    <div key={i} style={{ padding: '12px 14px', borderBottom: '1px solid #f0ebe3', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div>
+                        <div style={{ fontSize: 14, fontWeight: 600, color: '#5c4a3a' }}>{b.time || '未定'} - {b.customer_name || '未知'}</div>
+                        <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>📞 {b.customer_phone || ''} · {b.service || ''}{b.staff && ` · 👤 ${b.staff}`}</div>
+                      </div>
+                      <span style={{ padding: '4px 10px', borderRadius: 10, fontSize: 11, fontWeight: 600, background: b.status === 'confirmed' ? '#E8F5E9' : b.status === 'cancelled' ? '#FFEBEE' : '#FFF3E0', color: b.status === 'confirmed' ? '#2e7d32' : b.status === 'cancelled' ? '#c62828' : '#E65100' }}>{b.status === 'confirmed' ? '已確認' : b.status === 'cancelled' ? '已取消' : b.status || '待確認'}</span>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ═══ BUSINESS HOURS TAB ═══ */}
+        {tab === 'hours' && (
+          <div>
+            <div style={{ background: '#fff', borderRadius: 14, overflow: 'hidden', boxShadow: '0 2px 10px rgba(0,0,0,0.06)' }}>
+              <div style={{ padding: '16px 20px', borderBottom: '1px solid #eee', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: 16, fontWeight: 700, color: '#5c4a3a' }}>🕐 全店營業時間</span>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  {bhEditing ? (
+                    <>
+                      <button onClick={saveBusinessHours} style={{ padding: '8px 18px', borderRadius: 8, border: 'none', background: '#4CAF50', color: '#fff', cursor: 'pointer', fontSize: 13, fontFamily: font, fontWeight: 600 }}>💾 儲存</button>
+                      <button onClick={() => { setBhEditing(false); fetchBusinessHours(); }} style={{ padding: '8px 14px', borderRadius: 8, border: '1px solid #ccc', background: '#fff', color: '#666', cursor: 'pointer', fontSize: 13, fontFamily: font }}>取消</button>
+                    </>
+                  ) : (
+                    <button onClick={() => setBhEditing(true)} style={{ padding: '8px 18px', borderRadius: 8, border: '1px solid #d0c8bc', background: '#faf6f0', color: '#5c4a3a', cursor: 'pointer', fontSize: 13, fontFamily: font }}>✏️ 編輯</button>
+                  )}
+                </div>
+              </div>
+              <div style={{ padding: 20 }}>
+                <div style={{ fontSize: 12, color: '#888', marginBottom: 16 }}>呢個設定會顯示喺前台畀客人睇，方便佢哋知道你幾時營業。</div>
+                {businessHours.map((bh, idx) => (
+                  <div key={bh.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 0', borderBottom: '1px solid #f5f0eb' }}>
+                    <div style={{ width: 70, fontWeight: 600, fontSize: 14, color: '#5c4a3a' }}>{bh.day_name}</div>
+                    {bhEditing ? (
+                      <>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                          <input type="checkbox" checked={bh.is_open} onChange={e => setBusinessHours(prev => prev.map((h, i) => i === idx ? { ...h, is_open: e.target.checked } : h))} style={{ width: 18, height: 18 }} />
+                          <span style={{ fontSize: 12, color: bh.is_open ? '#2e7d32' : '#c62828' }}>{bh.is_open ? '營業' : '休息'}</span>
+                        </label>
+                        {bh.is_open && (
+                          <>
+                            <input type="time" value={bh.open_time} onChange={e => setBusinessHours(prev => prev.map((h, i) => i === idx ? { ...h, open_time: e.target.value } : h))} style={{ padding: '6px 10px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13 }} />
+                            <span style={{ color: '#999' }}>至</span>
+                            <input type="time" value={bh.close_time} onChange={e => setBusinessHours(prev => prev.map((h, i) => i === idx ? { ...h, close_time: e.target.value } : h))} style={{ padding: '6px 10px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13 }} />
+                          </>
+                        )}
+                      </>
+                    ) : (
+                      <div style={{ fontSize: 14, color: bh.is_open ? '#5c4a3a' : '#c62828', fontWeight: bh.is_open ? 400 : 600 }}>
+                        {bh.is_open ? `${bh.open_time} - ${bh.close_time}` : '🔴 休息'}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* 前台預覽效果 */}
+            <div style={{ marginTop: 20, background: '#fff', borderRadius: 14, padding: 20, boxShadow: '0 2px 10px rgba(0,0,0,0.06)' }}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: '#5c4a3a', marginBottom: 12 }}>👁️ 客人會見到嘅效果：</div>
+              <div style={{ background: '#f9f6f3', borderRadius: 12, padding: 20, border: '1px solid #e8e0d8' }}>
+                <div style={{ fontSize: 15, fontWeight: 700, color: '#5c4a3a', marginBottom: 12 }}>🕐 營業時間</div>
+                {businessHours.map(bh => (
+                  <div key={bh.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', fontSize: 13, color: bh.is_open ? '#333' : '#999' }}>
+                    <span>{bh.day_name}</span>
+                    <span style={{ fontWeight: bh.is_open ? 600 : 400 }}>{bh.is_open ? `${bh.open_time} - ${bh.close_time}` : '休息'}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
         {/* ═══ PACKAGES TAB ═══ */}
         {tab === 'packages' && (
           <div>
@@ -1445,6 +1611,27 @@ const allTabs = [
           {svcSubTab === 'theme' && (
             <div style={card}>
               <ThemeEditor />
+{/* 即時預覽 */}
+            <div style={{ marginTop: 20, background: '#fff', borderRadius: 14, overflow: 'hidden', boxShadow: '0 2px 10px rgba(0,0,0,0.06)' }}>
+              <div style={{ padding: '14px 20px', borderBottom: '1px solid #eee', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: 15, fontWeight: 600, color: '#5c4a3a' }}>👁️ 前台即時預覽</span>
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  <input value={previewUrl} onChange={e => setPreviewUrl(e.target.value)} placeholder="輸入你嘅前台網址 例：https://your-site.vercel.app" style={{ width: 300, padding: '8px 12px', border: '1px solid #ddd', borderRadius: 6, fontSize: 12, fontFamily: font }} />
+                  <button onClick={() => { const f = document.getElementById('preview-frame'); if (f) f.src = f.src; }} style={{ padding: '8px 14px', borderRadius: 6, border: '1px solid #d0c8bc', background: '#faf6f0', color: '#5c4a3a', cursor: 'pointer', fontSize: 12, fontFamily: font }}>🔄 刷新</button>
+                </div>
+              </div>
+              {previewUrl ? (
+                <div style={{ position: 'relative', width: '100%', height: 600, background: '#f5f5f5' }}>
+                  <iframe id="preview-frame" src={previewUrl} style={{ width: '100%', height: '100%', border: 'none' }} title="前台預覽" />
+                </div>
+              ) : (
+                <div style={{ padding: 40, textAlign: 'center', color: '#999', fontSize: 13 }}>
+                  ☝️ 請喺上面輸入你嘅前台 Booking 頁面網址<br />
+                  <span style={{ fontSize: 11, marginTop: 8, display: 'block' }}>例如：https://your-app.vercel.app/booking</span>
+                </div>
+              )}
+            </div>
+              
             </div>
           )}
         </>)}
