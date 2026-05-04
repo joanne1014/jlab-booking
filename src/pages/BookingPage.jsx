@@ -1,4 +1,4 @@
-// src/pages/BookingPage.jsx — 完整版（buildTheme + 即時預覽）
+// src/pages/BookingPage.jsx — 完整版（隱藏登入於 Logo）
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Check, ChevronUp, MessageCircle, Clock, User } from 'lucide-react';
@@ -141,7 +141,6 @@ export default function BookingPage() {
   // ★ 載入字體
   useEffect(() => {
     if (th.fnt) loadFont(th.fnt);
-    // 額外載入 display / accent fonts
     const corm = FS.find(f => f.id === 'corm');
     const play = FS.find(f => f.id === 'play');
     if (corm) loadFont(corm);
@@ -182,7 +181,7 @@ export default function BookingPage() {
 
   // ═══ Helper functions ═══
   const fetchDates = useCallback(async (staffId) => {
-    if (previewMode) return; // 預覽模式唔 fetch
+    if (previewMode) return;
     setDatesLoading(true);
     setAvailDates([]);
     setSelDate(null);
@@ -388,7 +387,7 @@ export default function BookingPage() {
       {/* ═══ Content wrapper ═══ */}
       <div style={{ position: 'relative', zIndex: 1 }}>
 
-        {/* ═══ Header ═══ */}
+        {/* ═══ Header（Logo 隱藏登入連結）═══ */}
         <header style={{
           display: 'flex', justifyContent: 'space-between', alignItems: 'center',
           padding: `${14 * pad}px ${22 * pad}px`,
@@ -407,9 +406,23 @@ export default function BookingPage() {
                 objectFit: 'cover',
               }} />
             )}
-            <div style={{ fontFamily: fp, fontSize: '1.1rem', fontWeight: 500, color: th.t2, letterSpacing: '0.04em', fontStyle: 'italic' }}>
+            {/* ★ 隱藏登入：點擊 brand name 進入 /admin ★ */}
+            <a
+              href="/admin"
+              style={{
+                fontFamily: fp,
+                fontSize: '1.1rem',
+                fontWeight: 500,
+                color: th.t2,
+                letterSpacing: '0.04em',
+                fontStyle: 'italic',
+                textDecoration: 'none',
+                cursor: 'default',  // 唔會顯示手指 icon
+              }}
+              title=""
+            >
               {th.brandName}
-            </div>
+            </a>
           </div>
         </header>
 
@@ -889,33 +902,13 @@ export default function BookingPage() {
             </span>
           </motion.button>
 
-          <div style={{ textAlign: 'center', fontSize: '0.48rem', color: th.t3, lineHeight: 1.8, marginTop: 8, fontWeight: 300 }}>
+          <div style={{ textAlign: 'center', fontSize: '0.48rem', color: th.t3, lineHeight: 1.8, marginTop: 8, marginBottom: 30, fontWeight: 300 }}>
             提交後我們將透過 WhatsApp 與您確認預約
           </div>
+
         </div>
 
-        {/* ═══ Footer ═══ */}
-        <div style={{
-          background: th.dk ? 'rgba(0,0,0,0.3)' : '#1a1814',
-          padding: `${28 * pad}px ${22 * pad}px`, textAlign: 'center',
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, marginBottom: 6 }}>
-            {logoUrl && (
-              <img src={logoUrl} alt="" style={{
-                width: 24, height: 24,
-                borderRadius: logoRadiusMap[logoShape],
-                objectFit: 'cover', opacity: 0.8,
-              }} />
-            )}
-            <div onClick={() => window.location.href = '/admin'}
-              style={{ fontFamily: fp, fontSize: '0.9rem', fontWeight: 500, color: th.pri, letterSpacing: '0.06em', fontStyle: 'italic', cursor: 'default' }}>
-              {th.brandName}
-            </div>
-          </div>
-          <div style={{ fontFamily: fc, fontSize: '0.5rem', letterSpacing: '0.2em', color: th.dk ? 'rgba(255,255,255,0.25)' : '#665e52', marginTop: 4, fontStyle: 'italic' }}>
-            {th.brandSubtitle}
-          </div>
-        </div>
+        {/* ═══ Footer 已移除 — 登入隱藏於左上角 Logo ═══ */}
 
         {/* ═══ Success Modal ═══ */}
         <AnimatePresence>
