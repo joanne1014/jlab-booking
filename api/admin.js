@@ -49,8 +49,9 @@ const ALLOWED_TABLES = [
   'timeslot_config','notification_templates','frontend_settings',
   'customers','admin_logs','admin_users','reminder_logs',
   'addons','technicians','time_slots','audit_logs','backups',
+  // ★ 新增
+  'service_records','customer_packages','consumption_records','points_log',
 ];
-
 /* ═══ DB Proxy ═══ */
 async function handleDbProxy(payload, res) {
   const { method = 'GET', path, body } = payload;
