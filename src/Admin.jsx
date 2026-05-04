@@ -180,10 +180,10 @@ export default function Admin() {
   const [custExpandedRecord, setCustExpandedRecord] = useState(null);
   const [showAddRecord, setShowAddRecord] = useState(false);
   const [newRecord, setNewRecord] = useState({});
-  // ★ 月曆 + 營業時間 + 預覽
-  const [calSelectedDate, setCalSelectedDate] = useState(null);
-  const [businessHours, setBusinessHours] = useState([]);
-  const [bhEditing, setBhEditing] = useState(false);
+// ★ 月曆 + 營業時間 + 預覽
+const [calSelectedDate, setCalSelectedDate] = useState(null);
+const [businessHours, setBusinessHours] = useState([]);
+const [bhEditing, setBhEditing] = useState(false);
 const [previewUrl, setPreviewUrl] = useState('https://jlab-booking.vercel.app/booking');
   const [allPackages, setAllPackages] = useState([]);
   const [packageTypes, setPackageTypes] = useState([]);
