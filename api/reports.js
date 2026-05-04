@@ -1,16 +1,30 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_KEY
-);
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_SERVICE_KEY;
 
 export default async function handler(req, res) {
+  // 檢查環境變數
+  if (!supabaseUrl || !supabaseKey) {
+    return res.status(500).json({ 
+      error: 'Missing environment variables',
+      details: {
+        hasUrl: !!supabaseUrl,
+        hasKey: !!supabaseKey
+      }
+    });
+  }
+
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { action, period, from, to } = req.body;
+  const supabase = createClient(supabaseUrl, supabaseKey);
+  const { action, period, from, to } = req.body || {};
+
+  if (!action) {
+    return res.status(400).json({ error: 'Missing action' });
+  }
 
   // Calculate date range based on period
   const getDateRange = () => {
@@ -56,16 +70,16 @@ export default async function handler(req, res) {
       const today = now.toISOString().split('T')[0];
       const monthStart = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
       const lastMonthYear = now.getMonth() === 0 ? now.getFullYear() - 1 : now.getFullYear();
-      const lastMonth = now.getMonth() === 0 ? 12 : now.getMonth();
-      const lastMonthStart = `${lastMonthYear}-${String(lastMonth).padStart(2, '0')}-01`;
-      const lastMonthEnd = `${lastMonthYear}-${String(lastMonth).padStart(2, '0')}-${new Date(lastMonthYear, lastMonth, 0).getDate()}`;
+      const lastMonthNum = now.getMonth() === 0 ? 12 : now.getMonth();
+      const lastMonthStart = `${lastMonthYear}-${String(lastMonthNum).padStart(2, '0')}-01`;
+      const lastMonthEnd = `${lastMonthYear}-${String(lastMonthNum).padStart(2, '0')}-${new Date(lastMonthYear, lastMonthNum, 0).getDate()}`;
 
-      const getStats = async (from, to) => {
+      const getStats = async (dateFrom, dateTo) => {
         const { data, error } = await supabase
           .from('bookings')
           .select('status, total_price')
-          .gte('booking_date', from)
-          .lte('booking_date', to);
+          .gte('booking_date', dateFrom)
+          .lte('booking_date', dateTo);
         if (error) throw error;
         const all = data || [];
         const active = all.filter(b => b.status !== 'cancelled');
@@ -85,7 +99,7 @@ export default async function handler(req, res) {
         getStats(lastMonthStart, lastMonthEnd)
       ]);
 
-      return res.json({ today: todayStats, thisMonth: thisMonthStats, lastMonth: lastMonthStats });
+      return res.status(200).json({ today: todayStats, thisMonth: thisMonthStats, lastMonth: lastMonthStats });
     }
 
     if (action === 'get-top-services') {
@@ -107,7 +121,7 @@ export default async function handler(req, res) {
       });
 
       const sorted = Object.values(map).sort((a, b) => b.revenue - a.revenue);
-      return res.json({ data: sorted });
+      return res.status(200).json({ data: sorted });
     }
 
     if (action === 'get-technician-stats') {
@@ -130,7 +144,7 @@ export default async function handler(req, res) {
       });
 
       const sorted = Object.values(map).sort((a, b) => b.revenue - a.revenue);
-      return res.json({ data: sorted });
+      return res.status(200).json({ data: sorted });
     }
 
     if (action === 'get-daily-revenue') {
@@ -152,20 +166,20 @@ export default async function handler(req, res) {
       });
 
       // Fill in missing dates
-      const start = new Date(dateFrom);
-      const end = new Date(dateTo);
+      const start = new Date(dateFrom + 'T00:00:00');
+      const end = new Date(dateTo + 'T00:00:00');
       for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
         const ds = d.toISOString().split('T')[0];
         if (!map[ds]) map[ds] = { date: ds, revenue: 0, count: 0 };
       }
 
       const sorted = Object.values(map).sort((a, b) => a.date.localeCompare(b.date));
-      return res.json({ data: sorted });
+      return res.status(200).json({ data: sorted });
     }
 
     return res.status(400).json({ error: '未知 action: ' + action });
   } catch (e) {
     console.error('Reports API error:', e);
-    return res.status(500).json({ error: e.message });
+    return res.status(500).json({ error: e.message || 'Internal server error' });
   }
 }
