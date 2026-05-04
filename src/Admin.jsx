@@ -170,7 +170,16 @@ export default function Admin() {
   const [custSearch, setCustSearch] = useState('');
   const [selectedCust, setSelectedCust] = useState(null);
   const [custBookings, setCustBookings] = useState([]);
-
+// ★ 客戶檔案系統
+  const [custProfileTab, setCustProfileTab] = useState('info');
+  const [custEditing, setCustEditing] = useState(false);
+  const [custServiceRecords, setCustServiceRecords] = useState([]);
+  const [custConsumption, setCustConsumption] = useState([]);
+  const [custPackages, setCustPackages] = useState([]);
+  const [custPointsLog, setCustPointsLog] = useState([]);
+  const [custExpandedRecord, setCustExpandedRecord] = useState(null);
+  const [showAddRecord, setShowAddRecord] = useState(false);
+  const [newRecord, setNewRecord] = useState({});
   const [reminders, setReminders] = useState([]);
   const [reminderDate, setReminderDate] = useState('');
   const [reminderLoading, setReminderLoading] = useState(false);
@@ -274,7 +283,40 @@ export default function Admin() {
   const exportCSV = () => { const hdrs = ['日期', '時間', '客人', '電話', '服務', '技師', '金額', '狀態', '取消原因']; const rows = filteredBookings.map(b => [b.booking_date, b.booking_time, b.customer_name, b.customer_phone, b.service_name, b.technician_label || '', b.total_price, statusText(b.status), b.cancel_reason || '']); const BOM = '\uFEFF'; const csv = BOM + [hdrs, ...rows].map(row => row.map(cell => `"${String(cell || '').replace(/"/g, '""')}"`).join(',')).join('\n'); const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `JLAB_預約_${todayStr}.csv`; a.click(); URL.revokeObjectURL(url); showToast('✅ 已匯出 CSV'); };
 
   const fetchCustomers = async () => { try { const data = await sbGet('customers?order=last_visit_date.desc.nullslast&limit=500'); setCustomers(data || []); } catch (_) {} };
-  const viewCustomer = async (cust) => { setSelectedCust(cust); try { const bks = await sbGet(`bookings?customer_phone=eq.${encodeURIComponent(cust.phone)}&order=booking_date.desc&limit=50`); setCustBookings(bks || []); } catch (_) {} };
+ const viewCustomer = async (cust) => {
+    setSelectedCust(cust);
+    setCustProfileTab('info');
+    setCustEditing(false);
+    setCustExpandedRecord(null);
+    setShowAddRecord(false);
+    try { const bks = await sbGet(`bookings?customer_phone=eq.${encodeURIComponent(cust.phone)}&order=booking_date.desc&limit=50`); setCustBookings(bks || []); } catch (_) { setCustBookings([]); }
+    try { const records = await sbGet(`service_records?customer_phone=eq.${encodeURIComponent(cust.phone)}&order=service_date.desc`); setCustServiceRecords(records || []); } catch (_) { setCustServiceRecords([]); }
+    try { const consumption = await sbGet(`consumption_records?customer_phone=eq.${encodeURIComponent(cust.phone)}&order=created_at.desc`); setCustConsumption(consumption || []); } catch (_) { setCustConsumption([]); }
+    try { const pkgs = await sbGet(`customer_packages?customer_phone=eq.${encodeURIComponent(cust.phone)}&status=eq.active`); setCustPackages(pkgs || []); } catch (_) { setCustPackages([]); }
+    try { const pts = await sbGet(`points_log?customer_phone=eq.${encodeURIComponent(cust.phone)}&order=created_at.desc&limit=20`); setCustPointsLog(pts || []); } catch (_) { setCustPointsLog([]); }
+  };
+  const saveCustomerProfile = async () => {
+    if (!selectedCust) return;
+    try {
+      const { id, created_at, ...fields } = selectedCust;
+      await sbPatch(`customers?id=eq.${id}`, { ...fields, updated_at: new Date().toISOString() });
+      setCustomers(prev => prev.map(c => c.id === id ? selectedCust : c));
+      setCustEditing(false);
+      showToast('✅ 客戶資料已儲存');
+    } catch (e) { showToast('❌ 儲存失敗：' + e.message); }
+  };
+
+  const saveServiceRecord = async () => {
+    if (!selectedCust || !newRecord.service_date) return showToast('❌ 請填寫服務日期');
+    try {
+      const record = { ...newRecord, customer_phone: selectedCust.phone };
+      const data = await sbPost('service_records', [record]);
+      if (data && data.length > 0) setCustServiceRecords(prev => [data[0], ...prev]);
+      setShowAddRecord(false);
+      setNewRecord({});
+      showToast('✅ 服務記錄已新增');
+    } catch (e) { showToast('❌ 新增失敗：' + e.message); }
+  };
   const updateCustNotes = async (custId, notes) => { try { await apiCall('update-customer', { customerId: custId, notes }); setCustomers(prev => prev.map(c => c.id === custId ? { ...c, notes } : c)); if (selectedCust?.id === custId) setSelectedCust(prev => ({ ...prev, notes })); showToast('✅ 備註已更新'); } catch (_) { showToast('❌ 更新失敗'); } };
   const addCustTag = async (custId, tag) => { const cust = customers.find(c => c.id === custId); if (!cust || !tag.trim()) return; const newTags = [...new Set([...(cust.tags || []), tag.trim()])]; try { await sbPatch(`customers?id=eq.${custId}`, { tags: newTags }); setCustomers(prev => prev.map(c => c.id === custId ? { ...c, tags: newTags } : c)); if (selectedCust?.id === custId) setSelectedCust(prev => ({ ...prev, tags: newTags })); } catch (_) {} };
   const removeCustTag = async (custId, tag) => { const cust = customers.find(c => c.id === custId); if (!cust) return; const newTags = (cust.tags || []).filter(t => t !== tag); try { await sbPatch(`customers?id=eq.${custId}`, { tags: newTags }); setCustomers(prev => prev.map(c => c.id === custId ? { ...c, tags: newTags } : c)); if (selectedCust?.id === custId) setSelectedCust(prev => ({ ...prev, tags: newTags })); } catch (_) {} };
@@ -930,37 +972,227 @@ const allTabs = [
         </>)}
 
         {/* ═══ ★ MODIFIED — CUSTOMERS TAB（加黑名單 + 刷新統計）═══ */}
+       {/* ═══ CUSTOMERS TAB ═══ */}
         {tab === 'customers' && (
           <div>
             <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
               <input type="text" placeholder="🔍 搜尋客人名 / 電話 / 標籤..." value={custSearch} onChange={e => setCustSearch(e.target.value)} style={{ flex: 1, minWidth: 200, padding: '10px 14px', border: '1px solid #d0c8bc', borderRadius: 8, fontSize: 14, fontFamily: font }} />
               <button onClick={refreshCustomerStats} style={{ padding: '10px 16px', background: '#FF9800', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontFamily: font, fontWeight: 600 }}>📊 刷新統計</button>
-              <button onClick={fetchCustomers} style={{ padding: '10px 16px', background: '#5c4a3a', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontFamily: font }}>🔄 重新載入</button>
+              <button onClick={fetchCustomers} style={{ padding: '10px 16px', background: '#5c4a3a', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontFamily: font }}>🔄</button>
             </div>
             {selectedCust ? (
               <div style={{ background: '#fff', borderRadius: 14, padding: 24, boxShadow: '0 2px 10px rgba(0,0,0,0.06)' }}>
-                <button onClick={() => { setSelectedCust(null); setCustBookings([]); }} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 14, color: '#b8956a', marginBottom: 12, fontFamily: font }}>← 返回列表</button>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 10, marginBottom: 8 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
+                  <button onClick={() => { setSelectedCust(null); setCustBookings([]); setCustEditing(false); }} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 14, color: '#b8956a', fontFamily: font }}>← 返回列表</button>
+                  <button onClick={() => setCustEditing(!custEditing)} style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid #d0c8bc', background: custEditing ? '#5c4a3a' : '#faf6f0', color: custEditing ? '#fff' : '#5c4a3a', cursor: 'pointer', fontSize: 12, fontFamily: font }}>{custEditing ? '✏️ 編輯中' : '✏️ 編輯'}</button>
+                </div>
+
+                {/* Summary */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20, padding: '16px 20px', background: '#f9f6f3', borderRadius: 12 }}>
+                  <div style={{ width: 56, height: 56, borderRadius: '50%', background: 'linear-gradient(135deg, #b8956a, #d4a574)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 20, fontWeight: 700, flexShrink: 0 }}>{selectedCust.name?.[0] || '?'}</div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: 18, fontWeight: 700, color: '#5c4a3a' }}>{selectedCust.name}</span>
+                      {selectedCust.is_blacklisted && <span style={{ padding: '2px 8px', background: '#FFEBEE', color: '#c62828', borderRadius: 6, fontSize: 11 }}>🚫 黑名單</span>}
+                    </div>
+                    <div style={{ fontSize: 13, color: '#888', marginTop: 4 }}>📞 {selectedCust.phone}{selectedCust.instagram && <span style={{ marginLeft: 10, color: '#9b59b6' }}>📷 {selectedCust.instagram}</span>}</div>
+                  </div>
+                </div>
+
+                {/* Quick Stats */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, marginBottom: 20 }}>
+                  {[
+                    { label: '到訪', value: selectedCust.total_visits || 0, color: '#5c4a3a' },
+                    { label: '總消費', value: `$${selectedCust.total_spent || 0}`, color: '#2196F3' },
+                    { label: '積分', value: selectedCust.total_points || 0, color: '#FF9800' },
+                    { label: '套票', value: custPackages.length, color: '#9C27B0' },
+                  ].map((s, i) => (
+                    <div key={i} style={{ textAlign: 'center', padding: '10px 6px', background: '#f9f6f3', borderRadius: 8 }}>
+                      <div style={{ fontSize: 18, fontWeight: 700, color: s.color }}>{s.value}</div>
+                      <div style={{ fontSize: 11, color: '#999' }}>{s.label}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Profile Tabs */}
+                <div style={{ display: 'flex', gap: 0, marginBottom: 16, background: '#f5f0eb', borderRadius: 8, padding: 3 }}>
+                  {[{ id: 'info', label: '👤 資料' }, { id: 'preference', label: '💜 偏好' }, { id: 'records', label: '📋 記錄' }, { id: 'finance', label: '💰 消費' }].map(t => (
+                    <button key={t.id} onClick={() => setCustProfileTab(t.id)} style={{ flex: 1, padding: '10px 8px', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontFamily: font, fontWeight: custProfileTab === t.id ? 700 : 400, background: custProfileTab === t.id ? '#5c4a3a' : 'transparent', color: custProfileTab === t.id ? '#fff' : '#5c4a3a' }}>{t.label}</button>
+                  ))}
+                </div>
+
+                {/* INFO TAB */}
+                {custProfileTab === 'info' && (
                   <div>
-                    <h3 style={{ margin: '0 0 6px', color: '#5c4a3a', fontSize: 18 }}>{selectedCust.name}{selectedCust.is_blacklisted && <span style={{ marginLeft: 8, padding: '2px 8px', background: '#FFEBEE', color: '#c62828', borderRadius: 6, fontSize: 11 }}>🚫 黑名單</span>}</h3>
-                    <div style={{ fontSize: 13, color: '#888', marginBottom: 4 }}>📞 {selectedCust.phone || '—'}</div>
-                    <div style={{ fontSize: 13, color: '#888' }}>來訪 {selectedCust.total_visits || 0} 次 ｜ 總消費 ${selectedCust.total_spent || 0} ｜ 最後來訪 {selectedCust.last_visit_date || '—'}</div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 16 }}>
+                      {[{ label: '姓名', key: 'name' }, { label: '電話', key: 'phone', readonly: true }, { label: '生日', key: 'birthday', placeholder: 'MM-DD' }, { label: 'Instagram', key: 'instagram', placeholder: '@username' }].map(f => (
+                        <div key={f.key}>
+                          <label style={{ fontSize: 11, color: '#999', marginBottom: 4, display: 'block' }}>{f.label}</label>
+                          {custEditing && !f.readonly ? <input value={selectedCust[f.key] || ''} onChange={e => setSelectedCust(prev => ({ ...prev, [f.key]: e.target.value }))} placeholder={f.placeholder || ''} style={{ width: '100%', padding: '8px 12px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13, boxSizing: 'border-box', fontFamily: font }} /> : <div style={{ fontSize: 14, fontWeight: 500, color: '#5c4a3a', padding: '8px 0' }}>{selectedCust[f.key] || '—'}</div>}
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{ borderTop: '1px solid #f0ebe3', paddingTop: 16, marginBottom: 16 }}>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: '#5c4a3a', marginBottom: 10 }}>✨ 皮膚 / 睫毛狀態</div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                        {[{ label: '膚質', key: 'skin_type', opts: ['', '油性', '乾性', '混合', '敏感'] }, { label: '眼型', key: 'eye_type', opts: ['', '單眼皮', '雙眼皮', '內雙'] }, { label: '睫毛狀態', key: 'lash_condition', opts: ['', '短而稀', '中等', '長而密'] }].map(f => (
+                          <div key={f.key}>
+                            <label style={{ fontSize: 11, color: '#999', marginBottom: 4, display: 'block' }}>{f.label}</label>
+                            {custEditing ? <select value={selectedCust[f.key] || ''} onChange={e => setSelectedCust(prev => ({ ...prev, [f.key]: e.target.value }))} style={{ width: '100%', padding: '8px 12px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13, fontFamily: font, boxSizing: 'border-box' }}>{f.opts.map(o => <option key={o} value={o}>{o || '— 選擇 —'}</option>)}</select> : <div style={{ fontSize: 14, color: '#5c4a3a', padding: '8px 0' }}>{selectedCust[f.key] || '—'}</div>}
+                          </div>
+                        ))}
+                        <div>
+                          <label style={{ fontSize: 11, color: '#999', marginBottom: 4, display: 'block' }}>過敏史</label>
+                          {custEditing ? <input value={selectedCust.allergy_history || ''} onChange={e => setSelectedCust(prev => ({ ...prev, allergy_history: e.target.value, has_allergy: !!e.target.value }))} placeholder="無 / 詳情..." style={{ width: '100%', padding: '8px 12px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13, boxSizing: 'border-box', fontFamily: font }} /> : <div style={{ fontSize: 14, color: selectedCust.has_allergy ? '#c62828' : '#5c4a3a', padding: '8px 0' }}>{selectedCust.allergy_history || '無'}</div>}
+                        </div>
+                      </div>
+                    </div>
+                    <div style={{ marginBottom: 16 }}>
+                      <label style={{ fontSize: 11, color: '#999', marginBottom: 6, display: 'block' }}>標籤</label>
+                      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                        {(selectedCust.tags || []).map(tag => (<span key={tag} style={{ background: '#f5f0eb', color: '#5c4a3a', padding: '3px 10px', borderRadius: 12, fontSize: 12 }}>{tag}{custEditing && <span onClick={() => removeCustTag(selectedCust.id, tag)} style={{ cursor: 'pointer', marginLeft: 4, color: '#c62828' }}>✕</span>}</span>))}
+                        <input placeholder="+ 標籤 ↵" onKeyDown={e => { if (e.key === 'Enter' && e.target.value.trim()) { addCustTag(selectedCust.id, e.target.value); e.target.value = ''; } }} style={{ border: '1px dashed #d0c8bc', borderRadius: 12, padding: '3px 10px', fontSize: 12, width: 80, fontFamily: font }} />
+                      </div>
+                    </div>
+                    <div style={{ marginBottom: 16 }}>
+                      <label style={{ fontSize: 11, color: '#999', marginBottom: 4, display: 'block' }}>備註</label>
+                      <textarea value={selectedCust.notes || ''} onChange={e => setSelectedCust(prev => ({ ...prev, notes: e.target.value }))} placeholder="備註..." rows={3} style={{ width: '100%', padding: 10, border: '1px solid #d0c8bc', borderRadius: 8, fontSize: 13, resize: 'vertical', boxSizing: 'border-box', fontFamily: font }} readOnly={!custEditing} />
+                    </div>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                      {custEditing && <button onClick={saveCustomerProfile} style={{ padding: '10px 24px', borderRadius: 8, border: 'none', background: '#4CAF50', color: '#fff', cursor: 'pointer', fontSize: 14, fontFamily: font, fontWeight: 600 }}>💾 儲存資料</button>}
+                      <button onClick={() => toggleBlacklist(selectedCust.id, selectedCust.is_blacklisted)} style={{ padding: '10px 16px', borderRadius: 8, border: `1px solid ${selectedCust.is_blacklisted ? '#a5d6a7' : '#ffcdd2'}`, background: selectedCust.is_blacklisted ? '#E8F5E9' : '#FFEBEE', color: selectedCust.is_blacklisted ? '#2e7d32' : '#c62828', cursor: 'pointer', fontSize: 13, fontFamily: font }}>{selectedCust.is_blacklisted ? '✅ 解除黑名單' : '🚫 黑名單'}</button>
+                    </div>
                   </div>
-                  {/* ★ NEW — 黑名單切換 */}
-                  <button onClick={() => toggleBlacklist(selectedCust.id, selectedCust.is_blacklisted)} style={{ padding: '8px 16px', borderRadius: 8, border: `1px solid ${selectedCust.is_blacklisted ? '#a5d6a7' : '#ffcdd2'}`, background: selectedCust.is_blacklisted ? '#E8F5E9' : '#FFEBEE', color: selectedCust.is_blacklisted ? '#2e7d32' : '#c62828', cursor: 'pointer', fontSize: 13, fontFamily: font, fontWeight: 600 }}>{selectedCust.is_blacklisted ? '✅ 解除黑名單' : '🚫 加入黑名單'}</button>
-                </div>
-                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', margin: '8px 0' }}>
-                  {(selectedCust.tags || []).map(tag => (<span key={tag} style={{ background: '#f5f0eb', color: '#5c4a3a', padding: '3px 10px', borderRadius: 12, fontSize: 12 }}>{tag} <span onClick={() => removeCustTag(selectedCust.id, tag)} style={{ cursor: 'pointer', marginLeft: 4, color: '#c62828' }}>✕</span></span>))}
-                  <input placeholder="+ 加標籤 ↵" onKeyDown={e => { if (e.key === 'Enter' && e.target.value.trim()) { addCustTag(selectedCust.id, e.target.value); e.target.value = ''; } }} style={{ border: '1px dashed #d0c8bc', borderRadius: 12, padding: '3px 10px', fontSize: 12, width: 90, fontFamily: font }} />
-                </div>
-                <textarea defaultValue={selectedCust.notes || ''} onBlur={e => updateCustNotes(selectedCust.id, e.target.value)} placeholder="備註..." rows={3} style={{ width: '100%', padding: 10, border: '1px solid #d0c8bc', borderRadius: 8, fontSize: 13, marginTop: 8, resize: 'vertical', boxSizing: 'border-box', fontFamily: font }} />
-                <h4 style={{ margin: '16px 0 8px', color: '#5c4a3a', fontSize: 14 }}>📋 預約記錄</h4>
-                {custBookings.length === 0 ? <div style={{ color: '#aaa', fontSize: 13, padding: 20, textAlign: 'center' }}>暫無記錄</div> : custBookings.map(b => (
-                  <div key={b.id} style={{ padding: '8px 12px', borderBottom: '1px solid #f0ebe3', fontSize: 13 }}>
-                    <span style={{ color: '#5c4a3a', fontWeight: 600 }}>{b.booking_date} {b.booking_time}</span> — {b.service_name} {b.variant_label || ''} <span style={{ padding: '1px 6px', borderRadius: 8, fontSize: 11, background: b.status === 'confirmed' ? '#e8f5e9' : b.status === 'cancelled' ? '#ffeaea' : b.status === 'completed' ? '#e3f2fd' : '#fff8e1', color: b.status === 'confirmed' ? '#2e7d32' : b.status === 'cancelled' ? '#c62828' : b.status === 'completed' ? '#1565c0' : '#f9a825' }}>{statusText(b.status)}</span> ${b.total_price || 0}
-                    {b.cancel_reason && <span style={{ fontSize: 11, color: '#c62828', marginLeft: 6 }}>({b.cancel_reason})</span>}
+                )}
+
+                {/* PREFERENCE TAB */}
+                {custProfileTab === 'preference' && (
+                  <div>
+                    <div style={{ padding: 14, background: '#fdf2f8', borderRadius: 10, marginBottom: 12 }}>
+                      <label style={{ fontSize: 11, color: '#ec4899', fontWeight: 600 }}>喜歡款式</label>
+                      {custEditing ? (
+                        <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+                          {['自然', '濃密', '飛揚', '貓眼', '芭比', '眼線感'].map(s => (
+                            <button key={s} onClick={() => setSelectedCust(prev => ({ ...prev, preferred_style: s }))} style={{ padding: '6px 14px', borderRadius: 6, fontSize: 12, fontFamily: font, border: 'none', cursor: 'pointer', background: selectedCust.preferred_style === s ? '#ec4899' : '#fff', color: selectedCust.preferred_style === s ? '#fff' : '#666' }}>{s}</button>
+                          ))}
+                        </div>
+                      ) : <div style={{ fontSize: 16, fontWeight: 700, color: '#5c4a3a', marginTop: 4 }}>{selectedCust.preferred_style || '未設定'}</div>}
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 12 }}>
+                      <div style={{ padding: 12, background: '#f3e8ff', borderRadius: 10 }}>
+                        <label style={{ fontSize: 11, color: '#7c3aed', fontWeight: 600 }}>常用捲度</label>
+                        {custEditing ? <select value={selectedCust.preferred_curl || ''} onChange={e => setSelectedCust(prev => ({ ...prev, preferred_curl: e.target.value }))} style={{ width: '100%', marginTop: 6, padding: '6px 8px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13, fontFamily: font }}><option value="">-</option>{['J','B','C','CC','D','DD','L','M'].map(v => <option key={v} value={v}>{v}</option>)}</select> : <div style={{ fontSize: 20, fontWeight: 700, color: '#5c4a3a', marginTop: 4 }}>{selectedCust.preferred_curl || '—'}</div>}
+                      </div>
+                      <div style={{ padding: 12, background: '#dbeafe', borderRadius: 10 }}>
+                        <label style={{ fontSize: 11, color: '#2563eb', fontWeight: 600 }}>常用粗度</label>
+                        {custEditing ? <select value={selectedCust.preferred_thickness || ''} onChange={e => setSelectedCust(prev => ({ ...prev, preferred_thickness: e.target.value }))} style={{ width: '100%', marginTop: 6, padding: '6px 8px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13, fontFamily: font }}><option value="">-</option>{['0.03','0.05','0.07','0.10','0.12','0.15','0.20'].map(v => <option key={v} value={v}>{v}</option>)}</select> : <div style={{ fontSize: 20, fontWeight: 700, color: '#5c4a3a', marginTop: 4 }}>{selectedCust.preferred_thickness || '—'}</div>}
+                      </div>
+                      <div style={{ padding: 12, background: '#dcfce7', borderRadius: 10 }}>
+                        <label style={{ fontSize: 11, color: '#16a34a', fontWeight: 600 }}>常用長度</label>
+                        {custEditing ? <input value={selectedCust.preferred_length || ''} onChange={e => setSelectedCust(prev => ({ ...prev, preferred_length: e.target.value }))} placeholder="e.g. 9-12mm" style={{ width: '100%', marginTop: 6, padding: '6px 8px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13, fontFamily: font, boxSizing: 'border-box' }} /> : <div style={{ fontSize: 16, fontWeight: 700, color: '#5c4a3a', marginTop: 4 }}>{selectedCust.preferred_length || '—'}</div>}
+                      </div>
+                    </div>
+                    <div style={{ padding: 12, background: '#f9f6f3', borderRadius: 10 }}>
+                      <label style={{ fontSize: 11, color: '#5c4a3a', fontWeight: 600 }}>其他偏好備註</label>
+                      {custEditing ? <textarea value={selectedCust.other_preferences || ''} onChange={e => setSelectedCust(prev => ({ ...prev, other_preferences: e.target.value }))} rows={2} style={{ width: '100%', marginTop: 6, padding: '8px 10px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13, fontFamily: font, resize: 'none', boxSizing: 'border-box' }} /> : <div style={{ fontSize: 13, color: '#5c4a3a', marginTop: 4 }}>{selectedCust.other_preferences || '無'}</div>}
+                    </div>
+                    {custEditing && <button onClick={saveCustomerProfile} style={{ marginTop: 16, padding: '10px 24px', borderRadius: 8, border: 'none', background: '#4CAF50', color: '#fff', cursor: 'pointer', fontSize: 14, fontFamily: font, fontWeight: 600 }}>💾 儲存偏好</button>}
                   </div>
-                ))}
+                )}
+
+                {/* RECORDS TAB */}
+                {custProfileTab === 'records' && (
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                      <span style={{ fontSize: 14, fontWeight: 600, color: '#5c4a3a' }}>📋 服務記錄 ({custServiceRecords.length})</span>
+                      <button onClick={() => { setShowAddRecord(true); setNewRecord({ service_date: getLocalDate(), staff_name: '', service_name: '', curl_used: '', thickness_used: '', length_used: '', satisfaction: 0, notes: '' }); }} style={{ padding: '6px 14px', borderRadius: 6, border: 'none', background: '#5c4a3a', color: '#fff', cursor: 'pointer', fontSize: 12, fontFamily: font }}>+ 新增記錄</button>
+                    </div>
+                    {showAddRecord && (
+                      <div style={{ padding: 16, background: '#FFFDE7', borderRadius: 10, border: '1px solid #FFF176', marginBottom: 16 }}>
+                        <div style={{ fontSize: 14, fontWeight: 600, color: '#F57F17', marginBottom: 12 }}>➕ 新增服務記錄</div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+                          <div><label style={{ fontSize: 11, color: '#666' }}>日期 *</label><input type="date" value={newRecord.service_date || ''} onChange={e => setNewRecord(p => ({ ...p, service_date: e.target.value }))} style={{ width: '100%', padding: '8px 10px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13, boxSizing: 'border-box' }} /></div>
+                          <div><label style={{ fontSize: 11, color: '#666' }}>技師</label><select value={newRecord.staff_name || ''} onChange={e => setNewRecord(p => ({ ...p, staff_name: e.target.value }))} style={{ width: '100%', padding: '8px 10px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13, fontFamily: font, boxSizing: 'border-box' }}><option value="">選擇</option>{staffList.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}</select></div>
+                          <div><label style={{ fontSize: 11, color: '#666' }}>服務</label><input value={newRecord.service_name || ''} onChange={e => setNewRecord(p => ({ ...p, service_name: e.target.value }))} placeholder="例：自然美睫" style={{ width: '100%', padding: '8px 10px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13, fontFamily: font, boxSizing: 'border-box' }} /></div>
+                          <div><label style={{ fontSize: 11, color: '#666' }}>捲度</label><input value={newRecord.curl_used || ''} onChange={e => setNewRecord(p => ({ ...p, curl_used: e.target.value }))} placeholder="C+D" style={{ width: '100%', padding: '8px 10px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13, boxSizing: 'border-box' }} /></div>
+                          <div><label style={{ fontSize: 11, color: '#666' }}>粗度</label><input value={newRecord.thickness_used || ''} onChange={e => setNewRecord(p => ({ ...p, thickness_used: e.target.value }))} placeholder="0.07" style={{ width: '100%', padding: '8px 10px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13, boxSizing: 'border-box' }} /></div>
+                          <div><label style={{ fontSize: 11, color: '#666' }}>長度</label><input value={newRecord.length_used || ''} onChange={e => setNewRecord(p => ({ ...p, length_used: e.target.value }))} placeholder="10-12mm" style={{ width: '100%', padding: '8px 10px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13, boxSizing: 'border-box' }} /></div>
+                          <div><label style={{ fontSize: 11, color: '#666' }}>滿意度</label><div style={{ display: 'flex', gap: 4, marginTop: 4 }}>{[1,2,3,4,5].map(s => <button key={s} onClick={() => setNewRecord(p => ({ ...p, satisfaction: s }))} style={{ padding: '6px 10px', borderRadius: 4, border: 'none', cursor: 'pointer', background: (newRecord.satisfaction || 0) >= s ? '#FFC107' : '#eee', color: (newRecord.satisfaction || 0) >= s ? '#fff' : '#999', fontSize: 13 }}>★</button>)}</div></div>
+                        </div>
+                        <div style={{ marginBottom: 10 }}><label style={{ fontSize: 11, color: '#666' }}>備註</label><textarea value={newRecord.notes || ''} onChange={e => setNewRecord(p => ({ ...p, notes: e.target.value }))} rows={2} style={{ width: '100%', padding: '8px 10px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13, fontFamily: font, resize: 'none', boxSizing: 'border-box' }} /></div>
+                        <div style={{ display: 'flex', gap: 8 }}>
+                          <button onClick={saveServiceRecord} style={{ padding: '8px 20px', borderRadius: 6, border: 'none', background: '#4CAF50', color: '#fff', cursor: 'pointer', fontSize: 13, fontFamily: font, fontWeight: 600 }}>💾 儲存</button>
+                          <button onClick={() => setShowAddRecord(false)} style={{ padding: '8px 16px', borderRadius: 6, border: '1px solid #ccc', background: '#fff', color: '#666', cursor: 'pointer', fontSize: 13, fontFamily: font }}>取消</button>
+                        </div>
+                      </div>
+                    )}
+                    {custServiceRecords.length === 0 ? <div style={{ textAlign: 'center', padding: 30, color: '#999' }}>暫無服務記錄</div> : custServiceRecords.map(r => (
+                      <div key={r.id} style={{ border: '1px solid #e8e0d8', borderRadius: 10, marginBottom: 8, overflow: 'hidden' }}>
+                        <div onClick={() => setCustExpandedRecord(custExpandedRecord === r.id ? null : r.id)} style={{ padding: '12px 14px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#faf8f5' }}>
+                          <div><div style={{ fontSize: 14, fontWeight: 600, color: '#5c4a3a' }}>{r.service_name || '未命名'}</div><div style={{ fontSize: 12, color: '#999', marginTop: 2 }}>{r.service_date} · {r.staff_name || '未指定'}</div></div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}><div style={{ display: 'flex' }}>{[1,2,3,4,5].map(s => <span key={s} style={{ fontSize: 11, color: s <= (r.satisfaction || 0) ? '#FFC107' : '#ddd' }}>★</span>)}</div><span style={{ fontSize: 12, color: '#999' }}>{custExpandedRecord === r.id ? '▲' : '▼'}</span></div>
+                        </div>
+                        {custExpandedRecord === r.id && (
+                          <div style={{ padding: '12px 14px', borderTop: '1px solid #e8e0d8' }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 8 }}>
+                              <div style={{ textAlign: 'center', padding: 8, background: '#f5f0eb', borderRadius: 6 }}><div style={{ fontSize: 10, color: '#999' }}>捲度</div><div style={{ fontSize: 14, fontWeight: 700 }}>{r.curl_used || '—'}</div></div>
+                              <div style={{ textAlign: 'center', padding: 8, background: '#f5f0eb', borderRadius: 6 }}><div style={{ fontSize: 10, color: '#999' }}>粗度</div><div style={{ fontSize: 14, fontWeight: 700 }}>{r.thickness_used || '—'}</div></div>
+                              <div style={{ textAlign: 'center', padding: 8, background: '#f5f0eb', borderRadius: 6 }}><div style={{ fontSize: 10, color: '#999' }}>長度</div><div style={{ fontSize: 14, fontWeight: 700 }}>{r.length_used || '—'}</div></div>
+                            </div>
+                            {r.notes && <div style={{ padding: '8px 10px', background: '#FFFDE7', borderRadius: 6, fontSize: 12, color: '#F57F17' }}>📝 {r.notes}</div>}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                    <div style={{ borderTop: '1px solid #f0ebe3', marginTop: 16, paddingTop: 16 }}>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: '#5c4a3a', marginBottom: 8 }}>📅 預約記錄 ({custBookings.length})</div>
+                      {custBookings.slice(0, 10).map(b => (
+                        <div key={b.id} style={{ padding: '8px 12px', borderBottom: '1px solid #f0ebe3', fontSize: 13 }}>
+                          <span style={{ color: '#5c4a3a', fontWeight: 600 }}>{b.booking_date} {b.booking_time}</span> — {b.service_name} <span style={{ marginLeft: 8, padding: '1px 6px', borderRadius: 8, fontSize: 11, background: statusColor(b.status), color: '#fff' }}>{statusText(b.status)}</span> <span style={{ fontWeight: 700 }}>${b.total_price || 0}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* FINANCE TAB */}
+                {custProfileTab === 'finance' && (
+                  <div>
+                    {custPackages.map(pkg => (
+                      <div key={pkg.id} style={{ padding: 14, background: 'linear-gradient(135deg, #5c4a3a, #b8956a)', borderRadius: 10, color: '#fff', marginBottom: 12 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <div><div style={{ fontSize: 11, opacity: 0.7 }}>套票餘額</div><div style={{ fontSize: 14, fontWeight: 600, marginTop: 2 }}>{pkg.package_name}</div></div>
+                          <div style={{ textAlign: 'right' }}><div style={{ fontSize: 24, fontWeight: 700 }}>{pkg.total_sessions - pkg.used_sessions}</div><div style={{ fontSize: 11, opacity: 0.7 }}>剩餘 / {pkg.total_sessions} 次</div></div>
+                        </div>
+                        <div style={{ marginTop: 10, background: 'rgba(255,255,255,0.2)', borderRadius: 4, height: 6 }}><div style={{ background: '#fff', borderRadius: 4, height: 6, width: `${(pkg.used_sessions / pkg.total_sessions) * 100}%` }} /></div>
+                      </div>
+                    ))}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 14px', background: '#FFF8E1', borderRadius: 8, marginBottom: 12 }}>
+                      <span style={{ fontSize: 14, color: '#F57F17', fontWeight: 600 }}>🎁 目前積分</span>
+                      <span style={{ fontSize: 20, fontWeight: 700, color: '#FF8F00' }}>{selectedCust.total_points || 0} 分</span>
+                    </div>
+                    {custPointsLog.length > 0 && (
+                      <div style={{ marginBottom: 16 }}>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: '#5c4a3a', marginBottom: 8 }}>積分記錄</div>
+                        {custPointsLog.slice(0, 5).map(p => (
+                          <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid #f5f0eb', fontSize: 12 }}>
+                            <span style={{ color: '#666' }}>{p.description || p.type}</span>
+                            <span style={{ fontWeight: 700, color: p.points > 0 ? '#4CAF50' : '#f44336' }}>{p.points > 0 ? '+' : ''}{p.points}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: '#5c4a3a', marginBottom: 8 }}>💰 消費明細 ({custConsumption.length})</div>
+                      {custConsumption.length === 0 ? <div style={{ textAlign: 'center', padding: 20, color: '#999', fontSize: 13 }}>暫無消費記錄</div> : custConsumption.map(item => (
+                        <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', borderBottom: '1px solid #f0ebe3' }}>
+                          <div><div style={{ fontSize: 13, fontWeight: 500, color: '#5c4a3a' }}>{item.description || '消費'}</div><div style={{ fontSize: 11, color: '#999' }}>{item.created_at?.slice(0, 10)} · {item.payment_method || 'cash'}</div></div>
+                          <span style={{ fontSize: 15, fontWeight: 700, color: '#5c4a3a' }}>${item.amount || 0}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             ) : (
               <div style={{ background: '#fff', borderRadius: 14, overflow: 'hidden', boxShadow: '0 2px 10px rgba(0,0,0,0.06)' }}>
@@ -979,7 +1211,6 @@ const allTabs = [
             )}
           </div>
         )}
-
         {/* ═══ REMINDERS TAB ═══ */}
         {tab === 'reminders' && (
           <div style={{ background: '#fff', borderRadius: 14, padding: 24, boxShadow: '0 2px 10px rgba(0,0,0,0.06)' }}>
