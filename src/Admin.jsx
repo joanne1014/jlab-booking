@@ -180,6 +180,16 @@ export default function Admin() {
   const [custExpandedRecord, setCustExpandedRecord] = useState(null);
   const [showAddRecord, setShowAddRecord] = useState(false);
   const [newRecord, setNewRecord] = useState({});
+  const [allPackages, setAllPackages] = useState([]);
+  const [packageTypes, setPackageTypes] = useState([]);
+  const [pkgLoading, setPkgLoading] = useState(false);
+  const [showAddPkg, setShowAddPkg] = useState(false);
+  const [newPkg, setNewPkg] = useState({});
+  const [pkgFilter, setPkgFilter] = useState('active');
+  const [showDeduct, setShowDeduct] = useState(null);
+  const [deductNote, setDeductNote] = useState('');
+  const [showAddPkgType, setShowAddPkgType] = useState(false);
+  const [newPkgType, setNewPkgType] = useState({});
   const [reminders, setReminders] = useState([]);
   const [reminderDate, setReminderDate] = useState('');
   const [reminderLoading, setReminderLoading] = useState(false);
@@ -270,9 +280,9 @@ export default function Admin() {
 
   const handleResetNewPw = async () => { setResetPwError(''); if (!resetNewPw || resetNewPw.length < 6) { setResetPwError('新密碼至少要 6 個字元'); return; } if (resetNewPw !== resetConfirmPw) { setResetPwError('兩次密碼不一致'); return; } setResetPwLoading(true); try { await apiCall('reset-via-token', { token: recoveryToken, newPassword: resetNewPw }); showToast('✅ 密碼已重設，請重新登入'); setShowResetForm(false); setRecoveryToken(''); setResetNewPw(''); setResetConfirmPw(''); } catch (err) { setResetPwError(err.message || '重設失敗'); } setResetPwLoading(false); };
 
-  const handleLogin = async (e) => { e.preventDefault(); setLoginError(''); setLoginLoading(true); try { const result = await apiCall('login', { email: loginEmail, password: pw }); authToken = result.access_token; try { sessionStorage.setItem('jlab_token', result.access_token); } catch (_) {} setAuth(true); try { const roles = await sbGet(`admin_users?email=eq.${encodeURIComponent(loginEmail)}`); if (roles && roles.length > 0) { setUserRole(roles[0].role || 'owner'); setUserStaffId(roles[0].staff_id || null); } else { setUserRole('owner'); } } catch (_) { setUserRole('owner'); } fetchBookings(); fetchBlocked(); fetchStaff(); fetchServices(); fetchAddons(); fetchLogs(); fetchCustomers(); apiCall('auto-backup').catch(() => {}); } catch (err) { setLoginError(err.message || '帳號或密碼錯誤'); } setLoginLoading(false); };
+  const handleLogin = async (e) => { e.preventDefault(); setLoginError(''); setLoginLoading(true); try { const result = await apiCall('login', { email: loginEmail, password: pw }); authToken = result.access_token; try { sessionStorage.setItem('jlab_token', result.access_token); } catch (_) {} setAuth(true); try { const roles = await sbGet(`admin_users?email=eq.${encodeURIComponent(loginEmail)}`); if (roles && roles.length > 0) { setUserRole(roles[0].role || 'owner'); setUserStaffId(roles[0].staff_id || null); } else { setUserRole('owner'); } } catch (_) { setUserRole('owner'); } fetchBookings(); fetchBlocked(); fetchStaff(); fetchServices(); fetchAddons(); fetchLogs(); fetchCustomers(); fetchPackageTypes(); fetchAllPackages(); apiCall('auto-backup').catch(() => {}); } catch (err) { setLoginError(err.message || '帳號或密碼錯誤'); } setLoginLoading(false); };
 
-  useEffect(() => { const saved = sessionStorage.getItem('jlab_token'); if (saved) { authToken = saved; apiCall('verify').then(() => { setAuth(true); fetchBookings(); fetchBlocked(); fetchStaff(); fetchServices(); fetchAddons(); fetchLogs(); fetchCustomers(); apiCall('auto-backup').catch(() => {}); }).catch(() => { authToken = null; sessionStorage.removeItem('jlab_token'); }); } }, []);
+  useEffect(() => { const saved = sessionStorage.getItem('jlab_token'); if (saved) { authToken = saved; apiCall('verify').then(() => { setAuth(true); fetchBookings(); fetchBlocked(); fetchStaff(); fetchServices(); fetchAddons(); fetchLogs(); fetchCustomers(); fetchPackageTypes(); fetchAllPackages(); apiCall('auto-backup').catch(() => {}); }).catch(() => { authToken = null; sessionStorage.removeItem('jlab_token'); }); } }, []);
 
   const logChange = (text) => { const id = Date.now(); const ts = new Date().toLocaleTimeString('zh-HK', { hour: '2-digit', minute: '2-digit', second: '2-digit' }); setChangeLog(prev => [{ id, text, ts }, ...prev].slice(0, 30)); try { sbPost('admin_logs', [{ action: text, admin_email: loginEmail || 'admin' }]); } catch (e) { console.error('Log save failed:', e); } };
   const fetchLogs = async () => { setLogLoading(true); try { const data = await sbGet('admin_logs?order=created_at.desc&limit=100'); setDbLogs(data || []); } catch (e) { console.error(e); } setLogLoading(false); };
@@ -295,6 +305,53 @@ export default function Admin() {
     try { const pkgs = await sbGet(`customer_packages?customer_phone=eq.${encodeURIComponent(cust.phone)}&status=eq.active`); setCustPackages(pkgs || []); } catch (_) { setCustPackages([]); }
     try { const pts = await sbGet(`points_log?customer_phone=eq.${encodeURIComponent(cust.phone)}&order=created_at.desc&limit=20`); setCustPointsLog(pts || []); } catch (_) { setCustPointsLog([]); }
   };
+  const fetchPackageTypes = async () => {
+    try { const data = await sbGet('package_types?order=created_at'); setPackageTypes(data || []); } catch (_) {}
+  };
+  const fetchAllPackages = async () => {
+    setPkgLoading(true);
+    try { const data = await sbGet('customer_packages?order=created_at.desc'); setAllPackages(data || []); } catch (_) {}
+    setPkgLoading(false);
+  };
+  const addPackageToCustomer = async () => {
+    if (!newPkg.customer_phone || !newPkg.package_name || !newPkg.total_sessions) return showToast('❌ 請填寫完整資料');
+    try {
+      const record = { customer_phone: newPkg.customer_phone, package_name: newPkg.package_name, total_sessions: parseInt(newPkg.total_sessions), used_sessions: 0, status: 'active', purchased_date: getLocalDate(), expiry_date: newPkg.expiry_date || null, price_paid: parseFloat(newPkg.price_paid) || 0, package_type_id: newPkg.package_type_id || null, notes: newPkg.notes || '' };
+      const data = await sbPost('customer_packages', [record]);
+      if (data && data.length > 0) setAllPackages(prev => [data[0], ...prev]);
+      setShowAddPkg(false); setNewPkg({});
+      showToast('✅ 套票已新增');
+      logChange(`🎫 新增套票「${record.package_name}」給 ${record.customer_phone}`);
+    } catch (e) { showToast('❌ 新增失敗：' + e.message); }
+  };
+  const deductSession = async (pkg) => {
+    if (pkg.used_sessions >= pkg.total_sessions) return showToast('❌ 套票已用完');
+    try {
+      await sbPatch(`customer_packages?id=eq.${pkg.id}`, { used_sessions: pkg.used_sessions + 1, status: (pkg.used_sessions + 1 >= pkg.total_sessions) ? 'completed' : 'active' });
+      setAllPackages(prev => prev.map(p => p.id === pkg.id ? { ...p, used_sessions: p.used_sessions + 1, status: (p.used_sessions + 1 >= p.total_sessions) ? 'completed' : 'active' } : p));
+      if (selectedCust) setCustPackages(prev => prev.map(p => p.id === pkg.id ? { ...p, used_sessions: p.used_sessions + 1, status: (p.used_sessions + 1 >= p.total_sessions) ? 'completed' : 'active' } : p));
+      setShowDeduct(null);
+      showToast(`✅ 已扣 1 次（剩餘 ${pkg.total_sessions - pkg.used_sessions - 1} 次）`);
+      logChange(`🎫 扣次「${pkg.package_name}」${pkg.customer_phone}（${pkg.used_sessions + 1}/${pkg.total_sessions}）`);
+    } catch (e) { showToast('❌ 扣次失敗：' + e.message); }
+  };
+  const cancelPackage = async (pkg) => {
+    if (!window.confirm(`確定取消「${pkg.package_name}」？`)) return;
+    try { await sbPatch(`customer_packages?id=eq.${pkg.id}`, { status: 'cancelled' }); setAllPackages(prev => prev.map(p => p.id === pkg.id ? { ...p, status: 'cancelled' } : p)); showToast('✅ 套票已取消'); } catch (e) { showToast('❌ 失敗'); }
+  };
+  const saveNewPkgType = async () => {
+    if (!newPkgType.name || !newPkgType.sessions) return showToast('❌ 請填寫名稱同次數');
+    try { const data = await sbPost('package_types', [{ name: newPkgType.name, sessions: parseInt(newPkgType.sessions), price: parseFloat(newPkgType.price) || 0, validity_days: parseInt(newPkgType.validity_days) || 365, description: newPkgType.description || '' }]); if (data && data.length > 0) setPackageTypes(prev => [...prev, ...data]); setShowAddPkgType(false); setNewPkgType({}); showToast('✅ 套票類型已新增'); } catch (e) { showToast('❌ 失敗：' + e.message); }
+  };
+  const deletePkgType = async (id) => {
+    if (!window.confirm('確定刪除此套票類型？')) return;
+    try { await sbDel(`package_types?id=eq.${id}`); setPackageTypes(prev => prev.filter(p => p.id !== id)); showToast('✅ 已刪除'); } catch (e) { showToast('❌ 失敗'); }
+  };
+  const selectPkgType = (pt) => {
+    const expiry = new Date(); expiry.setDate(expiry.getDate() + (pt.validity_days || 365));
+    setNewPkg(prev => ({ ...prev, package_name: pt.name, total_sessions: pt.sessions, price_paid: pt.price, package_type_id: pt.id, expiry_date: expiry.toISOString().split('T')[0] }));
+  };
+  const filteredPackages = useMemo(() => { if (pkgFilter === 'all') return allPackages; return allPackages.filter(p => p.status === pkgFilter); }, [allPackages, pkgFilter]);
   const saveCustomerProfile = async () => {
     if (!selectedCust) return;
     try {
@@ -527,6 +584,7 @@ const allTabs = [
   { key: 'bookings', label: `📋 預約${stats.pending > 0 ? ` (${stats.pending})` : ''}`, show: true },
   { key: 'timeslots', label: '🕐 時段', show: true },
   { key: 'customers', label: '👥 客戶', show: true },
+  { key: 'packages', label: '🎫 套票', show: true },
   { key: 'reminders', label: '📱 提醒', show: true },
   { key: 'reports', label: '📊 報表', show: isOwner },   // ← 加呢行
   { key: 'frontend', label: '🎨 前台管理', show: isOwner },
@@ -1209,6 +1267,117 @@ const allTabs = [
                 ))}
               </div>
             )}
+          </div>
+        )}
+        {/* ═══ PACKAGES TAB ═══ */}
+        {tab === 'packages' && (
+          <div>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap', alignItems: 'center' }}>
+              <select value={pkgFilter} onChange={e => setPkgFilter(e.target.value)} style={{ padding: '10px 14px', border: '1px solid #d0c8bc', borderRadius: 8, fontSize: 13, fontFamily: font }}>
+                <option value="active">使用中</option>
+                <option value="completed">已用完</option>
+                <option value="cancelled">已取消</option>
+                <option value="all">全部</option>
+              </select>
+              <div style={{ flex: 1 }} />
+              <button onClick={() => { setShowAddPkgType(!showAddPkgType); setNewPkgType({}); }} style={{ padding: '10px 16px', background: '#f5f0eb', color: '#5c4a3a', border: '1px solid #d0c8bc', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontFamily: font }}>⚙️ 管理類型</button>
+              <button onClick={() => { setShowAddPkg(true); setNewPkg({}); }} style={{ padding: '10px 16px', background: '#5c4a3a', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontFamily: font, fontWeight: 600 }}>+ 新增套票</button>
+            </div>
+            {showAddPkgType && (
+              <div style={{ background: '#fff', borderRadius: 12, padding: 20, marginBottom: 16, boxShadow: '0 2px 10px rgba(0,0,0,0.06)', border: '1px solid #e8e0d8' }}>
+                <div style={{ fontSize: 15, fontWeight: 600, color: '#5c4a3a', marginBottom: 12 }}>⚙️ 套票類型模板</div>
+                {packageTypes.map(pt => (
+                  <div key={pt.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', borderBottom: '1px solid #f0ebe3' }}>
+                    <div><span style={{ fontWeight: 600, color: '#5c4a3a' }}>{pt.name}</span><span style={{ color: '#999', fontSize: 12, marginLeft: 8 }}>{pt.sessions}次 · ${pt.price} · {pt.validity_days}日</span></div>
+                    <button onClick={() => deletePkgType(pt.id)} style={{ padding: '4px 10px', borderRadius: 4, border: '1px solid #ffcdd2', background: '#ffebee', color: '#c62828', cursor: 'pointer', fontSize: 11, fontFamily: font }}>刪除</button>
+                  </div>
+                ))}
+                <div style={{ marginTop: 12, padding: 12, background: '#f9f6f3', borderRadius: 8 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: '#5c4a3a', marginBottom: 8 }}>➕ 新增類型</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr', gap: 8 }}>
+                    <input value={newPkgType.name || ''} onChange={e => setNewPkgType(p => ({ ...p, name: e.target.value }))} placeholder="名稱" style={{ padding: '8px 10px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13, fontFamily: font }} />
+                    <input type="number" value={newPkgType.sessions || ''} onChange={e => setNewPkgType(p => ({ ...p, sessions: e.target.value }))} placeholder="次數" style={{ padding: '8px 10px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13 }} />
+                    <input type="number" value={newPkgType.price || ''} onChange={e => setNewPkgType(p => ({ ...p, price: e.target.value }))} placeholder="價格" style={{ padding: '8px 10px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13 }} />
+                    <button onClick={saveNewPkgType} style={{ padding: '8px 14px', borderRadius: 6, border: 'none', background: '#4CAF50', color: '#fff', cursor: 'pointer', fontSize: 13, fontFamily: font, fontWeight: 600 }}>儲存</button>
+                  </div>
+                </div>
+              </div>
+            )}
+            {showAddPkg && (
+              <div style={{ background: '#fff', borderRadius: 12, padding: 20, marginBottom: 16, boxShadow: '0 2px 10px rgba(0,0,0,0.06)', border: '2px solid #FFB74D' }}>
+                <div style={{ fontSize: 15, fontWeight: 600, color: '#E65100', marginBottom: 14 }}>🎫 新增套票給客戶</div>
+                {packageTypes.length > 0 && (
+                  <div style={{ marginBottom: 14 }}>
+                    <label style={{ fontSize: 12, color: '#666', marginBottom: 6, display: 'block' }}>快速選擇套票類型：</label>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      {packageTypes.filter(pt => pt.is_active !== false).map(pt => (
+                        <button key={pt.id} onClick={() => selectPkgType(pt)} style={{ padding: '8px 14px', borderRadius: 8, border: newPkg.package_type_id === pt.id ? '2px solid #5c4a3a' : '1px solid #d0c8bc', background: newPkg.package_type_id === pt.id ? '#f5f0eb' : '#fff', color: '#5c4a3a', cursor: 'pointer', fontSize: 12, fontFamily: font }}>{pt.name}<br /><span style={{ fontSize: 11, color: '#999' }}>{pt.sessions}次 · ${pt.price}</span></button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 12 }}>
+                  <div><label style={{ fontSize: 11, color: '#666', marginBottom: 4, display: 'block' }}>客戶電話 *</label><input value={newPkg.customer_phone || ''} onChange={e => setNewPkg(p => ({ ...p, customer_phone: e.target.value }))} placeholder="例：91234567" style={{ width: '100%', padding: '10px 12px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13, boxSizing: 'border-box', fontFamily: font }} /></div>
+                  <div><label style={{ fontSize: 11, color: '#666', marginBottom: 4, display: 'block' }}>套票名稱 *</label><input value={newPkg.package_name || ''} onChange={e => setNewPkg(p => ({ ...p, package_name: e.target.value }))} placeholder="例：美睫10次卡" style={{ width: '100%', padding: '10px 12px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13, boxSizing: 'border-box', fontFamily: font }} /></div>
+                  <div><label style={{ fontSize: 11, color: '#666', marginBottom: 4, display: 'block' }}>總次數 *</label><input type="number" value={newPkg.total_sessions || ''} onChange={e => setNewPkg(p => ({ ...p, total_sessions: e.target.value }))} placeholder="10" style={{ width: '100%', padding: '10px 12px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13, boxSizing: 'border-box' }} /></div>
+                  <div><label style={{ fontSize: 11, color: '#666', marginBottom: 4, display: 'block' }}>收費金額</label><input type="number" value={newPkg.price_paid || ''} onChange={e => setNewPkg(p => ({ ...p, price_paid: e.target.value }))} placeholder="2500" style={{ width: '100%', padding: '10px 12px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13, boxSizing: 'border-box' }} /></div>
+                  <div><label style={{ fontSize: 11, color: '#666', marginBottom: 4, display: 'block' }}>到期日</label><input type="date" value={newPkg.expiry_date || ''} onChange={e => setNewPkg(p => ({ ...p, expiry_date: e.target.value }))} style={{ width: '100%', padding: '10px 12px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13, boxSizing: 'border-box' }} /></div>
+                  <div><label style={{ fontSize: 11, color: '#666', marginBottom: 4, display: 'block' }}>備註</label><input value={newPkg.notes || ''} onChange={e => setNewPkg(p => ({ ...p, notes: e.target.value }))} placeholder="可選" style={{ width: '100%', padding: '10px 12px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13, boxSizing: 'border-box', fontFamily: font }} /></div>
+                </div>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <button onClick={addPackageToCustomer} style={{ padding: '10px 24px', borderRadius: 8, border: 'none', background: '#4CAF50', color: '#fff', cursor: 'pointer', fontSize: 14, fontFamily: font, fontWeight: 600 }}>✅ 確認新增</button>
+                  <button onClick={() => setShowAddPkg(false)} style={{ padding: '10px 16px', borderRadius: 8, border: '1px solid #ccc', background: '#fff', color: '#666', cursor: 'pointer', fontSize: 13, fontFamily: font }}>取消</button>
+                </div>
+              </div>
+            )}
+            {showDeduct && (
+              <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }} onClick={() => setShowDeduct(null)}>
+                <div style={{ background: '#fff', borderRadius: 16, padding: 28, maxWidth: 400, width: '100%', boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }} onClick={e => e.stopPropagation()}>
+                  <h3 style={{ margin: '0 0 16px', color: '#5c4a3a', fontSize: 18 }}>🎫 確認扣次</h3>
+                  <div style={{ padding: 14, background: '#f9f6f3', borderRadius: 10, marginBottom: 16 }}>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: '#5c4a3a' }}>{showDeduct.package_name}</div>
+                    <div style={{ fontSize: 13, color: '#888', marginTop: 4 }}>📞 {showDeduct.customer_phone}</div>
+                    <div style={{ fontSize: 20, fontWeight: 700, color: '#FF9800', marginTop: 8 }}>{showDeduct.used_sessions} / {showDeduct.total_sessions} 次已用</div>
+                    <div style={{ fontSize: 13, color: '#4CAF50', marginTop: 4 }}>扣除後剩餘：{showDeduct.total_sessions - showDeduct.used_sessions - 1} 次</div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                    <button onClick={() => setShowDeduct(null)} style={{ padding: '10px 20px', borderRadius: 8, border: '1px solid #ccc', background: '#fff', color: '#666', cursor: 'pointer', fontSize: 14, fontFamily: font }}>取消</button>
+                    <button onClick={() => deductSession(showDeduct)} style={{ padding: '10px 24px', borderRadius: 8, border: 'none', background: '#FF9800', color: '#fff', cursor: 'pointer', fontSize: 14, fontFamily: font, fontWeight: 600 }}>確認扣 1 次</button>
+                  </div>
+                </div>
+              </div>
+            )}
+            <div style={{ background: '#fff', borderRadius: 14, overflow: 'hidden', boxShadow: '0 2px 10px rgba(0,0,0,0.06)' }}>
+              <div style={{ padding: '14px 16px', borderBottom: '1px solid #eee', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: 15, fontWeight: 600, color: '#5c4a3a' }}>🎫 套票列表（{filteredPackages.length}）</span>
+                <button onClick={fetchAllPackages} style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid #d0c8bc', background: '#faf6f0', color: '#5c4a3a', cursor: 'pointer', fontSize: 12, fontFamily: font }}>🔄 刷新</button>
+              </div>
+              {pkgLoading ? <div style={{ padding: 40, textAlign: 'center', color: '#999' }}>載入中...</div> : filteredPackages.length === 0 ? <div style={{ padding: 40, textAlign: 'center', color: '#999' }}>暫無套票</div> : filteredPackages.map(pkg => (
+                <div key={pkg.id} style={{ padding: '14px 16px', borderBottom: '1px solid #f0ebe3', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+                  <div style={{ flex: 1, minWidth: 200 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontSize: 14, fontWeight: 600, color: '#5c4a3a' }}>{pkg.package_name}</span>
+                      <span style={{ padding: '2px 8px', borderRadius: 10, fontSize: 11, fontWeight: 600, background: pkg.status === 'active' ? '#E8F5E9' : pkg.status === 'completed' ? '#E3F2FD' : '#FFEBEE', color: pkg.status === 'active' ? '#2e7d32' : pkg.status === 'completed' ? '#1565C0' : '#c62828' }}>{pkg.status === 'active' ? '使用中' : pkg.status === 'completed' ? '已用完' : '已取消'}</span>
+                    </div>
+                    <div style={{ fontSize: 12, color: '#999', marginTop: 4 }}>📞 {pkg.customer_phone}{pkg.purchased_date && <span style={{ marginLeft: 8 }}>📅 {pkg.purchased_date}</span>}{pkg.expiry_date && <span style={{ marginLeft: 8, color: new Date(pkg.expiry_date) < new Date() ? '#c62828' : '#999' }}>⏰ 到期 {pkg.expiry_date}</span>}</div>
+                    {pkg.notes && <div style={{ fontSize: 11, color: '#888', marginTop: 2 }}>📝 {pkg.notes}</div>}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <div style={{ textAlign: 'center' }}>
+                      <div style={{ fontSize: 20, fontWeight: 700, color: pkg.status === 'active' ? '#FF9800' : '#999' }}>{pkg.total_sessions - pkg.used_sessions}</div>
+                      <div style={{ fontSize: 10, color: '#999' }}>剩餘 / {pkg.total_sessions}</div>
+                    </div>
+                    <div style={{ width: 60, height: 6, background: '#eee', borderRadius: 3, overflow: 'hidden' }}><div style={{ height: '100%', background: pkg.status === 'active' ? '#FF9800' : '#999', borderRadius: 3, width: `${(pkg.used_sessions / pkg.total_sessions) * 100}%` }} /></div>
+                    {pkg.status === 'active' && (
+                      <div style={{ display: 'flex', gap: 4 }}>
+                        <button onClick={() => setShowDeduct(pkg)} style={{ padding: '8px 14px', borderRadius: 6, border: 'none', background: '#FF9800', color: '#fff', cursor: 'pointer', fontSize: 12, fontFamily: font, fontWeight: 600 }}>-1 扣次</button>
+                        <button onClick={() => cancelPackage(pkg)} style={{ padding: '8px 10px', borderRadius: 6, border: '1px solid #ffcdd2', background: '#ffebee', color: '#c62828', cursor: 'pointer', fontSize: 11, fontFamily: font }}>取消</button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
         {/* ═══ REMINDERS TAB ═══ */}
