@@ -1,4 +1,5 @@
 import ThemeEditor from './components/ThemeEditor';
+import ReportsPanel from './components/ReportsPanel'; 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 
 /* ═══ Module-level ═══ */
@@ -480,14 +481,15 @@ export default function Admin() {
     </div>
   ) : null;
 
-  const allTabs = [
-    { key: 'bookings', label: `📋 預約${stats.pending > 0 ? ` (${stats.pending})` : ''}`, show: true },
-    { key: 'timeslots', label: '🕐 時段', show: true },
-    { key: 'customers', label: '👥 客戶', show: true },
-    { key: 'reminders', label: '📱 提醒', show: true },
-    { key: 'frontend', label: '🎨 前台管理', show: isOwner },
-    { key: 'templates', label: '📝 訊息模板', show: isOwner },
-  ].filter(t => t.show);
+const allTabs = [
+  { key: 'bookings', label: `📋 預約${stats.pending > 0 ? ` (${stats.pending})` : ''}`, show: true },
+  { key: 'timeslots', label: '🕐 時段', show: true },
+  { key: 'customers', label: '👥 客戶', show: true },
+  { key: 'reminders', label: '📱 提醒', show: true },
+  { key: 'reports', label: '📊 報表', show: isOwner },   // ← 加呢行
+  { key: 'frontend', label: '🎨 前台管理', show: isOwner },
+  { key: 'templates', label: '📝 訊息模板', show: isOwner },
+].filter(t => t.show);
 
   // ★ NEW — 審計日誌 action 名稱中文化
   const auditActionText = (a) => {
@@ -1048,6 +1050,9 @@ export default function Admin() {
         </>)}
 
         {/* ═══ TEMPLATES TAB ═══ */}
+        {tab === 'reports' && (
+  <ReportsPanel />
+)}
         {tab === 'templates' && (
           <div style={{ background: '#fff', borderRadius: 14, padding: 20, margin: '0 auto', maxWidth: 800, boxShadow: '0 2px 12px rgba(0,0,0,0.08)' }}>
             <h3 style={{ margin: '0 0 16px', color: '#5c4a3a', fontSize: 18 }}>📝 WhatsApp 訊息模板</h3>
