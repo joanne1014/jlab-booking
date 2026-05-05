@@ -231,6 +231,12 @@ const [previewUrl, setPreviewUrl] = useState('https://jlab-booking.vercel.app/bo
   const bookingCountRef = useRef(0);
   const showToast = (m) => { setToast(m); setTimeout(() => setToast(''), 3000); };
 
+  useEffect(() => {
+  const check = () => setIsMobile(window.innerWidth < 768);
+  check();
+  window.addEventListener('resize', check);
+  return () => window.removeEventListener('resize', check);
+}, []);
 // ═══ useEffect 1: onAuthExpired ═══
 useEffect(() => {
   let expired = false;
@@ -390,17 +396,16 @@ const deleteCustomer = async (id) => {
     } catch (e) { showToast('❌ 儲存失敗：' + e.message); }
   };
   // ★ 收據 Functions
-  const fetchReceipts = async () => {
-    setReceiptLoading(true);
-    try {
-      let query = 'receipts?order=created_at.desc&limit=200';
-      if (receiptFilter !== 'all') query += `&status=eq.${receiptFilter}`;
-      if (receiptSearch) query += `&or=(receipt_no.ilike.%${receiptSearch}%,customer_name.ilike.%${receiptSearch}%)`;
-      const data = await sbGet(query);
-      setReceiptList(data || []);
-    } catch (e) { console.error(e); }
-    setReceiptLoading(false);
-  };
+ const fetchReceipts = async () => {
+  setReceiptLoading(true);
+  try {
+    const data = await sbGet('receipts?order=created_at.desc&limit=500');
+    setReceiptList(data || []);
+  } catch (e) {
+    console.error(e);
+  }
+  setReceiptLoading(false);
+};
 
  const createReceipt = async (overrideStatus) => {
   if (!newReceipt.customer_name || newReceipt.items.length === 0) {
@@ -444,9 +449,9 @@ const sendReceiptWhatsApp = (receipt) => {
   if (!receipt.customer_phone) return showToast('❌ 客戶冇電話');
   const phone = receipt.customer_phone.replace(/[^0-9]/g, '');
   const fullPhone = phone.length <= 8 ? '852' + phone : phone;
-  const itemsText = (receipt.items || []).map(i => `• ${i.name} x${i.qty} $${i.price * i.qty}`).join('\n');
-  const msg = `🧾 J.LAB 收據\n單號：${receipt.receipt_no}\n\n${itemsText}\n\n💰 合計：$${receipt.total}\n付款方式：${receipt.payment_method || '待定'}\n\n多謝惠顧 🙏`;
-  window.open(`https://wa.me/${fullPhone}?text=${encodeURIComponent(msg)}`, '_blank');
+  const itemsText = (receipt.items || []).map(i => '• ' + i.name + ' x' + i.qty + ' $' + (i.price * i.qty)).join('\n');
+  const msg = '🧾 J.LAB 收據\n單號：' + receipt.receipt_no + '\n\n' + itemsText + '\n\n💰 合計：$' + receipt.total + '\n付款方式：' + (receipt.payment_method || '待定') + '\n\n多謝惠顧 🙏';
+  window.open('https://wa.me/' + fullPhone + '?text=' + encodeURIComponent(msg), '_blank');
   showToast('✅ 已開啟 WhatsApp');
 };
     if (data.receipt) {
@@ -468,8 +473,8 @@ const sendReceiptWhatsApp = (receipt) => {
   };
 
 const printReceipt = (receipt) => {
-  const itemsHtml = (receipt.items || []).map(i => `<tr><td>${i.name}</td><td>×${i.qty}</td><td>$${i.price * i.qty}</td></tr>`).join('');
-  const html = `<html><head><style>body{font-family:sans-serif;max-width:350px;margin:0 auto;padding:20px}table{width:100%;border-collapse:collapse}td{padding:4px 0}h2{text-align:center;margin-bottom:4px}.total{font-size:24px;font-weight:bold;text-align:right;border-top:2px solid #000;padding-top:8px;margin-top:8px}</style></head><body><h2>J.LAB</h2><p style="text-align:center;color:#888;font-size:12px">${receipt.receipt_no}</p><hr/><p><b>${receipt.customer_name}</b> ${receipt.customer_phone || ''}</p><table>${itemsHtml}</table><div class="total">$${receipt.total}</div><p style="font-size:12px;color:#888;margin-top:16px">付款方式：${receipt.payment_method || '-'}<br/>日期：${new Date(receipt.created_at).toLocaleDateString('zh-HK')}</p></body></html>`;
+  const itemsHtml = (receipt.items || []).map(i => '<tr><td>' + i.name + '</td><td>×' + i.qty + '</td><td>$' + (i.price * i.qty) + '</td></tr>').join('');
+  const html = '<html><head><style>body{font-family:sans-serif;max-width:350px;margin:0 auto;padding:20px}table{width:100%;border-collapse:collapse}td{padding:4px 0}h2{text-align:center;margin-bottom:4px}.total{font-size:24px;font-weight:bold;text-align:right;border-top:2px solid #000;padding-top:8px;margin-top:8px}</style></head><body><h2>J.LAB</h2><p style="text-align:center;color:#888;font-size:12px">' + receipt.receipt_no + '</p><hr/><p><b>' + receipt.customer_name + '</b> ' + (receipt.customer_phone || '') + '</p><table>' + itemsHtml + '</table><div class="total">$' + receipt.total + '</div><p style="font-size:12px;color:#888;margin-top:16px">付款方式：' + (receipt.payment_method || '-') + '<br/>日期：' + new Date(receipt.created_at).toLocaleDateString('zh-HK') + '</p></body></html>';
   const w = window.open('', '', 'width=420,height=700');
   w.document.write(html);
   w.document.close();
