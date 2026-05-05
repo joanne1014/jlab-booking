@@ -1196,8 +1196,9 @@ const allTabs = [
               <input type="text" placeholder="🔍 搜尋客人名 / 電話 / 標籤..." value={custSearch} onChange={e => setCustSearch(e.target.value)} style={{ flex: 1, minWidth: 200, padding: '10px 14px', border: '1px solid #d0c8bc', borderRadius: 8, fontSize: 14, fontFamily: font }} />
               <button onClick={refreshCustomerStats} style={{ padding: '10px 16px', background: '#FF9800', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontFamily: font, fontWeight: 600 }}>📊 刷新統計</button>
 <button onClick={() => { setShowAddCust(true); setNewCust({ name: '', phone: '', email: '', notes: '' }); }} style={{ padding: '10px 16px', background: '#4CAF50', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontFamily: font, fontWeight: 600 }}>+ 新增客戶</button>
-<button onClick={fetchCustomers} style={{ padding: '10px 16px', background: '#5c4a3a', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontFamily: font }}>🔄</button>
-            {showAddCust && (
+<button onClick={fetchCustomers} style={{ ... }}>🔄</button>
+</div>
+{showAddCust && (
   <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }} onClick={() => setShowAddCust(false)}>
     <div style={{ background: '#fff', borderRadius: 16, padding: 28, maxWidth: 440, width: '100%', boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }} onClick={e => e.stopPropagation()}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
@@ -1320,8 +1321,8 @@ const allTabs = [
   setTab('receipts');
 }} style={{ padding: '10px 16px', borderRadius: 8, border: 'none', background: '#FF9800', color: '#fff', cursor: 'pointer', fontSize: 13, fontFamily: font, fontWeight: 600 }}>
   🧾 出單
-                    <button onClick={() => deleteCustomer(selectedCust.id)} style={{ padding: '10px 16px', borderRadius: 8, border: '1px solid #ffcdd2', background: '#FFEBEE', color: '#c62828', cursor: 'pointer', fontSize: 13, fontFamily: font }}>🗑️ 刪除客戶</button>
 </button>
+<button onClick={() => deleteCustomer(selectedCust.id)} style={{ padding: '10px 16px', borderRadius: 8, border: '1px solid #ffcdd2', background: '#FFEBEE', color: '#c62828', cursor: 'pointer', fontSize: 13, fontFamily: font }}>🗑️ 刪除客戶</button>
                       <button onClick={() => deleteCustomer(selectedCust.id)} style={{ padding: '10px 16px', borderRadius: 8, border: '1px solid #ffcdd2', background: '#FFEBEE', color: '#c62828', cursor: 'pointer', fontSize: 13, fontFamily: font }}>🗑️ 刪除客戶</button>
                     </div>
                   </div>
