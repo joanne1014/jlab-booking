@@ -43,15 +43,26 @@ async function verifyToken(req) {
 
 /* ═══ 白名單 ═══ */
 const ALLOWED_TABLES = [
-  'bookings','services','service_addons','service_variants',
-  'staff','enabled_timeslots','disabled_timeslots',
-  'date_availability','blocked_dates','daily_slots',
-  'timeslot_config','notification_templates','frontend_settings',
-  'customers','admin_logs','admin_users','reminder_logs',
-  'addons','technicians','time_slots','audit_logs','backups',
-  'service_records','customer_packages','consumption_records','points_log',
-  'receipts','business_hours','shop_settings','whatsapp_templates',
+  'bookings',
+  'staff',
+  'services',
+  'service_variants',
+  'service_addons',
+  'date_availability',
+  'enabled_timeslots',
+  'disabled_timeslots',
+  'blocked_dates',
+  'admin_logs',
+  'customers',
+  'notification_templates',
+  'customer_packages',
   'package_types',
+  'service_records',
+  'consumption_records',
+  'points_log',
+  'business_hours',
+  'receipts',
+  'admin_users',
 ];
 
 /* ═══ DB Proxy ═══ */
