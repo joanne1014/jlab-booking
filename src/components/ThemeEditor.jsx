@@ -1,12 +1,11 @@
-// src/components/ThemeEditor.jsx
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+/ src/components/ThemeEditor.jsx
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Check, Upload, Trash2, Eye, EyeOff, RotateCcw, Save,
   Palette, Type, Image, Settings, Diamond,
   ChevronDown, ChevronUp, Smartphone, Loader2
 } from 'lucide-react';
-
 // ═══════════════════════════════════════════════════════
 // Theme Configuration Data
 // ═══════════════════════════════════════════════════════
