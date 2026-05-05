@@ -1287,11 +1287,13 @@ const allTabs = [
   setShowNewReceipt(true);
   setNewReceipt(prev => ({
     ...prev,
-    customer_name: selectedCust.name,
-    customer_phone: selectedCust.phone,
+    customer_name: selectedCust.name || '',
+    customer_phone: selectedCust.phone || '',
   }));
   setTab('receipts');
-}} style={{ padding: '10px 16px', borderRadius: 8, border: 'none', background: '#FF9800', color: '#fff', cursor: 'pointer', fontSize: 13, fontFamily: font, fontWeight: 600 }}>🧾 出單</button>
+}} style={{ padding: '10px 16px', borderRadius: 8, border: 'none', background: '#FF9800', color: '#fff', cursor: 'pointer', fontSize: 13, fontFamily: font, fontWeight: 600 }}>
+  🧾 出單
+</button>
                     </div>
                   </div>
                 )}
