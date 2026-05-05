@@ -2032,7 +2032,8 @@ const allTabs = [
             </button>
           </div>
         )}
-    
+        
+     {tab === 'templates' && (
           <div style={{ background: '#fff', borderRadius: 14, padding: 20, margin: '0 auto', maxWidth: 800, boxShadow: '0 2px 12px rgba(0,0,0,0.08)' }}>
             <h3 style={{ margin: '0 0 16px', color: '#5c4a3a', fontSize: 18 }}>📝 WhatsApp 訊息模板</h3>
             <div style={{ background: '#fff8e1', borderRadius: 10, padding: 12, marginBottom: 16, fontSize: 13 }}><strong>📌 可用變數：</strong><br/><code>{'{customer_name}'}</code> 客人名 &nbsp;<code>{'{booking_date}'}</code> 日期 &nbsp;<code>{'{booking_time}'}</code> 時間 &nbsp;<code>{'{service_name}'}</code> 服務 &nbsp;<code>{'{technician_label}'}</code> 技師 &nbsp;<code>{'{total_price}'}</code> 價錢 &nbsp;<code>{'{old_date}'}</code> 原日期 &nbsp;<code>{'{old_time}'}</code> 原時間</div>
