@@ -2038,6 +2038,7 @@ const allTabs = [
             </button>
           </div>
         )}
+      {tab === 'invoice-style' && <div style={{padding:80,background:'red',color:'white',fontSize:40,textAlign:'center'}}>✅ INVOICE STYLE TAB WORKS</div>}
         {tab === 'templates' && (
           <div style={{ background: '#fff', borderRadius: 14, padding: 20, margin: '0 auto', maxWidth: 800, boxShadow: '0 2px 12px rgba(0,0,0,0.08)' }}>
             <h3 style={{ margin: '0 0 16px', color: '#5c4a3a', fontSize: 18 }}>📝 WhatsApp 訊息模板</h3>
