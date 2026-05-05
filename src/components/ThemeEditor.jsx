@@ -1,4 +1,4 @@
-/ src/components/ThemeEditor.jsx
+// src/components/ThemeEditor.jsx
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
