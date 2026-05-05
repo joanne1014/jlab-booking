@@ -422,7 +422,60 @@ export default async function handler(req, res) {
         .limit(payload.limit || 200);
       return res.status(200).json(data || []);
     }
+// ★ 新增客戶
+if (action === 'add-customer') {
+  const { name, phone, email, notes, tags, vip } = payload;
+  if (!name) return res.status(400).json({ error: '請輸入客戶名稱' });
 
+  const { data, error } = await supabase
+    .from('customers')
+    .insert([{
+      name,
+      phone: phone || '',
+      email: email || '',
+      notes: notes || '',
+      tags: tags || [],
+      is_vip: vip || false,
+      total_visits: 0,
+      total_spent: 0,
+      is_blacklisted: false,
+    }])
+    .select()
+    .single();
+
+  if (error) return res.status(500).json({ error: error.message });
+
+  await logAudit({
+    action: 'customer_created',
+    target_type: 'customer',
+    target_id: String(data.id),
+    details: { name, phone },
+  });
+
+  return res.status(200).json({ success: true, data });
+}
+
+// ★ 刪除客戶
+if (action === 'delete-customer') {
+  const { id } = payload;
+  if (!id) return res.status(400).json({ error: 'Missing customer id' });
+
+  const { error } = await supabase
+    .from('customers')
+    .delete()
+    .eq('id', id);
+
+  if (error) return res.status(500).json({ error: error.message });
+
+  await logAudit({
+    action: 'customer_deleted',
+    target_type: 'customer',
+    target_id: String(id),
+    details: {},
+  });
+
+  return res.status(200).json({ success: true });
+}
     if (action === 'update-customer') {
       const customerId = payload.id || payload.customerId;
       if (!customerId) return res.status(400).json({ error: 'Missing customer id' });
