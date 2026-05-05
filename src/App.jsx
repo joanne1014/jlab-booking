@@ -24,6 +24,7 @@ export default function App() {
         <Route path="/admin/invoice-style" element={<InvoiceStyleEditor />} />
         <Route path="/admin/customers" element={<CustomerManagement />} />
         <Route path="/reset-password" element={<ResetPassword />} />
+        <Route path="/admin/customers" element={<CustomerManagement />} />
 
         {/* 其他 URL 全部去首頁 */}
         <Route path="*" element={<Navigate to="/" replace />} />
