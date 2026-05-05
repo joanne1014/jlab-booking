@@ -292,13 +292,44 @@ const [previewUrl, setPreviewUrl] = useState('https://jlab-booking.vercel.app/bo
       window.history.replaceState(null, '', window.location.pathname + window.location.search);
     }
   }, []);
-
+useEffect(() => {
+  let expired = false;
+  onAuthExpired = () => {
+    if (expired) return; // 只觸發一次
+    expired = true;
+    setAuth(false);
+    showToast('⚠️ 登入已過期，請重新登入');
+  };
+  return () => { onAuthExpired = null; };
+}, []);
   const handleResetNewPw = async () => { setResetPwError(''); if (!resetNewPw || resetNewPw.length < 6) { setResetPwError('新密碼至少要 6 個字元'); return; } if (resetNewPw !== resetConfirmPw) { setResetPwError('兩次密碼不一致'); return; } setResetPwLoading(true); try { await apiCall('reset-via-token', { token: recoveryToken, newPassword: resetNewPw }); showToast('✅ 密碼已重設，請重新登入'); setShowResetForm(false); setRecoveryToken(''); setResetNewPw(''); setResetConfirmPw(''); } catch (err) { setResetPwError(err.message || '重設失敗'); } setResetPwLoading(false); };
 
   const handleLogin = async (e) => { e.preventDefault(); setLoginError(''); setLoginLoading(true); try { const result = await apiCall('login', { email: loginEmail, password: pw }); authToken = result.access_token; try { sessionStorage.setItem('jlab_token', result.access_token); } catch (_) {} setAuth(true); try { const roles = await sbGet(`admin_users?email=eq.${encodeURIComponent(loginEmail)}`); if (roles && roles.length > 0) { setUserRole(roles[0].role || 'owner'); setUserStaffId(roles[0].staff_id || null); } else { setUserRole('owner'); } } catch (_) { setUserRole('owner'); } fetchBookings(); fetchReceipts();fetchBlocked(); fetchStaff(); fetchServices(); fetchAddons(); fetchLogs(); fetchCustomers(); fetchPackageTypes(); fetchAllPackages(); fetchBusinessHours();; apiCall('auto-backup').catch(() => {}); } catch (err) { setLoginError(err.message || '帳號或密碼錯誤'); } setLoginLoading(false); };
 
-  useEffect(() => { const saved = sessionStorage.getItem('jlab_token');fetchReceipts(); if (saved) { authToken = saved; apiCall('verify').then(() => { setAuth(true); fetchBookings(); fetchBlocked(); fetchStaff(); fetchServices(); fetchAddons(); fetchLogs(); fetchCustomers();fetchPackageTypes(); fetchAllPackages(); fetchBusinessHours();; apiCall('auto-backup').catch(() => {}); }).catch(() => { authToken = null; sessionStorage.removeItem('jlab_token'); }); } }, []);
-
+ useEffect(() => {
+  const saved = sessionStorage.getItem('jlab_token');
+  if (saved) {
+    authToken = saved;
+    apiCall('verify').then(() => {
+      setAuth(true);
+      fetchBookings();
+      fetchReceipts();
+      fetchBlocked();
+      fetchStaff();
+      fetchServices();
+      fetchAddons();
+      fetchLogs();
+      fetchCustomers();
+      fetchPackageTypes();
+      fetchAllPackages();
+      fetchBusinessHours();
+      apiCall('auto-backup').catch(() => {});
+    }).catch(() => {
+      authToken = null;
+      sessionStorage.removeItem('jlab_token');
+    });
+  }
+}, []);
   const logChange = (text) => { const id = Date.now(); const ts = new Date().toLocaleTimeString('zh-HK', { hour: '2-digit', minute: '2-digit', second: '2-digit' }); setChangeLog(prev => [{ id, text, ts }, ...prev].slice(0, 30)); try { sbPost('admin_logs', [{ action: text, admin_email: loginEmail || 'admin' }]); } catch (e) { console.error('Log save failed:', e); } };
   const fetchLogs = async () => { setLogLoading(true); try { const data = await sbGet('admin_logs?order=created_at.desc&limit=100'); setDbLogs(data || []); } catch (e) { console.error(e); } setLogLoading(false); };
   const fetchAuditLogs = async () => { setAuditLoading(true); try { const result = await apiCall('get-audit-logs', {}); setAuditLogs(result.data || []); } catch (e) { console.error(e); } setAuditLoading(false); };
