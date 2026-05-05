@@ -1563,24 +1563,7 @@ const allTabs = [
                         {bh.is_open ? `${bh.open_time} - ${bh.close_time}` : '🔴 休息'}
                       </div>
                     )}
-                    {tab === 'invoice-style' && (
-  <div style={{ textAlign: 'center', padding: 40 }}>
-    <div style={{ fontSize: 40, marginBottom: 16 }}>🎨</div>
-    <h3 style={{ color: '#5c4a3a', marginBottom: 12, fontFamily: font }}>單據風格編輯器</h3>
-    <p style={{ color: '#999', fontSize: 14, marginBottom: 20 }}>自訂你嘅收據風格：顏色、字體、版面</p>
-    <button
-      onClick={() => window.open('/admin/invoice-style', '_blank')}
-      style={{
-        padding: '14px 32px',
-        borderRadius: 10,
-        border: 'none',
-        background: '#5c4a3a',
-        color: '#fff',
-        cursor: 'pointer',
-        fontSize: 15,
-        fontFamily: font,
-        fontWeight: 600
-      }}
+                   
     >
       🎨 打開風格編輯器
     </button>
@@ -2030,6 +2013,29 @@ const allTabs = [
                 )
               )}
             </div>
+          </div>
+        )}
+      {tab === 'invoice-style' && (
+          <div style={{ textAlign: 'center', padding: 40 }}>
+            <div style={{ fontSize: 40, marginBottom: 16 }}>🎨</div>
+            <h3 style={{ color: '#5c4a3a', marginBottom: 12, fontFamily: font }}>單據風格編輯器</h3>
+            <p style={{ color: '#999', fontSize: 14, marginBottom: 20 }}>自訂你嘅收據風格：顏色、字體、版面</p>
+            <button
+              onClick={() => window.open('/admin/invoice-style', '_blank')}
+              style={{
+                padding: '14px 32px',
+                borderRadius: 10,
+                border: 'none',
+                background: '#5c4a3a',
+                color: '#fff',
+                cursor: 'pointer',
+                fontSize: 15,
+                fontFamily: font,
+                fontWeight: 600
+              }}
+            >
+              🎨 打開風格編輯器
+            </button>
           </div>
         )}
         {tab === 'templates' && (
