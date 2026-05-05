@@ -77,7 +77,275 @@ if (typeof window !== 'undefined') {
     }
   } catch (_) {}
 }
+function InvoiceStyleEditor({ sbGet, sbPost, sbPatch, showToast, logChange, font }) {
+  const [settings, setSettings] = useState({
+    business_name: 'J.LAB',
+    subtitle: '專業美睫',
+    logo_url: '',
+    primary_color: '#5c4a3a',
+    accent_color: '#b8956a',
+    bg_color: '#ffffff',
+    text_color: '#333333',
+    font_style: 'elegant',
+    layout: 'modern',
+    show_logo: true,
+    show_footer: true,
+    footer_text: '多謝惠顧 Thank you! 🙏',
+    border_style: 'minimal',
+  });
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [settingsId, setSettingsId] = useState(null);
 
+  useEffect(() => {
+    loadSettings();
+  }, []);
+
+  const loadSettings = async () => {
+    setLoading(true);
+    try {
+      const data = await sbGet('invoice_settings?limit=1');
+      if (data && data.length > 0) {
+        setSettings(prev => ({ ...prev, ...data[0].settings }));
+        setSettingsId(data[0].id);
+      }
+    } catch (e) {
+      console.log('No existing invoice settings');
+    }
+    setLoading(false);
+  };
+
+  const saveSettings = async () => {
+    setSaving(true);
+    try {
+      if (settingsId) {
+        await sbPatch(`invoice_settings?id=eq.${settingsId}`, { settings, updated_at: new Date().toISOString() });
+      } else {
+        const data = await sbPost('invoice_settings', [{ settings }]);
+        if (data && data.length > 0) setSettingsId(data[0].id);
+      }
+      showToast('✅ 收據風格已儲存');
+      logChange('🎨 更新收據風格設定');
+    } catch (e) {
+      showToast('❌ 儲存失敗：' + e.message);
+    }
+    setSaving(false);
+  };
+
+  const colorField = (label, key) => (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+      <input type="color" value={settings[key]} onChange={e => setSettings(p => ({ ...p, [key]: e.target.value }))} style={{ width: 40, height: 40, border: '2px solid #e8e0d8', borderRadius: 8, cursor: 'pointer', padding: 2 }} />
+      <div>
+        <div style={{ fontSize: 13, fontWeight: 600, color: '#5c4a3a' }}>{label}</div>
+        <div style={{ fontSize: 11, color: '#999' }}>{settings[key]}</div>
+      </div>
+    </div>
+  );
+
+  const sampleItems = [
+    { name: '自然美睫 — 輕盈款', qty: 1, price: 580 },
+    { name: '卸甲服務', qty: 1, price: 80 },
+  ];
+  const sampleTotal = sampleItems.reduce((s, i) => s + i.price * i.qty, 0);
+
+  const fontMap = {
+    elegant: "'Noto Serif TC', serif",
+    modern: "'Noto Sans TC', sans-serif",
+    playful: "'Comic Neue', cursive",
+    minimal: "system-ui, sans-serif",
+  };
+
+  const previewFont = fontMap[settings.font_style] || fontMap.elegant;
+
+  if (loading) return <div style={{ padding: 60, textAlign: 'center', color: '#999' }}>載入中...</div>;
+
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, alignItems: 'start' }}>
+      {/* 左側：設定面板 */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {/* 基本資料 */}
+        <div style={{ background: '#fff', borderRadius: 14, padding: 20, boxShadow: '0 2px 10px rgba(0,0,0,0.05)' }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: '#5c4a3a', marginBottom: 14 }}>📋 基本資料</div>
+          <div style={{ marginBottom: 12 }}>
+            <label style={{ fontSize: 12, color: '#666', marginBottom: 4, display: 'block' }}>商店名稱</label>
+            <input value={settings.business_name} onChange={e => setSettings(p => ({ ...p, business_name: e.target.value }))} style={{ width: '100%', padding: '10px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, boxSizing: 'border-box', fontFamily: font }} />
+          </div>
+          <div style={{ marginBottom: 12 }}>
+            <label style={{ fontSize: 12, color: '#666', marginBottom: 4, display: 'block' }}>副標題</label>
+            <input value={settings.subtitle} onChange={e => setSettings(p => ({ ...p, subtitle: e.target.value }))} placeholder="專業美睫" style={{ width: '100%', padding: '10px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, boxSizing: 'border-box', fontFamily: font }} />
+          </div>
+          <div style={{ marginBottom: 12 }}>
+            <label style={{ fontSize: 12, color: '#666', marginBottom: 4, display: 'block' }}>Logo 圖片 URL（可選）</label>
+            <input value={settings.logo_url} onChange={e => setSettings(p => ({ ...p, logo_url: e.target.value }))} placeholder="https://..." style={{ width: '100%', padding: '10px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }} />
+          </div>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13 }}>
+            <input type="checkbox" checked={settings.show_logo} onChange={e => setSettings(p => ({ ...p, show_logo: e.target.checked }))} />
+            顯示 Logo
+          </label>
+        </div>
+
+        {/* 顏色設定 */}
+        <div style={{ background: '#fff', borderRadius: 14, padding: 20, boxShadow: '0 2px 10px rgba(0,0,0,0.05)' }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: '#5c4a3a', marginBottom: 14 }}>🎨 顏色設定</div>
+          {colorField('主色（標題 / 重點）', 'primary_color')}
+          {colorField('點綴色（線條 / 按鈕）', 'accent_color')}
+          {colorField('背景色', 'bg_color')}
+          {colorField('文字色', 'text_color')}
+          <div style={{ marginTop: 8, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 11, color: '#999' }}>快速方案：</span>
+            {[
+              { label: '典雅棕', p: '#5c4a3a', a: '#b8956a', bg: '#ffffff', t: '#333333' },
+              { label: '現代黑', p: '#1a1a1a', a: '#666666', bg: '#ffffff', t: '#222222' },
+              { label: '玫瑰金', p: '#8b6f5f', a: '#d4a574', bg: '#fdf8f4', t: '#4a3728' },
+              { label: '薰衣草', p: '#6b5b95', a: '#b8a9c9', bg: '#f8f6fb', t: '#3d3250' },
+              { label: '森林綠', p: '#2d5016', a: '#6b8f3e', bg: '#f5f9f0', t: '#1a3a0a' },
+            ].map(scheme => (
+              <button key={scheme.label} onClick={() => setSettings(p => ({ ...p, primary_color: scheme.p, accent_color: scheme.a, bg_color: scheme.bg, text_color: scheme.t }))} style={{ padding: '4px 10px', borderRadius: 6, border: '1px solid #e8e0d8', background: '#faf6f0', color: '#5c4a3a', cursor: 'pointer', fontSize: 11, fontFamily: font }}>{scheme.label}</button>
+            ))}
+          </div>
+        </div>
+
+        {/* 字體 + 版面 */}
+        <div style={{ background: '#fff', borderRadius: 14, padding: 20, boxShadow: '0 2px 10px rgba(0,0,0,0.05)' }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: '#5c4a3a', marginBottom: 14 }}>🖌️ 字體 & 版面</div>
+          <div style={{ marginBottom: 14 }}>
+            <label style={{ fontSize: 12, color: '#666', marginBottom: 6, display: 'block' }}>字體風格</label>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {[
+                { key: 'elegant', label: '典雅', desc: 'Noto Serif' },
+                { key: 'modern', label: '現代', desc: 'Noto Sans' },
+                { key: 'minimal', label: '極簡', desc: 'System' },
+              ].map(f => (
+                <button key={f.key} onClick={() => setSettings(p => ({ ...p, font_style: f.key }))} style={{ padding: '10px 16px', borderRadius: 8, border: settings.font_style === f.key ? '2px solid #5c4a3a' : '1px solid #ddd', background: settings.font_style === f.key ? '#f5f0eb' : '#fff', cursor: 'pointer', fontFamily: font, fontSize: 12 }}>
+                  <div style={{ fontWeight: 600 }}>{f.label}</div>
+                  <div style={{ fontSize: 10, color: '#999' }}>{f.desc}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+          <div style={{ marginBottom: 14 }}>
+            <label style={{ fontSize: 12, color: '#666', marginBottom: 6, display: 'block' }}>版面風格</label>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {[
+                { key: 'modern', label: '現代', desc: '圓角卡片' },
+                { key: 'classic', label: '經典', desc: '正式排版' },
+                { key: 'minimal', label: '極簡', desc: '留白為主' },
+              ].map(l => (
+                <button key={l.key} onClick={() => setSettings(p => ({ ...p, layout: l.key }))} style={{ padding: '10px 16px', borderRadius: 8, border: settings.layout === l.key ? '2px solid #5c4a3a' : '1px solid #ddd', background: settings.layout === l.key ? '#f5f0eb' : '#fff', cursor: 'pointer', fontFamily: font, fontSize: 12 }}>
+                  <div style={{ fontWeight: 600 }}>{l.label}</div>
+                  <div style={{ fontSize: 10, color: '#999' }}>{l.desc}</div>
+                </button>
+              ))}
+            </div>
+          </div>
+          <div style={{ marginBottom: 12 }}>
+            <label style={{ fontSize: 12, color: '#666', marginBottom: 6, display: 'block' }}>邊框風格</label>
+            <div style={{ display: 'flex', gap: 8 }}>
+              {[
+                { key: 'none', label: '無邊框' },
+                { key: 'minimal', label: '細線' },
+                { key: 'bold', label: '粗線' },
+                { key: 'double', label: '雙線' },
+              ].map(b => (
+                <button key={b.key} onClick={() => setSettings(p => ({ ...p, border_style: b.key }))} style={{ padding: '6px 14px', borderRadius: 6, border: settings.border_style === b.key ? '2px solid #5c4a3a' : '1px solid #ddd', background: settings.border_style === b.key ? '#f5f0eb' : '#fff', cursor: 'pointer', fontSize: 11, fontFamily: font }}>{b.label}</button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* 頁尾 */}
+        <div style={{ background: '#fff', borderRadius: 14, padding: 20, boxShadow: '0 2px 10px rgba(0,0,0,0.05)' }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: '#5c4a3a', marginBottom: 14 }}>📝 頁尾</div>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13, marginBottom: 10 }}>
+            <input type="checkbox" checked={settings.show_footer} onChange={e => setSettings(p => ({ ...p, show_footer: e.target.checked }))} />
+            顯示頁尾文字
+          </label>
+          {settings.show_footer && (
+            <input value={settings.footer_text} onChange={e => setSettings(p => ({ ...p, footer_text: e.target.value }))} style={{ width: '100%', padding: '10px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 13, boxSizing: 'border-box', fontFamily: font }} />
+          )}
+        </div>
+
+        {/* 儲存按鈕 */}
+        <button onClick={saveSettings} disabled={saving} style={{ padding: '14px 32px', borderRadius: 10, border: 'none', background: saving ? '#a89888' : '#5c4a3a', color: '#fff', cursor: saving ? 'not-allowed' : 'pointer', fontSize: 15, fontFamily: font, fontWeight: 700, width: '100%' }}>
+          {saving ? '⏳ 儲存中...' : '💾 儲存收據風格'}
+        </button>
+      </div>
+
+      {/* 右側：即時預覽 */}
+      <div style={{ position: 'sticky', top: 20 }}>
+        <div style={{ fontSize: 14, fontWeight: 600, color: '#5c4a3a', marginBottom: 10, textAlign: 'center' }}>👁️ 即時預覽</div>
+        <div style={{
+          background: settings.bg_color,
+          borderRadius: settings.layout === 'modern' ? 16 : settings.layout === 'minimal' ? 4 : 0,
+          padding: settings.layout === 'minimal' ? 30 : 28,
+          boxShadow: '0 4px 24px rgba(0,0,0,0.12)',
+          fontFamily: previewFont,
+          color: settings.text_color,
+          border: settings.border_style === 'none' ? 'none' : settings.border_style === 'bold' ? `3px solid ${settings.accent_color}` : settings.border_style === 'double' ? `4px double ${settings.accent_color}` : `1px solid ${settings.accent_color}`,
+          maxWidth: 360,
+          margin: '0 auto',
+        }}>
+          {/* Header */}
+          <div style={{ textAlign: 'center', marginBottom: 20, paddingBottom: 16, borderBottom: `2px solid ${settings.accent_color}` }}>
+            {settings.show_logo && settings.logo_url && (
+              <img src={settings.logo_url} alt="Logo" style={{ width: 60, height: 60, objectFit: 'contain', marginBottom: 8 }} onError={e => { e.target.style.display = 'none'; }} />
+            )}
+            <div style={{ fontSize: settings.layout === 'classic' ? 28 : 24, fontWeight: 700, color: settings.primary_color, letterSpacing: settings.layout === 'classic' ? 4 : 2 }}>{settings.business_name}</div>
+            {settings.subtitle && <div style={{ fontSize: 12, color: settings.accent_color, marginTop: 4, letterSpacing: 1 }}>{settings.subtitle}</div>}
+          </div>
+
+          {/* Receipt Info */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: settings.text_color, opacity: 0.6, marginBottom: 16 }}>
+            <span>單號：JLAB-20260505-001</span>
+            <span>2026-05-05</span>
+          </div>
+
+          {/* Customer */}
+          <div style={{ marginBottom: 16, padding: '10px 14px', background: `${settings.primary_color}08`, borderRadius: settings.layout === 'modern' ? 8 : 4 }}>
+            <div style={{ fontSize: 13, fontWeight: 600 }}>陳小姐</div>
+            <div style={{ fontSize: 11, opacity: 0.6 }}>📞 91234567</div>
+          </div>
+
+          {/* Items */}
+          <div style={{ marginBottom: 16 }}>
+            {sampleItems.map((item, i) => (
+              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: i < sampleItems.length - 1 ? `1px solid ${settings.accent_color}30` : 'none' }}>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 500 }}>{item.name}</div>
+                  <div style={{ fontSize: 11, opacity: 0.5 }}>×{item.qty}</div>
+                </div>
+                <div style={{ fontSize: 14, fontWeight: 600 }}>${item.price}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Total */}
+          <div style={{ borderTop: `2px solid ${settings.primary_color}`, paddingTop: 14, marginBottom: 16 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: settings.text_color, opacity: 0.6, marginBottom: 6 }}>
+              <span>小計</span><span>${sampleTotal}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 22, fontWeight: 700, color: settings.primary_color }}>
+              <span>總計</span><span>${sampleTotal}</span>
+            </div>
+          </div>
+
+          {/* Payment */}
+          <div style={{ textAlign: 'center', padding: '8px 14px', background: `${settings.accent_color}15`, borderRadius: settings.layout === 'modern' ? 8 : 4, marginBottom: 16 }}>
+            <span style={{ fontSize: 12, color: settings.accent_color, fontWeight: 600 }}>💳 轉數快</span>
+            <span style={{ fontSize: 12, marginLeft: 12, color: '#4CAF50', fontWeight: 600 }}>✅ 已付款</span>
+          </div>
+
+          {/* Footer */}
+          {settings.show_footer && (
+            <div style={{ textAlign: 'center', fontSize: 12, color: settings.text_color, opacity: 0.5, paddingTop: 12, borderTop: `1px dashed ${settings.accent_color}40` }}>
+              {settings.footer_text}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 /* ═══ Component ═══ */
 export default function Admin() {
   const [auth, setAuth] = useState(false);
@@ -2010,28 +2278,15 @@ const allTabs = [
           </div>
         )}
       {tab === 'invoice-style' && (
-          <div style={{ textAlign: 'center', padding: 40 }}>
-            <div style={{ fontSize: 40, marginBottom: 16 }}>🎨</div>
-            <h3 style={{ color: '#5c4a3a', marginBottom: 12, fontFamily: font }}>單據風格編輯器</h3>
-            <p style={{ color: '#999', fontSize: 14, marginBottom: 20 }}>自訂你嘅收據風格：顏色、字體、版面</p>
-            <button
-              onClick={() => window.open('/admin/invoice-style', '_blank')}
-              style={{
-                padding: '14px 32px',
-                borderRadius: 10,
-                border: 'none',
-                background: '#5c4a3a',
-                color: '#fff',
-                cursor: 'pointer',
-                fontSize: 15,
-                fontFamily: font,
-                fontWeight: 600
-              }}
-            >
-              🎨 打開風格編輯器
-            </button>
-          </div>
-        )}
+  <InvoiceStyleEditor
+    sbGet={sbGet}
+    sbPost={sbPost}
+    sbPatch={sbPatch}
+    showToast={showToast}
+    logChange={logChange}
+    font={font}
+  />
+)}
         
      {tab === 'templates' && (
           <div style={{ background: '#fff', borderRadius: 14, padding: 20, margin: '0 auto', maxWidth: 800, boxShadow: '0 2px 12px rgba(0,0,0,0.08)' }}>
