@@ -402,24 +402,34 @@ const deleteCustomer = async (id) => {
     setReceiptLoading(false);
   };
 
-  const createReceipt = async () => {
-    if (!newReceipt.customer_name || newReceipt.items.length === 0) return showToast('❌ 請填寫客戶名同至少一項服務');
-    try {
-      const res = await fetch('/api/receipts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newReceipt)
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setReceiptList(prev => [data, ...prev]);
-        setShowNewReceipt(false);
-        setNewReceipt({ customer_name: '', customer_phone: '', staff_name: '', items: [], payment_method: '', discount_type: 'none', discount_value: 0, remarks: '' });
-        showToast('✅ 收據已建立：' + data.receipt_no);
-        logChange(`🧾 新增收據 ${data.receipt_no} — ${data.customer_name} $${data.total}`);
-      } else { showToast('❌ ' + (data.error || '建立失敗')); }
-    } catch (e) { showToast('❌ ' + e.message); }
-  };
+ const createReceipt = async (overrideStatus) => {
+  if (!newReceipt.customer_name || newReceipt.items.length === 0) {
+    return showToast('❌ 請填寫客戶名同至少一項服務');
+  }
+  try {
+    const data = await apiCall('create-receipt', {
+      customer_name: newReceipt.customer_name,
+      customer_phone: newReceipt.customer_phone,
+      staff_name: newReceipt.staff_name,
+      items: newReceipt.items,
+      subtotal: receiptSubtotal,
+      discount: receiptDiscount,
+      total: receiptTotal,
+      payment_method: newReceipt.payment_method,
+      remarks: newReceipt.remarks,
+      status: overrideStatus || 'unpaid',
+    });
+    if (data.receipt) {
+      setReceiptList(prev => [data.receipt, ...prev]);
+      setShowNewReceipt(false);
+      setNewReceipt({ customer_name: '', customer_phone: '', staff_name: '', items: [], payment_method: '', discount_type: 'none', discount_value: 0, remarks: '' });
+      showToast('✅ 收據已建立：' + data.receipt.receipt_no);
+      logChange('🧾 新增收據 ' + data.receipt.receipt_no + ' — ' + data.receipt.customer_name + ' $' + data.receipt.total);
+    }
+  } catch (e) {
+    showToast('❌ ' + e.message);
+  }
+};
 
   const markReceiptPaid = async (receipt) => {
     try {
@@ -430,18 +440,24 @@ const deleteCustomer = async (id) => {
     } catch (e) { showToast('❌ 更新失敗'); }
   };
 
-  const sendReceiptWhatsApp = async (receipt) => {
-    setReceiptSending(receipt.id);
-    try {
-      const res = await fetch('/api/send-receipt', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          receipt_id: receipt.id,
-          method: 'whatsapp',
-          phone: receipt.customer_phone ? '852' + receipt.customer_phone.replace(/[^0-9]/g, '') : '',
-        })
-      });
+const sendReceiptWhatsApp = (receipt) => {
+  if (!receipt.customer_phone) return showToast('❌ 客戶冇電話');
+  const phone = receipt.customer_phone.replace(/[^0-9]/g, '');
+  const fullPhone = phone.length <= 8 ? '852' + phone : phone;
+  const itemsText = (receipt.items || []).map(i => `• ${i.name} x${i.qty} $${i.price * i.qty}`).join('\n');
+  const msg = `🧾 J.LAB 收據\n單號：${receipt.receipt_no}\n\n${itemsText}\n\n💰 合計：$${receipt.total}\n付款方式：${receipt.payment_method || '待定'}\n\n多謝惠顧 🙏`;
+  window.open(`https://wa.me/${fullPhone}?text=${encodeURIComponent(msg)}`, '_blank');
+  showToast('✅ 已開啟 WhatsApp');
+};
+    if (data.receipt) {
+      setReceiptList(prev => [data.receipt, ...prev]);
+      setShowNewReceipt(false);
+      setNewReceipt({ customer_name: '', customer_phone: '', staff_name: '', items: [], payment_method: '', discount_type: 'none', discount_value: 0, remarks: '' });
+      showToast('✅ 收據已建立：' + data.receipt.receipt_no);
+      logChange(`🧾 新增收據 ${data.receipt.receipt_no} — ${data.receipt.customer_name} $${data.receipt.total}`);
+    }
+  } catch (e) { showToast('❌ ' + e.message); }
+};
       const data = await res.json();
       if (data.success && data.wa_link) {
         window.open(data.wa_link, '_blank');
@@ -451,13 +467,14 @@ const deleteCustomer = async (id) => {
     setReceiptSending(null);
   };
 
-  const printReceipt = async (receipt) => {
-    try {
-      const res = await fetch('/api/receipt-pdf', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ receipt_id: receipt.id })
-      });
+const printReceipt = (receipt) => {
+  const itemsHtml = (receipt.items || []).map(i => `<tr><td>${i.name}</td><td>×${i.qty}</td><td>$${i.price * i.qty}</td></tr>`).join('');
+  const html = `<html><head><style>body{font-family:sans-serif;max-width:350px;margin:0 auto;padding:20px}table{width:100%;border-collapse:collapse}td{padding:4px 0}h2{text-align:center;margin-bottom:4px}.total{font-size:24px;font-weight:bold;text-align:right;border-top:2px solid #000;padding-top:8px;margin-top:8px}</style></head><body><h2>J.LAB</h2><p style="text-align:center;color:#888;font-size:12px">${receipt.receipt_no}</p><hr/><p><b>${receipt.customer_name}</b> ${receipt.customer_phone || ''}</p><table>${itemsHtml}</table><div class="total">$${receipt.total}</div><p style="font-size:12px;color:#888;margin-top:16px">付款方式：${receipt.payment_method || '-'}<br/>日期：${new Date(receipt.created_at).toLocaleDateString('zh-HK')}</p></body></html>`;
+  const w = window.open('', '', 'width=420,height=700');
+  w.document.write(html);
+  w.document.close();
+  setTimeout(() => w.print(), 500);
+};
       const data = await res.json();
       if (data.html) {
         const w = window.open('', '', 'width=420,height=700');
@@ -678,18 +695,6 @@ useEffect(() => { if (auth && tab === 'calendar' && schedDate) loadDaySlots(sche
       setAllBookings(prev => prev.map(x => x.id === id ? { ...x, status: s } : x));
       logChange(`${statusText(s)} — ${b?.customer_name} ${b?.booking_date} ${b?.booking_time}`);
       showToast(`✅ 狀態已更新為「${statusText(s)}」`);
-      if ((s === 'confirmed' || s === 'completed') && b?.customer_phone) {
-        try {
-          const existing = await sbGet(`customers?phone=eq.${encodeURIComponent(b.customer_phone)}`);
-          if (existing && existing.length > 0) {
-            const cust = existing[0];
-            await sbPatch(`customers?id=eq.${cust.id}`, { name: b.customer_name, total_visits: (cust.total_visits || 0) + (s === 'completed' ? 1 : 0), total_spent: (cust.total_spent || 0) + (s === 'completed' ? (b.total_price || 0) : 0), last_visit_date: b.booking_date });
-          } else {
-            await sbPost('customers', [{ name: b.customer_name, phone: b.customer_phone, total_visits: s === 'completed' ? 1 : 0, total_spent: s === 'completed' ? (b.total_price || 0) : 0, last_visit_date: b.booking_date, tags: [] }]);
-          }
-          fetchCustomers();
-        } catch (_) {}
-      }
     } catch (e) { showToast('❌ 更新失敗: ' + e.message); }
   };
 
@@ -706,19 +711,7 @@ useEffect(() => { if (auth && tab === 'calendar' && schedDate) loadDaySlots(sche
       logChange(`${statusText(s)} — ${selectedBooking.customer_name} ${selectedBooking.booking_date} ${selectedBooking.booking_time}`);
       showToast(`✅ 狀態已更新為「${statusText(s)}」`);
       if (s === 'confirmed') { const ask = window.confirm(`📲 要唔要 WhatsApp 通知 ${selectedBooking.customer_name}？`); if (ask) { const msg = fillTemplate(s, updated); sendWhatsApp(selectedBooking.customer_phone, msg); } }
-      if ((s === 'confirmed' || s === 'completed') && selectedBooking.customer_phone) {
-        try {
-          const phone = selectedBooking.customer_phone;
-          const existing = await sbGet(`customers?phone=eq.${encodeURIComponent(phone)}`);
-          if (existing && existing.length > 0) {
-            const cust = existing[0];
-            await sbPatch(`customers?id=eq.${cust.id}`, { name: selectedBooking.customer_name, total_visits: (cust.total_visits || 0) + (s === 'completed' ? 1 : 0), total_spent: (cust.total_spent || 0) + (s === 'completed' ? (selectedBooking.total_price || 0) : 0), last_visit_date: selectedBooking.booking_date });
-          } else {
-            await sbPost('customers', [{ name: selectedBooking.customer_name, phone: phone, total_visits: s === 'completed' ? 1 : 0, total_spent: s === 'completed' ? (selectedBooking.total_price || 0) : 0, last_visit_date: selectedBooking.booking_date, tags: [] }]);
-          }
-          fetchCustomers();
-        } catch (custErr) { console.error('客戶建立失敗:', custErr); }
-      }
+
     } catch (e) { showToast('❌ 更新失敗'); }
   };
 
@@ -1196,7 +1189,7 @@ const allTabs = [
               <input type="text" placeholder="🔍 搜尋客人名 / 電話 / 標籤..." value={custSearch} onChange={e => setCustSearch(e.target.value)} style={{ flex: 1, minWidth: 200, padding: '10px 14px', border: '1px solid #d0c8bc', borderRadius: 8, fontSize: 14, fontFamily: font }} />
               <button onClick={refreshCustomerStats} style={{ padding: '10px 16px', background: '#FF9800', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontFamily: font, fontWeight: 600 }}>📊 刷新統計</button>
 <button onClick={() => { setShowAddCust(true); setNewCust({ name: '', phone: '', email: '', notes: '' }); }} style={{ padding: '10px 16px', background: '#4CAF50', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontFamily: font, fontWeight: 600 }}>+ 新增客戶</button>
-<button onClick={fetchCustomers} style={{ ... }}>🔄</button>
+<button onClick={fetchCustomers} style={{ padding: '10px 14px', background: '#f5f0eb', border: '1px solid #d0c8bc', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontFamily: font, color: '#5c4a3a' }}>🔄</button>
 </div>
 {showAddCust && (
   <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }} onClick={() => setShowAddCust(false)}>
@@ -1933,7 +1926,7 @@ const allTabs = [
 
                 {/* 動作按鈕 */}
                 <div style={{ display: 'flex', gap: 10 }}>
-                  <button onClick={() => { setNewReceipt(p => ({ ...p, status: 'paid' })); createReceipt(); }} disabled={newReceipt.items.length === 0} style={{ padding: '12px 24px', borderRadius: 8, border: 'none', background: newReceipt.items.length > 0 ? '#4CAF50' : '#ddd', color: '#fff', cursor: newReceipt.items.length > 0 ? 'pointer' : 'not-allowed', fontSize: 14, fontFamily: font, fontWeight: 600 }}>✅ 建立（已付）</button>
+<button onClick={() => createReceipt('paid')}>✅ 建立（已付）</button>
                   <button onClick={() => { setNewReceipt(p => ({ ...p, status: 'unpaid' })); createReceipt(); }} disabled={newReceipt.items.length === 0} style={{ padding: '12px 24px', borderRadius: 8, border: '1px solid #FFB74D', background: '#FFF3E0', color: '#E65100', cursor: newReceipt.items.length > 0 ? 'pointer' : 'not-allowed', fontSize: 14, fontFamily: font, fontWeight: 600 }}>📋 建立（未付）</button>
                   <button onClick={() => setShowNewReceipt(false)} style={{ padding: '12px 16px', borderRadius: 8, border: '1px solid #ccc', background: '#fff', color: '#666', cursor: 'pointer', fontSize: 14, fontFamily: font }}>取消</button>
                 </div>
@@ -1953,7 +1946,7 @@ const allTabs = [
                             <div style={{ fontSize: 11, color: '#999' }}>{r.receipt_no}</div>
                             <div style={{ fontWeight: 700, fontSize: 15, color: '#5c4a3a' }}>{r.customer_name}</div>
                           </div>
-                          <span style={{ padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 600, background: r.status === 'paid' ? '#E8F5E9' : r.status === 'cancelled' ? '#FFEBEE' : '#FFF3E0', color: r.status === 'paid' ? '#2e7d32' : r.status === 'cancelled' ? '#c62828' : '#E65100' }}>{r.status === 'paid' ? '已付' : r.status === 'cancelled' ? '已取消' : '未付'}</span>
+<button onClick={() => createReceipt('unpaid')}>📋 建立（未付）</button>
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                           <span style={{ fontSize: 12, color: '#888' }}>{new Date(r.created_at).toLocaleDateString('zh-HK')} · {r.staff_name || ''}</span>
