@@ -2277,15 +2277,8 @@ const allTabs = [
             </div>
           </div>
         )}
-      {tab === 'invoice-style' && (
-  <InvoiceStyleEditor
-    sbGet={sbGet}
-    sbPost={sbPost}
-    sbPatch={sbPatch}
-    showToast={showToast}
-    logChange={logChange}
-    font={font}
-  />
+     {tab === 'invoice-style' && (
+  <InvoiceStyleEditor sbGet={sbGet} sbPost={sbPost} sbPatch={sbPatch} showToast={showToast} logChange={logChange} font={font} />
 )}
         
      {tab === 'templates' && (
