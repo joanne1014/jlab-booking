@@ -337,8 +337,7 @@ useEffect(() => {
     });
   }
 }, []);
-  const logChange = (text) => { const id = Date.now(); const ts = new Date().toLocaleTimeString('zh-HK', { hour: '2-digit', minute: '2-digit', second: '2-digit' }); setChangeLog(prev => [{ id, text, ts }, ...prev].slice(0, 30)); try { sbPost('admin_logs', [{ action: text, admin_email: loginEmail || 'admin' }]); } catch (e) { console.error('Log save failed:', e); } };
-  const fetchLogs = async () => { setLogLoading(true); try { const data = await sbGet('admin_logs?order=created_at.desc&limit=100'); setDbLogs(data || []); } catch (e) { console.error(e); } setLogLoading(false); };
+ const logChange = (text) => { const id = Date.now(); const ts = new Date().toLocaleTimeString('zh-HK', { hour: '2-digit', minute: '2-digit', second: '2-digit' }); setChangeLog(prev => [{ id, text, ts }, ...prev].slice(0, 30)); sbPost('admin_logs', [{ action: text, admin_email: loginEmail || 'admin' }]).catch(e => console.error('Log save failed:', e)); };
   const fetchAuditLogs = async () => { setAuditLoading(true); try { const result = await apiCall('get-audit-logs', {}); setAuditLogs(result.data || []); } catch (e) { console.error(e); } setAuditLoading(false); };
   const openHistory = () => { setShowHistory(true); fetchLogs(); fetchAuditLogs(); };
   const handleChangePw = async () => { setCpError(''); setCpMsg(''); if (!cpOld) { setCpError('請輸入舊密碼'); return; } if (!cpNew || cpNew.length < 6) { setCpError('新密碼至少要 6 個字元'); return; } if (cpNew !== cpConfirm) { setCpError('兩次密碼不一致'); return; } setCpLoading(true); try { await apiCall('change-password', { oldPassword: cpOld, newPassword: cpNew }); setCpMsg('✅ 密碼已更改'); setCpOld(''); setCpNew(''); setCpConfirm(''); } catch (err) { setCpError(err.message || '更改失敗'); } setCpLoading(false); };
@@ -454,23 +453,6 @@ const sendReceiptWhatsApp = (receipt) => {
   window.open('https://wa.me/' + fullPhone + '?text=' + encodeURIComponent(msg), '_blank');
   showToast('✅ 已開啟 WhatsApp');
 };
-    if (data.receipt) {
-      setReceiptList(prev => [data.receipt, ...prev]);
-      setShowNewReceipt(false);
-      setNewReceipt({ customer_name: '', customer_phone: '', staff_name: '', items: [], payment_method: '', discount_type: 'none', discount_value: 0, remarks: '' });
-      showToast('✅ 收據已建立：' + data.receipt.receipt_no);
-      logChange(`🧾 新增收據 ${data.receipt.receipt_no} — ${data.receipt.customer_name} $${data.receipt.total}`);
-    }
-  } catch (e) { showToast('❌ ' + e.message); }
-};
-      const data = await res.json();
-      if (data.success && data.wa_link) {
-        window.open(data.wa_link, '_blank');
-        showToast('✅ 已開啟 WhatsApp');
-      } else { showToast('❌ ' + (data.error || '發送失敗')); }
-    } catch (e) { showToast('❌ ' + e.message); }
-    setReceiptSending(null);
-  };
 
 const printReceipt = (receipt) => {
   const itemsHtml = (receipt.items || []).map(i => '<tr><td>' + i.name + '</td><td>×' + i.qty + '</td><td>$' + (i.price * i.qty) + '</td></tr>').join('');
@@ -480,15 +462,7 @@ const printReceipt = (receipt) => {
   w.document.close();
   setTimeout(() => w.print(), 500);
 };
-      const data = await res.json();
-      if (data.html) {
-        const w = window.open('', '', 'width=420,height=700');
-        w.document.write(data.html);
-        w.document.close();
-        setTimeout(() => w.print(), 600);
-      }
-    } catch (e) { showToast('❌ 列印失敗'); }
-  };
+  
 
   const deleteReceipt = async (id) => {
     if (!window.confirm('確定刪除此收據？')) return;
@@ -1931,8 +1905,8 @@ const allTabs = [
 
                 {/* 動作按鈕 */}
                 <div style={{ display: 'flex', gap: 10 }}>
-<button onClick={() => createReceipt('paid')}>✅ 建立（已付）</button>
-                  <button onClick={() => { setNewReceipt(p => ({ ...p, status: 'unpaid' })); createReceipt(); }} disabled={newReceipt.items.length === 0} style={{ padding: '12px 24px', borderRadius: 8, border: '1px solid #FFB74D', background: '#FFF3E0', color: '#E65100', cursor: newReceipt.items.length > 0 ? 'pointer' : 'not-allowed', fontSize: 14, fontFamily: font, fontWeight: 600 }}>📋 建立（未付）</button>
+<button onClick={() => createReceipt('paid')} disabled={newReceipt.items.length === 0} style={{ padding: '12px 24px', borderRadius: 8, border: 'none', background: newReceipt.items.length > 0 ? '#4CAF50' : '#ddd', color: '#fff', cursor: newReceipt.items.length > 0 ? 'pointer' : 'not-allowed', fontSize: 14, fontFamily: font, fontWeight: 600 }}>✅ 建立（已付）</button>
+                  <button onClick={() => createReceipt('unpaid')} disabled={newReceipt.items.length === 0} style={{ padding: '12px 24px', borderRadius: 8, border: '1px solid #FFB74D', background: '#FFF3E0', color: '#E65100', cursor: newReceipt.items.length > 0 ? 'pointer' : 'not-allowed', fontSize: 14, fontFamily: font, fontWeight: 600 }}>📋 建立（未付）</button>
                   <button onClick={() => setShowNewReceipt(false)} style={{ padding: '12px 16px', borderRadius: 8, border: '1px solid #ccc', background: '#fff', color: '#666', cursor: 'pointer', fontSize: 14, fontFamily: font }}>取消</button>
                 </div>
               </div>
@@ -1951,8 +1925,6 @@ const allTabs = [
                             <div style={{ fontSize: 11, color: '#999' }}>{r.receipt_no}</div>
                             <div style={{ fontWeight: 700, fontSize: 15, color: '#5c4a3a' }}>{r.customer_name}</div>
                           </div>
-<button onClick={() => createReceipt('unpaid')}>📋 建立（未付）</button>
-                        </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                           <span style={{ fontSize: 12, color: '#888' }}>{new Date(r.created_at).toLocaleDateString('zh-HK')} · {r.staff_name || ''}</span>
                           <span style={{ fontSize: 20, fontWeight: 700, color: '#5c4a3a' }}>${r.total}</span>
