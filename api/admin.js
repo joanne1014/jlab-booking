@@ -1,4 +1,4 @@
-// api/admin.js
+// api/admin.js — 完整修正版（修復 .catch is not a function）
 import { createClient } from '@supabase/supabase-js'
 
 const SB_URL = process.env.SUPABASE_URL
@@ -49,10 +49,10 @@ const ALLOWED_TABLES = [
   'timeslot_config','notification_templates','frontend_settings',
   'customers','admin_logs','admin_users','reminder_logs',
   'addons','technicians','time_slots','audit_logs','backups',
-  // ★ 新增
   'service_records','customer_packages','consumption_records','points_log',
   'receipts','business_hours','shop_settings','whatsapp_templates',
 ];
+
 /* ═══ DB Proxy ═══ */
 async function handleDbProxy(payload, res) {
   const { method = 'GET', path, body } = payload;
@@ -86,6 +86,15 @@ async function handleDbProxy(payload, res) {
     return res.status(response.status).json(responseData || { error: 'Supabase error' });
   }
   return res.status(200).json(responseData);
+}
+
+/* ═══ 安全寫入 audit_logs（唔會 crash） ═══ */
+async function logAudit(entry) {
+  try {
+    await supabase.from('audit_logs').insert([entry]);
+  } catch (_) {
+    // 靜默失敗，唔影響主流程
+  }
 }
 
 /* ═══════════════════════════════════════════
@@ -214,10 +223,8 @@ export default async function handler(req, res) {
       const { settings } = payload;
       if (!settings) return res.status(400).json({ error: 'Missing settings' });
 
-      // 移除 id 欄位避免衝突
       const { id: _removeId, ...settingsWithoutId } = settings;
 
-      // 先檢查是否已有記錄
       const { data: existing } = await supabase
         .from('frontend_settings')
         .select('id')
@@ -244,13 +251,13 @@ export default async function handler(req, res) {
         result = data;
       }
 
-      // 記錄審計日誌
-      await supabase.from('audit_logs').insert([{
+      // ★ 修正：用 logAudit 代替 .catch()
+      await logAudit({
         action: 'frontend_settings_update',
         target_type: 'settings',
         target_id: result?.id || 'frontend_settings',
         details: { updated_fields: Object.keys(settingsWithoutId) },
-      }]).catch(() => {});
+      });
 
       return res.status(200).json({ success: true, settings: result });
     }
@@ -325,12 +332,14 @@ export default async function handler(req, res) {
         }
       }
 
-      await supabase.from('audit_logs').insert([{
+      // ★ 修正：用 logAudit 代替 .catch()
+      await logAudit({
         action: 'booking_' + newStatus,
         target_type: 'booking',
         target_id: String(bookingId),
         details: { status: newStatus, cancel_reason: cancel_reason || null },
-      }]).catch(() => {});
+      });
+
       return res.status(200).json({ success: true });
     }
 
@@ -427,12 +436,15 @@ export default async function handler(req, res) {
       const { data, error } = await supabase
         .from('customers').update(updateData).eq('id', customerId).select().single();
       if (error) return res.status(500).json({ error: error.message });
-      await supabase.from('audit_logs').insert([{
+
+      // ★ 修正：用 logAudit 代替 .catch()
+      await logAudit({
         action: payload.is_blacklisted !== undefined ? 'customer_blacklist_toggle' : 'customer_update',
         target_type: 'customer',
         target_id: String(customerId),
         details: updateData,
-      }]).catch(() => {});
+      });
+
       return res.status(200).json(data || { success: true });
     }
 
@@ -531,119 +543,122 @@ export default async function handler(req, res) {
         updated,
       });
     }
-/* ══════════════════════════════════════
-   收據相關
-   ══════════════════════════════════════ */
 
-if (action === 'create-receipt') {
-  const { customer_id, customer_name, customer_phone, staff_name, items, subtotal, discount, total, payment_method, remarks } = payload;
-  
-  // 生成收據編號
-  const now = new Date();
-  const receipt_no = 'R' + now.getFullYear().toString().slice(2) + 
-    String(now.getMonth()+1).padStart(2,'0') + 
-    String(now.getDate()).padStart(2,'0') + '-' + 
-    String(now.getHours()).padStart(2,'0') + 
-    String(now.getMinutes()).padStart(2,'0') + 
-    String(now.getSeconds()).padStart(2,'0');
-
-  const { data, error } = await supabase
-    .from('receipts')
-    .insert([{
-      receipt_no,
-      customer_id: customer_id || null,
-      customer_name,
-      customer_phone,
-      staff_name,
-      items: items || [],
-      subtotal: subtotal || 0,
-      discount: discount || 0,
-      total: total || 0,
-      payment_method,
-      remarks,
-      status: 'unpaid',
-      created_at: now.toISOString(),
-    }])
-    .select()
-    .single();
-
-  if (error) return res.status(500).json({ error: error.message });
-
-  await supabase.from('audit_logs').insert([{
-    action: 'receipt_created',
-    target_type: 'receipt',
-    target_id: data.id,
-    details: { receipt_no, total, customer_name },
-  }]).catch(() => {});
-
-  return res.status(200).json({ success: true, receipt: data });
-}
-
-if (action === 'get-receipts') {
-  let query = supabase
-    .from('receipts')
-    .select('*')
-    .order('created_at', { ascending: false });
-  
-  if (payload.customer_phone) query = query.eq('customer_phone', payload.customer_phone);
-  if (payload.status) query = query.eq('status', payload.status);
-  if (payload.limit) query = query.limit(payload.limit);
-  else query = query.limit(100);
-
-  const { data, error } = await query;
-  if (error) return res.status(500).json({ error: error.message });
-  return res.status(200).json({ data: data || [] });
-}
-
-if (action === 'update-receipt-status') {
-  const { receiptId, status: rStatus, payment_method: pMethod } = payload;
-  if (!receiptId) return res.status(400).json({ error: 'Missing receiptId' });
-  
-  const updateData = { status: rStatus };
-  if (pMethod) updateData.payment_method = pMethod;
-  if (rStatus === 'paid') updateData.paid_at = new Date().toISOString();
-
-  const { data, error } = await supabase
-    .from('receipts')
-    .update(updateData)
-    .eq('id', receiptId)
-    .select()
-    .single();
-
-  if (error) return res.status(500).json({ error: error.message });
-  return res.status(200).json({ success: true, receipt: data });
-}
     /* ══════════════════════════════════════
-   營業時間
-   ══════════════════════════════════════ */
+       收據相關
+       ══════════════════════════════════════ */
 
-if (action === 'get-business-hours') {
-  const { data, error } = await supabase
-    .from('business_hours')
-    .select('*')
-    .order('day_of_week', { ascending: true });
-  if (error) return res.status(500).json({ error: error.message });
-  return res.status(200).json({ data: data || [] });
-}
+    if (action === 'create-receipt') {
+      const { customer_id, customer_name, customer_phone, staff_name, items, subtotal, discount, total, payment_method, remarks } = payload;
 
-if (action === 'save-business-hours') {
-  const { hours } = payload;
-  if (!hours || !Array.isArray(hours)) return res.status(400).json({ error: 'Missing hours array' });
-  
-  for (const h of hours) {
-    await supabase
-      .from('business_hours')
-      .upsert({
-        day_of_week: h.day_of_week,
-        day_name: h.day_name,
-        is_open: h.is_open,
-        open_time: h.open_time,
-        close_time: h.close_time,
-      }, { onConflict: 'day_of_week' });
-  }
-  
-  return res.status(200).json({ success: true });
-}
+      const now = new Date();
+      const receipt_no = 'R' + now.getFullYear().toString().slice(2) +
+        String(now.getMonth() + 1).padStart(2, '0') +
+        String(now.getDate()).padStart(2, '0') + '-' +
+        String(now.getHours()).padStart(2, '0') +
+        String(now.getMinutes()).padStart(2, '0') +
+        String(now.getSeconds()).padStart(2, '0');
+
+      const { data, error } = await supabase
+        .from('receipts')
+        .insert([{
+          receipt_no,
+          customer_id: customer_id || null,
+          customer_name,
+          customer_phone,
+          staff_name,
+          items: items || [],
+          subtotal: subtotal || 0,
+          discount: discount || 0,
+          total: total || 0,
+          payment_method,
+          remarks,
+          status: 'unpaid',
+          created_at: now.toISOString(),
+        }])
+        .select()
+        .single();
+
+      if (error) return res.status(500).json({ error: error.message });
+
+      // ★ 修正：用 logAudit 代替 .catch()
+      await logAudit({
+        action: 'receipt_created',
+        target_type: 'receipt',
+        target_id: String(data.id),
+        details: { receipt_no, total, customer_name },
+      });
+
+      return res.status(200).json({ success: true, receipt: data });
+    }
+
+    if (action === 'get-receipts') {
+      let query = supabase
+        .from('receipts')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (payload.customer_phone) query = query.eq('customer_phone', payload.customer_phone);
+      if (payload.status) query = query.eq('status', payload.status);
+      if (payload.limit) query = query.limit(payload.limit);
+      else query = query.limit(100);
+
+      const { data, error } = await query;
+      if (error) return res.status(500).json({ error: error.message });
+      return res.status(200).json({ data: data || [] });
+    }
+
+    if (action === 'update-receipt-status') {
+      const { receiptId, status: rStatus, payment_method: pMethod } = payload;
+      if (!receiptId) return res.status(400).json({ error: 'Missing receiptId' });
+
+      const updateData = { status: rStatus };
+      if (pMethod) updateData.payment_method = pMethod;
+      if (rStatus === 'paid') updateData.paid_at = new Date().toISOString();
+
+      const { data, error } = await supabase
+        .from('receipts')
+        .update(updateData)
+        .eq('id', receiptId)
+        .select()
+        .single();
+
+      if (error) return res.status(500).json({ error: error.message });
+      return res.status(200).json({ success: true, receipt: data });
+    }
+
+    /* ══════════════════════════════════════
+       營業時間
+       ══════════════════════════════════════ */
+
+    if (action === 'get-business-hours') {
+      const { data, error } = await supabase
+        .from('business_hours')
+        .select('*')
+        .order('day_of_week', { ascending: true });
+      if (error) return res.status(500).json({ error: error.message });
+      return res.status(200).json({ data: data || [] });
+    }
+
+    if (action === 'save-business-hours') {
+      const { hours } = payload;
+      if (!hours || !Array.isArray(hours)) return res.status(400).json({ error: 'Missing hours array' });
+
+      for (const h of hours) {
+        await supabase
+          .from('business_hours')
+          .upsert({
+            day_of_week: h.day_of_week,
+            day_name: h.day_name,
+            is_open: h.is_open,
+            open_time: h.open_time,
+            close_time: h.close_time,
+          }, { onConflict: 'day_of_week' });
+      }
+
+      return res.status(200).json({ success: true });
+    }
+
     /* ══════════════════════════════════════
        統計 / 審計
        ══════════════════════════════════════ */
