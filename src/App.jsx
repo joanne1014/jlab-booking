@@ -6,6 +6,8 @@ import AboutPage from './pages/AboutPage';
 import Admin from './Admin';
 import ResetPassword from './ResetPassword';
 import ReceiptsPage from './pages/ReceiptsPage';
+import InvoiceStyleEditor from './pages/InvoiceStyleEditor';
+import CustomerManagement from './pages/CustomerManagement';
 
 export default function App() {
   return (
@@ -19,6 +21,8 @@ export default function App() {
         {/* 管理員頁面 */}
         <Route path="/admin" element={<Admin />} />
         <Route path="/admin/receipts" element={<ReceiptsPage />} />
+        <Route path="/admin/invoice-style" element={<InvoiceStyleEditor />} />
+        <Route path="/admin/customers" element={<CustomerManagement />} />
         <Route path="/reset-password" element={<ResetPassword />} />
 
         {/* 其他 URL 全部去首頁 */}
