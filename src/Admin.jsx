@@ -1001,7 +1001,7 @@ const allTabs = [
           )}
 
           <div style={{ display: 'flex', gap: 0, marginBottom: 16 }}>
-            {[['list', '📋 列表模式'], ['schedule', '📅 月曆日程']].map(([k, l]) => (<button key={k} onClick={() => setViewMode(k)} style={{ padding: '10px 20px', border: 'none', cursor: 'pointer', fontSize: 13, fontFamily: font, fontWeight: viewMode === k ? 700 : 400, background: viewMode === k ? '#5c4a3a' : '#fff', color: viewMode === k ? '#fff' : '#5c4a3a', borderRadius: k === 'list' ? '10px 0 0 10px' : '0 10px 10px 0', boxShadow: viewMode === k ? '0 2px 8px rgba(92,74,58,0.3)' : '0 2px 10px rgba(0,0,0,0.05)' }}>{l}</button>))}
+            {[['list', '📋 列表模式'], ['schedule',
           </div>
 
           {viewMode === 'list' && (<>
@@ -1283,6 +1283,15 @@ const allTabs = [
                     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                       {custEditing && <button onClick={saveCustomerProfile} style={{ padding: '10px 24px', borderRadius: 8, border: 'none', background: '#4CAF50', color: '#fff', cursor: 'pointer', fontSize: 14, fontFamily: font, fontWeight: 600 }}>💾 儲存資料</button>}
                       <button onClick={() => toggleBlacklist(selectedCust.id, selectedCust.is_blacklisted)} style={{ padding: '10px 16px', borderRadius: 8, border: `1px solid ${selectedCust.is_blacklisted ? '#a5d6a7' : '#ffcdd2'}`, background: selectedCust.is_blacklisted ? '#E8F5E9' : '#FFEBEE', color: selectedCust.is_blacklisted ? '#2e7d32' : '#c62828', cursor: 'pointer', fontSize: 13, fontFamily: font }}>{selectedCust.is_blacklisted ? '✅ 解除黑名單' : '🚫 黑名單'}</button>
+                  <button onClick={() => {
+  setShowNewReceipt(true);
+  setNewReceipt(prev => ({
+    ...prev,
+    customer_name: selectedCust.name,
+    customer_phone: selectedCust.phone,
+  }));
+  setTab('receipts');
+}} style={{ padding: '10px 16px', borderRadius: 8, border: 'none', background: '#FF9800', color: '#fff', cursor: 'pointer', fontSize: 13, fontFamily: font, fontWeight: 600 }}>🧾 出單</button>
                     </div>
                   </div>
                 )}
