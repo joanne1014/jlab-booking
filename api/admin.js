@@ -51,6 +51,7 @@ const ALLOWED_TABLES = [
   'addons','technicians','time_slots','audit_logs','backups',
   'service_records','customer_packages','consumption_records','points_log',
   'receipts','business_hours','shop_settings','whatsapp_templates',
+  'package_types',
 ];
 
 /* ═══ DB Proxy ═══ */
