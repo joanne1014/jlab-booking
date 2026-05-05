@@ -1466,31 +1466,7 @@ const allTabs = [
             )}
           </div>
         </>)}
-              </div>
-            </div>
-
-            {/* 選中日期嘅預約詳情 */}
-            {calSelectedDate && (
-              <div style={{ marginTop: 16, background: '#fff', borderRadius: 14, padding: 20, boxShadow: '0 2px 10px rgba(0,0,0,0.06)' }}>
-                <div style={{ fontSize: 16, fontWeight: 700, color: '#5c4a3a', marginBottom: 12 }}>📋 {calYear}/{calMonth + 1}/{calSelectedDate} 嘅預約</div>
-                {getBookingsForDate(calSelectedDate).length === 0 ? (
-                  <div style={{ color: '#999', fontSize: 13, padding: 20, textAlign: 'center' }}>呢日暫無預約</div>
-                ) : (
-                  getBookingsForDate(calSelectedDate).sort((a, b) => (a.time || '').localeCompare(b.time || '')).map((b, i) => (
-                    <div key={i} style={{ padding: '12px 14px', borderBottom: '1px solid #f0ebe3', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <div>
-                        <div style={{ fontSize: 14, fontWeight: 600, color: '#5c4a3a' }}>{b.time || '未定'} - {b.customer_name || '未知'}</div>
-                        <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>📞 {b.customer_phone || ''} · {b.service || ''}{b.staff && ` · 👤 ${b.staff}`}</div>
-                      </div>
-                      <span style={{ padding: '4px 10px', borderRadius: 10, fontSize: 11, fontWeight: 600, background: b.status === 'confirmed' ? '#E8F5E9' : b.status === 'cancelled' ? '#FFEBEE' : '#FFF3E0', color: b.status === 'confirmed' ? '#2e7d32' : b.status === 'cancelled' ? '#c62828' : '#E65100' }}>{b.status === 'confirmed' ? '已確認' : b.status === 'cancelled' ? '已取消' : b.status || '待確認'}</span>
-                    </div>
-                  ))
-                )}
-              </div>
-            )}
-          </div>
-        )}
-
+         
         {/* ═══ BUSINESS HOURS TAB ═══ */}
         {tab === 'hours' && (
           <div>
