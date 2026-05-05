@@ -338,6 +338,7 @@ useEffect(() => {
   }
 }, []);
  const logChange = (text) => { const id = Date.now(); const ts = new Date().toLocaleTimeString('zh-HK', { hour: '2-digit', minute: '2-digit', second: '2-digit' }); setChangeLog(prev => [{ id, text, ts }, ...prev].slice(0, 30)); sbPost('admin_logs', [{ action: text, admin_email: loginEmail || 'admin' }]).catch(e => console.error('Log save failed:', e)); };
+ const fetchLogs = async () => { setLogLoading(true); try { const data = await sbGet('admin_logs?order=created_at.desc&limit=100'); setDbLogs(data || []); } catch (e) { console.error(e); } setLogLoading(false); };
   const fetchAuditLogs = async () => { setAuditLoading(true); try { const result = await apiCall('get-audit-logs', {}); setAuditLogs(result.data || []); } catch (e) { console.error(e); } setAuditLoading(false); };
   const openHistory = () => { setShowHistory(true); fetchLogs(); fetchAuditLogs(); };
   const handleChangePw = async () => { setCpError(''); setCpMsg(''); if (!cpOld) { setCpError('請輸入舊密碼'); return; } if (!cpNew || cpNew.length < 6) { setCpError('新密碼至少要 6 個字元'); return; } if (cpNew !== cpConfirm) { setCpError('兩次密碼不一致'); return; } setCpLoading(true); try { await apiCall('change-password', { oldPassword: cpOld, newPassword: cpNew }); setCpMsg('✅ 密碼已更改'); setCpOld(''); setCpNew(''); setCpConfirm(''); } catch (err) { setCpError(err.message || '更改失敗'); } setCpLoading(false); };
@@ -406,7 +407,7 @@ const deleteCustomer = async (id) => {
   setReceiptLoading(false);
 };
 
- const createReceipt = async (overrideStatus) => {
+const createReceipt = async (overrideStatus) => {
   if (!newReceipt.customer_name || newReceipt.items.length === 0) {
     return showToast('❌ 請填寫客戶名同至少一項服務');
   }
@@ -1920,11 +1921,13 @@ const allTabs = [
                   <div style={{ padding: '12px 16px' }}>
                     {filteredReceipts.map(r => (
                       <div key={r.id} style={{ background: r.status === 'paid' ? '#f0fdf4' : '#fffbeb', borderRadius: 10, padding: 14, marginBottom: 10, border: '1px solid #e8e0d8' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
                           <div>
                             <div style={{ fontSize: 11, color: '#999' }}>{r.receipt_no}</div>
                             <div style={{ fontWeight: 700, fontSize: 15, color: '#5c4a3a' }}>{r.customer_name}</div>
                           </div>
+                          <span style={{ padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 600, background: r.status === 'paid' ? '#E8F5E9' : r.status === 'cancelled' ? '#FFEBEE' : '#FFF3E0', color: r.status === 'paid' ? '#2e7d32' : r.status === 'cancelled' ? '#c62828' : '#E65100' }}>{r.status === 'paid' ? '已付' : r.status === 'cancelled' ? '已取消' : '未付'}</span>
+                        </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
                           <span style={{ fontSize: 12, color: '#888' }}>{new Date(r.created_at).toLocaleDateString('zh-HK')} · {r.staff_name || ''}</span>
                           <span style={{ fontSize: 20, fontWeight: 700, color: '#5c4a3a' }}>${r.total}</span>
