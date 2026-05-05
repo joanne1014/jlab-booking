@@ -2002,6 +2002,21 @@ const allTabs = [
               <div key={tpl.id} style={{ marginBottom: 16, padding: 16, background: '#fafafa', borderRadius: 10, border: '1px solid #eee' }}>
                 <div style={{ fontWeight: 600, marginBottom: 8, color: '#5c4a3a' }}>{tpl.label}</div>
                 <textarea value={tpl.content} onChange={e => setMsgTemplates(prev => prev.map(t => t.id === tpl.id ? { ...t, content: e.target.value } : t))} style={{ width: '100%', minHeight: 120, padding: 10, borderRadius: 8, border: '1px solid #ddd', fontFamily: 'inherit', fontSize: 14, resize: 'vertical', boxSizing: 'border-box' }} />
+           {/* WhatsApp 預覽 */}
+<div style={{ marginTop: 12, padding: 14, background: '#DCF8C6', borderRadius: '0 12px 12px 12px', fontSize: 13, lineHeight: 1.8, color: '#333', fontFamily: 'system-ui', whiteSpace: 'pre-wrap', maxWidth: '85%', position: 'relative' }}>
+  <div style={{ position: 'absolute', top: -6, left: 0, width: 0, height: 0, borderLeft: '6px solid transparent', borderRight: '6px solid transparent', borderBottom: '6px solid #DCF8C6' }} />
+  {tpl.content
+    .replace(/\{customer_name\}/g, '陳小姐')
+    .replace(/\{booking_date\}/g, '2026-05-10')
+    .replace(/\{booking_time\}/g, '14:00')
+    .replace(/\{service_name\}/g, '自然美睫')
+    .replace(/\{technician_label\}/g, '店主')
+    .replace(/\{total_price\}/g, '580')
+    .replace(/\{old_date\}/g, '2026-05-08')
+    .replace(/\{old_time\}/g, '16:00')}
+  <div style={{ fontSize: 10, color: '#999', textAlign: 'right', marginTop: 4 }}>14:30 ✓✓</div>
+</div>
+<div style={{ fontSize: 11, color: '#999', marginTop: 6, fontStyle: 'italic' }}>👆 預覽效果（使用示例數據）</div>
                 <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}><button onClick={() => saveTemplate(tpl.id, tpl.content)} style={{ padding: '6px 20px', borderRadius: 8, border: 'none', background: '#4CAF50', color: '#fff', cursor: 'pointer', fontWeight: 600, fontFamily: font }}>💾 儲存</button></div>
               </div>
             ))}
