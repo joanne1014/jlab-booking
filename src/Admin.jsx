@@ -9,6 +9,12 @@ let onAuthExpired = null;
 const apiCall = async (action, payload = {}) => {
   const headers = { 'Content-Type': 'application/json' };
   const noTokenActions = ['login', 'recover', 'reset-via-token'];
+
+  // ★ 新增：如果 token 已清空但又需要 token，直接停止
+  if (!authToken && !noTokenActions.includes(action)) {
+    throw new Error('登入已過期');
+  }
+
   if (authToken && !noTokenActions.includes(action)) {
     headers['Authorization'] = `Bearer ${authToken}`;
   }
@@ -313,12 +319,25 @@ useEffect(() => {
 
   const handleLogin = async (e) => { e.preventDefault(); setLoginError(''); setLoginLoading(true); try { const result = await apiCall('login', { email: loginEmail, password: pw }); authToken = result.access_token; try { sessionStorage.setItem('jlab_token', result.access_token); } catch (_) {} setAuth(true); try { const roles = await sbGet(`admin_users?email=eq.${encodeURIComponent(loginEmail)}`); if (roles && roles.length > 0) { setUserRole(roles[0].role || 'owner'); setUserStaffId(roles[0].staff_id || null); } else { setUserRole('owner'); } } catch (_) { setUserRole('owner'); } fetchBookings(); fetchReceipts();fetchBlocked(); fetchStaff(); fetchServices(); fetchAddons(); fetchLogs(); fetchCustomers(); fetchPackageTypes(); fetchAllPackages(); fetchBusinessHours();; apiCall('auto-backup').catch(() => {}); } catch (err) { setLoginError(err.message || '帳號或密碼錯誤'); } setLoginLoading(false); };
 
- useEffect(() => {
+useEffect(() => {
   const saved = sessionStorage.getItem('jlab_token');
   if (saved) {
     authToken = saved;
-    apiCall('verify').then(() => {
+    apiCall('verify').then(async () => {
       setAuth(true);
+
+      // ★ 新增：取回用戶角色
+      try {
+        const roles = await sbGet('admin_users?select=role,staff_id&limit=1');
+        if (roles && roles.length > 0) {
+          setUserRole(roles[0].role || 'owner');
+          setUserStaffId(roles[0].staff_id || null);
+        }
+      } catch (_) {
+        setUserRole('owner');
+      }
+
+      // 然後先 fetch 數據
       fetchBookings();
       fetchReceipts();
       fetchBlocked();
