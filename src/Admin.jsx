@@ -177,6 +177,8 @@ export default function Admin() {
 // ★ 客戶檔案系統
   const [custProfileTab, setCustProfileTab] = useState('info');
   const [custEditing, setCustEditing] = useState(false);
+  const [showAddCust, setShowAddCust] = useState(false);
+const [newCust, setNewCust] = useState({ name: '', phone: '', email: '', notes: '' });
   const [custServiceRecords, setCustServiceRecords] = useState([]);
   const [custConsumption, setCustConsumption] = useState([]);
   const [custPackages, setCustPackages] = useState([]);
@@ -338,7 +340,30 @@ useEffect(() => {
   const exportCSV = () => { const hdrs = ['日期', '時間', '客人', '電話', '服務', '技師', '金額', '狀態', '取消原因']; const rows = filteredBookings.map(b => [b.booking_date, b.booking_time, b.customer_name, b.customer_phone, b.service_name, b.technician_label || '', b.total_price, statusText(b.status), b.cancel_reason || '']); const BOM = '\uFEFF'; const csv = BOM + [hdrs, ...rows].map(row => row.map(cell => `"${String(cell || '').replace(/"/g, '""')}"`).join(',')).join('\n'); const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `JLAB_預約_${todayStr}.csv`; a.click(); URL.revokeObjectURL(url); showToast('✅ 已匯出 CSV'); };
 
   const fetchCustomers = async () => { try { const data = await sbGet('customers?order=last_visit_date.desc.nullslast&limit=500'); setCustomers(data || []); } catch (_) {} };
- const viewCustomer = async (cust) => {
+ const addCustomer = async () => {
+  if (!newCust.name || !newCust.phone) return showToast('❌ 請填寫姓名同電話');
+  try {
+    await apiCall('add-customer', newCust);
+    await fetchCustomers();
+    setShowAddCust(false);
+    setNewCust({ name: '', phone: '', email: '', notes: '' });
+    showToast('✅ 客戶已新增');
+    logChange(`👤 新增客戶 ${newCust.name} (${newCust.phone})`);
+  } catch (e) { showToast('❌ 新增失敗：' + e.message); }
+};
+
+const deleteCustomer = async (id) => {
+  const cust = customers.find(c => c.id === id);
+  if (!window.confirm(`確定刪除「${cust?.name}」？此操作無法復原。`)) return;
+  try {
+    await apiCall('delete-customer', { id });
+    setCustomers(prev => prev.filter(c => c.id !== id));
+    setSelectedCust(null);
+    showToast('✅ 客戶已刪除');
+    logChange(`🗑️ 刪除客戶 ${cust?.name}`);
+  } catch (e) { showToast('❌ 刪除失敗：' + e.message); }
+};
+  const viewCustomer = async (cust) => {
     setSelectedCust(cust);
     setCustProfileTab('info');
     setCustEditing(false);
@@ -1170,9 +1195,41 @@ const allTabs = [
             <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
               <input type="text" placeholder="🔍 搜尋客人名 / 電話 / 標籤..." value={custSearch} onChange={e => setCustSearch(e.target.value)} style={{ flex: 1, minWidth: 200, padding: '10px 14px', border: '1px solid #d0c8bc', borderRadius: 8, fontSize: 14, fontFamily: font }} />
               <button onClick={refreshCustomerStats} style={{ padding: '10px 16px', background: '#FF9800', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontFamily: font, fontWeight: 600 }}>📊 刷新統計</button>
-              <button onClick={fetchCustomers} style={{ padding: '10px 16px', background: '#5c4a3a', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontFamily: font }}>🔄</button>
-            </div>
-            {selectedCust ? (
+<button onClick={() => { setShowAddCust(true); setNewCust({ name: '', phone: '', email: '', notes: '' }); }} style={{ padding: '10px 16px', background: '#4CAF50', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontFamily: font, fontWeight: 600 }}>+ 新增客戶</button>
+<button onClick={fetchCustomers} style={{ padding: '10px 16px', background: '#5c4a3a', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontFamily: font }}>🔄</button>
+            {showAddCust && (
+  <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }} onClick={() => setShowAddCust(false)}>
+    <div style={{ background: '#fff', borderRadius: 16, padding: 28, maxWidth: 440, width: '100%', boxShadow: '0 20px 60px rgba(0,0,0,0.2)' }} onClick={e => e.stopPropagation()}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+        <h3 style={{ margin: 0, color: '#5c4a3a', fontSize: 18 }}>👤 新增客戶</h3>
+        <button onClick={() => setShowAddCust(false)} style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: '#999' }}>✕</button>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <div>
+          <label style={{ fontSize: 12, color: '#5c4a3a', fontWeight: 600, marginBottom: 4, display: 'block' }}>姓名 *</label>
+          <input value={newCust.name} onChange={e => setNewCust(p => ({ ...p, name: e.target.value }))} placeholder="例：陳小姐" style={{ width: '100%', padding: '12px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, boxSizing: 'border-box', fontFamily: font }} />
+        </div>
+        <div>
+          <label style={{ fontSize: 12, color: '#5c4a3a', fontWeight: 600, marginBottom: 4, display: 'block' }}>電話 *</label>
+          <input value={newCust.phone} onChange={e => setNewCust(p => ({ ...p, phone: e.target.value }))} placeholder="例：91234567" style={{ width: '100%', padding: '12px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, boxSizing: 'border-box', fontFamily: font }} />
+        </div>
+        <div>
+          <label style={{ fontSize: 12, color: '#5c4a3a', fontWeight: 600, marginBottom: 4, display: 'block' }}>Email</label>
+          <input value={newCust.email} onChange={e => setNewCust(p => ({ ...p, email: e.target.value }))} placeholder="可選" style={{ width: '100%', padding: '12px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, boxSizing: 'border-box', fontFamily: font }} />
+        </div>
+        <div>
+          <label style={{ fontSize: 12, color: '#5c4a3a', fontWeight: 600, marginBottom: 4, display: 'block' }}>備註</label>
+          <textarea value={newCust.notes} onChange={e => setNewCust(p => ({ ...p, notes: e.target.value }))} placeholder="過敏、喜好等..." rows={3} style={{ width: '100%', padding: '12px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, boxSizing: 'border-box', fontFamily: font, resize: 'vertical' }} />
+        </div>
+      </div>
+      <div style={{ display: 'flex', gap: 10, marginTop: 20, justifyContent: 'flex-end' }}>
+        <button onClick={() => setShowAddCust(false)} style={{ padding: '10px 20px', borderRadius: 8, border: '1px solid #ccc', background: '#fff', color: '#666', cursor: 'pointer', fontSize: 14, fontFamily: font }}>取消</button>
+        <button onClick={addCustomer} style={{ padding: '10px 24px', borderRadius: 8, border: 'none', background: '#4CAF50', color: '#fff', cursor: 'pointer', fontSize: 14, fontFamily: font, fontWeight: 600 }}>✅ 儲存客戶</button>
+      </div>
+    </div>
+  </div>
+)}
+              {selectedCust ? (
               <div style={{ background: '#fff', borderRadius: 14, padding: 24, boxShadow: '0 2px 10px rgba(0,0,0,0.06)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
                   <button onClick={() => { setSelectedCust(null); setCustBookings([]); setCustEditing(false); }} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 14, color: '#b8956a', fontFamily: font }}>← 返回列表</button>
@@ -1263,7 +1320,9 @@ const allTabs = [
   setTab('receipts');
 }} style={{ padding: '10px 16px', borderRadius: 8, border: 'none', background: '#FF9800', color: '#fff', cursor: 'pointer', fontSize: 13, fontFamily: font, fontWeight: 600 }}>
   🧾 出單
+                    <button onClick={() => deleteCustomer(selectedCust.id)} style={{ padding: '10px 16px', borderRadius: 8, border: '1px solid #ffcdd2', background: '#FFEBEE', color: '#c62828', cursor: 'pointer', fontSize: 13, fontFamily: font }}>🗑️ 刪除客戶</button>
 </button>
+                      <button onClick={() => deleteCustomer(selectedCust.id)} style={{ padding: '10px 16px', borderRadius: 8, border: '1px solid #ffcdd2', background: '#FFEBEE', color: '#c62828', cursor: 'pointer', fontSize: 13, fontFamily: font }}>🗑️ 刪除客戶</button>
                     </div>
                   </div>
                 )}
