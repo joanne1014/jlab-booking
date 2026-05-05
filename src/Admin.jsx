@@ -1322,7 +1322,7 @@ const allTabs = [
 }} style={{ padding: '10px 16px', borderRadius: 8, border: 'none', background: '#FF9800', color: '#fff', cursor: 'pointer', fontSize: 13, fontFamily: font, fontWeight: 600 }}>
   🧾 出單
 </button>
-<button onClick={() => deleteCustomer(selectedCust.id)} style={{ padding: '10px 16px', borderRadius: 8, border: '1px solid #ffcdd2', background: '#FFEBEE', color: '#c62828', cursor: 'pointer', fontSize: 13, fontFamily: font }}>🗑️ 刪除客戶</button>
+
                       <button onClick={() => deleteCustomer(selectedCust.id)} style={{ padding: '10px 16px', borderRadius: 8, border: '1px solid #ffcdd2', background: '#FFEBEE', color: '#c62828', cursor: 'pointer', fontSize: 13, fontFamily: font }}>🗑️ 刪除客戶</button>
                     </div>
                   </div>
