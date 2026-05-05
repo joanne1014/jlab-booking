@@ -973,7 +973,7 @@ const allTabs = [
       <div style={{ maxWidth: 1200, margin: '0 auto', padding: '20px 16px' }}>
 
         {/* ═══ BOOKINGS TAB（原有，加上取消原因顯示）═══ */}
-        {tab === 'bookings' && (<>
+      {tab === 'bookings' && (<>
           <div style={{ display: 'flex', gap: 8, marginBottom: 16, overflowX: 'auto', paddingBottom: 4 }}>
             {[{ label: '今日', value: stats.today, sub: `$${stats.todayRev}`, color: '#FF9800' }, { label: '本月', value: stats.month, sub: `$${stats.monthRev}`, color: '#2196F3' }, { label: nextMonthLabel, value: stats.nextMonth, sub: `$${stats.nextMonthRev}`, color: '#9C27B0' }, { label: '待處理', value: stats.pending, sub: null, color: stats.pending > 0 ? '#f44336' : '#999', action: stats.pending > 0 }, { label: '總數', value: stats.total, sub: null, color: '#5c4a3a' }].map((s, i) => (
               <div key={i} style={{ background: '#fff', padding: '10px 14px', borderRadius: 10, textAlign: 'center', boxShadow: '0 1px 6px rgba(0,0,0,0.04)', borderLeft: `3px solid ${s.color}`, flex: '1 0 90px', minWidth: 90 }}>
@@ -985,7 +985,7 @@ const allTabs = [
             ))}
           </div>
 
-          {revenueData.length > 2 && viewMode === 'list' && (
+          {revenueData.length > 2 && (
             <div style={{ background: '#fff', borderRadius: 12, padding: 20, marginBottom: 16, boxShadow: '0 2px 10px rgba(0,0,0,0.05)' }}>
               <div style={{ fontSize: 14, fontWeight: 600, color: '#5c4a3a', marginBottom: 12 }}>📊 近期收入趨勢</div>
               <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 100, overflowX: 'auto' }}>
@@ -1000,44 +1000,73 @@ const allTabs = [
             </div>
           )}
 
-     
+          <div style={{ background: '#fff', padding: '14px 16px', borderRadius: 12, marginBottom: 14, boxShadow: '0 2px 10px rgba(0,0,0,0.05)' }}>
+            <div style={{ marginBottom: 10 }}><input type="text" placeholder="🔍 搜尋客人名稱或電話..." value={searchTerm} onChange={e => { setSearchTerm(e.target.value); setBkPage(0); }} style={{ width: '100%', padding: '10px 14px', border: '1px solid #ddd', borderRadius: 8, fontSize: 14, boxSizing: 'border-box', fontFamily: font }} /></div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
+              <span style={{ color: '#5c4a3a', fontWeight: 600, fontSize: 13 }}>日期：</span>
+              <input type="date" value={filterDateFrom} onChange={e => { setFilterDateFrom(e.target.value); setBkPage(0); }} style={{ padding: '6px 10px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13 }} />
+              <span style={{ color: '#999', fontSize: 12 }}>至</span>
+              <input type="date" value={filterDateTo} onChange={e => { setFilterDateTo(e.target.value); setBkPage(0); }} style={{ padding: '6px 10px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13 }} />
+              <div style={{ display: 'flex', gap: 4 }}>{[['今日', 'today'], ['明日', 'tomorrow'], ['本週', 'week'], ['本月', 'month'], ['下月', 'nextMonth']].map(([l, k]) => (<button key={k} onClick={() => setQuickDate(k)} style={{ padding: '5px 10px', borderRadius: 4, border: '1px solid #d0c8bc', background: '#faf6f0', color: '#5c4a3a', cursor: 'pointer', fontSize: 11, fontFamily: font }}>{l}</button>))}</div>
+            </div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <select value={filterStatus} onChange={e => { setFilterStatus(e.target.value); setBkPage(0); }} style={{ padding: '6px 10px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13, fontFamily: font }}><option value="all">全部狀態</option><option value="pending">待確認</option><option value="confirmed">已確認</option><option value="completed">已完成</option><option value="cancelled">已取消</option></select>
+              <select value={filterTech} onChange={e => { setFilterTech(e.target.value); setBkPage(0); }} style={{ padding: '6px 10px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13, fontFamily: font }}><option value="all">全部技師</option>{techList.map(t => <option key={t} value={t}>{t}</option>)}</select>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: '#999', cursor: 'pointer' }}><input type="checkbox" checked={autoRefresh} onChange={e => setAutoRefresh(e.target.checked)} /> 自動刷新</label>
+              <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+                {hasFilters && <button onClick={clearFilters} style={{ padding: '6px 14px', background: '#f5f0eb', border: 'none', borderRadius: 6, cursor: 'pointer', color: '#999', fontSize: 12, fontFamily: font }}>✕ 清除</button>}
+                <button onClick={fetchBookings} style={{ padding: '6px 14px', background: '#5c4a3a', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontFamily: font }}>🔄 刷新</button>
               </div>
             </div>
-            <div style={card}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
-                <div><div style={{ fontSize: 18, fontWeight: 700, color: '#5c4a3a' }}>{schedDate}（星期{DAYS[new Date(schedDate + 'T00:00:00').getDay()]}）</div>{schedDate === todayStr && <span style={{ padding: '2px 10px', background: '#FF9800', color: '#fff', borderRadius: 4, fontSize: 11, fontWeight: 600 }}>今日</span>}</div>
-                <div style={{ display: 'flex', gap: 8 }}>{dayStats.pending > 0 && <button onClick={confirmDayPending} style={{ padding: '6px 14px', borderRadius: 6, border: 'none', background: '#4CAF50', color: '#fff', cursor: 'pointer', fontSize: 12, fontFamily: font, fontWeight: 600 }}>✅ 確認當日全部 ({dayStats.pending})</button>}<button onClick={() => loadDaySlots(schedDate)} style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid #d0c8bc', background: '#faf6f0', color: '#5c4a3a', cursor: 'pointer', fontSize: 12, fontFamily: font }}>🔄</button></div>
+          </div>
+          {hasFilters && <div style={{ padding: '8px 14px', marginBottom: 12, borderRadius: 8, background: '#FFF8E1', border: '1px solid #FFE082', fontSize: 13, color: '#F57F17' }}>🔍 篩選結果：{filteredBookings.length} / {allBookings.length} 筆</div>}
+          <div style={{ background: '#fff', borderRadius: 12, overflow: 'hidden', boxShadow: '0 2px 10px rgba(0,0,0,0.05)' }}>
+            <div style={{ padding: '14px 16px', borderBottom: '1px solid #eee', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h2 style={{ margin: 0, color: '#5c4a3a', fontSize: 16 }}>預約列表 ({filteredBookings.length})</h2>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <button onClick={exportCSV} style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid #d0c8bc', background: '#faf6f0', color: '#5c4a3a', cursor: 'pointer', fontSize: 12, fontFamily: font }}>📥 匯出 CSV</button>
+                {autoRefresh && <span style={{ fontSize: 11, color: '#999' }}>🔄 30秒刷新</span>}
               </div>
-              <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', padding: '10px 14px', background: '#f9f6f3', borderRadius: 8, fontSize: 13, marginBottom: 16 }}><span>📊 <b>{dayStats.total}</b></span><span>💰 <b>${dayStats.revenue}</b></span>{dayStats.pending > 0 && <span style={{ color: '#FF9800' }}>⏳ {dayStats.pending}</span>}{dayStats.confirmed > 0 && <span style={{ color: '#4CAF50' }}>✅ {dayStats.confirmed}</span>}{dayStats.completed > 0 && <span style={{ color: '#2196F3' }}>✔️ {dayStats.completed}</span>}</div>
-              {dayLoading ? <p style={{ textAlign: 'center', color: '#999', padding: 30 }}>載入中...</p> : timetableTimes.length === 0 && dayBks.length === 0 ? (<div style={{ textAlign: 'center', padding: '40px 20px', color: '#999' }}><div style={{ fontSize: 40, marginBottom: 10 }}>📭</div><div style={{ fontSize: 14 }}>此日未有開放時段或預約</div></div>) : (
-                <div style={{ overflowX: 'auto', border: '1px solid #e8e0d8', borderRadius: 10 }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: timetableStaff.length * 160 + 80 }}>
-                    <thead><tr style={{ background: '#f9f6f3' }}>
-                      <th style={{ padding: '12px 8px', borderBottom: '2px solid #e8e0d8', fontSize: 13, color: '#5c4a3a', fontWeight: 600, position: 'sticky', left: 0, background: '#f9f6f3', zIndex: 2, minWidth: 65, textAlign: 'center' }}>時間</th>
-                      {timetableStaff.map(s => { const cnt = dayBks.filter(b => (b.technician_label || '未指定') === s.name).length; const slotCnt = s.id ? (daySlots[s.id]?.size || 0) : 0; return <th key={s.name} style={{ padding: '12px 8px', borderBottom: '2px solid #e8e0d8', borderLeft: '1px solid #e8e0d8', fontSize: 14, color: '#5c4a3a', fontWeight: 700, minWidth: 150, textAlign: 'center' }}>{s.name}<div style={{ fontSize: 11, fontWeight: 400, marginTop: 2 }}>{s.id && <span style={{ color: slotCnt > 0 ? '#4CAF50' : '#ccc' }}>{slotCnt} 時段</span>}{cnt > 0 && <span style={{ color: '#FF9800', marginLeft: 6 }}>{cnt} 預約</span>}</div></th>; })}
-                    </tr></thead>
-                    <tbody>{timetableTimes.map((time, ti) => {
-                      const isHour = time.endsWith(':00');
-                      return (<tr key={time} style={{ borderBottom: isHour ? '2px solid #e8e0d8' : '1px solid #f0ebe3' }}>
-                        <td style={{ padding: '4px 6px', fontSize: 13, color: isHour ? '#5c4a3a' : '#bbb', fontWeight: isHour ? 700 : 400, position: 'sticky', left: 0, background: '#faf8f5', zIndex: 1, borderRight: '2px solid #e8e0d8', textAlign: 'center', verticalAlign: 'top', height: 52 }}>{time}</td>
-                        {timetableStaff.map(s => {
-                          const bks = timetableGrid[`${time}|${s.name}`] || [];
-                          const hasSlot = s.id ? daySlots[s.id]?.has(time) : false;
-                          return (<td key={s.name} style={{ padding: '3px 5px', borderLeft: '1px solid #f0ebe3', verticalAlign: 'top', height: 52, background: bks.length > 0 ? 'transparent' : hasSlot ? '#f0faf0' : (ti % 2 === 0 ? '#fafafa' : '#f5f5f5') }}>
-                            {bks.length > 0 ? bks.map(b => (<div key={b.id} onClick={() => openBooking(b)} style={{ padding: '5px 8px', borderRadius: 6, marginBottom: 2, cursor: 'pointer', borderLeft: `4px solid ${statusColor(b.status)}`, background: rowBg(b.status), fontSize: 12, lineHeight: 1.4 }}>
-                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}><span style={{ fontWeight: 700, color: '#5c4a3a', fontSize: 13 }}>{b.customer_name}</span>{b.status === 'pending' && <button onClick={e => { e.stopPropagation(); updateStatus(b.id, 'confirmed'); }} style={{ padding: '2px 8px', borderRadius: 4, border: 'none', background: '#4CAF50', color: '#fff', cursor: 'pointer', fontSize: 10, fontFamily: font }}>✅</button>}</div>
-                              <div style={{ color: '#888', marginTop: 1 }}>{b.service_name}</div>
-                              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 2 }}><span style={{ color: statusColor(b.status), fontWeight: 600, fontSize: 11 }}>{statusText(b.status)}</span><span style={{ fontWeight: 700, color: '#5c4a3a' }}>${b.total_price}</span></div>
-                            </div>)) : hasSlot ? <div style={{ color: '#c8e6c9', fontSize: 11, textAlign: 'center', paddingTop: 16 }}>空</div> : null}
-                          </td>);
-                        })}
-                      </tr>);
-                    })}</tbody>
-                  </table>
+            </div>
+            {bkLoading ? <p style={{ padding: 40, textAlign: 'center', color: '#999' }}>載入中...</p> : filteredBookings.length === 0 ? <p style={{ padding: 40, textAlign: 'center', color: '#999' }}>{hasFilters ? '搵唔到符合條件嘅預約' : '暫無預約'}</p> : isMobile ? (
+              <div style={{ padding: '12px 16px' }}>{pagedBookings.map(b => (
+                <div key={b.id} onClick={() => openBooking(b)} style={{ background: rowBg(b.status), borderRadius: 10, padding: 14, marginBottom: 10, border: '1px solid #e8e0d8', cursor: 'pointer' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}><div><span style={{ fontWeight: 700, fontSize: 15, color: '#5c4a3a' }}>{b.customer_name}</span><div style={{ fontSize: 13, color: '#666', marginTop: 4 }}>{b.customer_phone}</div></div><span style={{ padding: '3px 10px', borderRadius: 20, fontSize: 11, color: '#fff', background: statusColor(b.status), fontWeight: 600 }}>{statusText(b.status)}</span></div>
+                  <div style={{ fontSize: 13, color: '#666', marginBottom: 4 }}>📅 {b.booking_date}　🕐 {b.booking_time}　👤 {b.technician_label || '未指定'}</div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}><span style={{ fontSize: 13, color: '#5c4a3a' }}>{b.service_name}</span><span style={{ fontSize: 17, fontWeight: 700, color: '#5c4a3a' }}>${b.total_price}</span></div>
+                  {b.cancel_reason && <div style={{ fontSize: 11, color: '#c62828', marginTop: 4 }}>❌ {b.cancel_reason}</div>}
+                  {b.status === 'pending' && <div style={{ marginTop: 8, display: 'flex', gap: 6 }}><button onClick={e => { e.stopPropagation(); updateStatus(b.id, 'confirmed'); }} style={{ padding: '6px 16px', borderRadius: 6, border: 'none', background: '#4CAF50', color: '#fff', cursor: 'pointer', fontSize: 12, fontFamily: font, fontWeight: 600 }}>✅ 快速確認</button></div>}
                 </div>
-              )}
-            </div>
-          </>)}
+              ))}</div>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 14 }}>
+                  <thead><tr style={{ background: '#f9f6f3' }}>{['日期', '時間', '服務', '客人', '電話', '技師', '金額', '狀態', '操作'].map(h => <th key={h} style={{ padding: '12px 10px', textAlign: 'left', color: '#5c4a3a', fontWeight: 600, whiteSpace: 'nowrap', fontSize: 13 }}>{h}</th>)}</tr></thead>
+                  <tbody>{pagedBookings.map(b => (
+                    <tr key={b.id} style={{ borderBottom: '1px solid #f0f0f0', background: rowBg(b.status), cursor: 'pointer' }} onClick={() => openBooking(b)}>
+                      <td style={{ padding: '12px 10px', whiteSpace: 'nowrap' }}>{b.booking_date}<div style={{ fontSize: 11, color: '#999' }}>週{DAYS[new Date(b.booking_date + 'T00:00:00').getDay()]}</div></td>
+                      <td style={{ padding: '12px 10px', fontWeight: 600 }}>{b.booking_time}</td>
+                      <td style={{ padding: '12px 10px' }}>{b.service_name}{b.variant_label && <div style={{ fontSize: 12, color: '#999' }}>{b.variant_label}</div>}</td>
+                      <td style={{ padding: '12px 10px', fontWeight: 500 }}>{b.customer_name}</td>
+                      <td style={{ padding: '12px 10px', whiteSpace: 'nowrap' }}>{b.customer_phone}{b.customer_phone && <a href={waLink(b.customer_phone)} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} style={{ marginLeft: 6, textDecoration: 'none', fontSize: 14 }}>💬</a>}</td>
+                      <td style={{ padding: '12px 10px' }}>{b.technician_label || <span style={{ color: '#ccc' }}>-</span>}</td>
+                      <td style={{ padding: '12px 10px', fontWeight: 'bold', fontSize: 15 }}>${b.total_price}</td>
+                      <td style={{ padding: '12px 10px' }}><span style={{ padding: '3px 10px', borderRadius: 20, fontSize: 11, color: '#fff', background: statusColor(b.status), fontWeight: 600 }}>{statusText(b.status)}</span>{b.cancel_reason && <div style={{ fontSize: 10, color: '#c62828', marginTop: 2 }}>{b.cancel_reason}</div>}</td>
+                      <td style={{ padding: '12px 10px', whiteSpace: 'nowrap' }} onClick={e => e.stopPropagation()}>
+                        <div style={{ display: 'flex', gap: 4 }}>
+                          {b.status === 'pending' && actBtn('✅', '#E8F5E9', '#A5D6A7', () => updateStatus(b.id, 'confirmed'), '確認')}
+                          {(b.status === 'pending' || b.status === 'confirmed') && actBtn('✔️', '#E3F2FD', '#90CAF9', () => updateStatus(b.id, 'completed'), '完成')}
+                          {b.status !== 'cancelled' && b.status !== 'completed' && actBtn('❌', '#FFEBEE', '#EF9A9A', () => updateStatus(b.id, 'cancelled'), '取消')}
+                          {actBtn('🗑️', '#fafafa', '#ddd', () => deleteBooking(b.id), '刪除')}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
+            )}
+            <PaginationBar />
+          </div>
         </>)}
 
         {/* ═══ TIMESLOTS TAB（加封鎖日期管理）═══ */}
@@ -1356,59 +1385,59 @@ const allTabs = [
           </div>
         )}
         {/* ═══ CALENDAR TAB ═══ */}
-      {tab === 'calendar' && (<>
-  <div style={card}>
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}><button onClick={prevSchedCal} style={navBtn}>◀</button><span style={{ fontSize: 20, fontWeight: 700, color: '#5c4a3a' }}>{schedYear}年 {schedMonth + 1}月</span><button onClick={nextSchedCal} style={navBtn}>▶</button></div>
-    <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}><button onClick={schedToToday} style={{ padding: '6px 16px', borderRadius: 6, border: '1px solid #d0c8bc', background: '#faf6f0', color: '#5c4a3a', cursor: 'pointer', fontSize: 13, fontFamily: font, fontWeight: 600 }}>📍 今日</button><button onClick={() => { setSchedRefreshKey(k => k + 1); showToast('🔄 已刷新'); }} style={{ padding: '6px 16px', borderRadius: 6, border: '1px solid #d0c8bc', background: '#faf6f0', color: '#5c4a3a', cursor: 'pointer', fontSize: 13, fontFamily: font }}>🔄</button><label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: '#999', cursor: 'pointer', marginLeft: 'auto' }}><input type="checkbox" checked={showCancelled} onChange={e => setShowCancelled(e.target.checked)} /> 顯示已取消</label></div>
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 4 }}>
-      {DAYS.map((d, i) => <div key={`h${i}`} style={{ padding: '10px 0', textAlign: 'center', fontSize: 13, fontWeight: 600, color: i === 0 || i === 6 ? '#c62828' : '#5c4a3a', background: '#f9f6f3', borderRadius: 6 }}>{d}</div>)}
-      {schedCalDays.map((day, i) => {
-        if (!day) return <div key={`e${i}`} style={{ minHeight: isMobile ? 52 : 90 }} />;
-        const ds = toDS(schedYear, schedMonth, day); const isSel = ds === schedDate; const isToday = ds === todayStr;
-        const bk = monthBkStats[ds]; const avail = monthAvail[ds]; const isPast = ds < todayStr; const dow = new Date(ds + 'T00:00:00').getDay();
-        return (<div key={`d${i}`} onClick={() => setSchedDate(ds)} style={{ minHeight: isMobile ? 52 : 90, padding: isMobile ? '4px 3px' : '6px 8px', borderRadius: 8, cursor: 'pointer', border: isSel ? '3px solid #FF9800' : '1px solid #e8e0d8', background: isSel ? '#FFF8E1' : isToday ? '#FFFDE7' : isPast ? '#fafafa' : '#fff', display: 'flex', flexDirection: 'column', gap: isMobile ? 1 : 3, opacity: isPast ? 0.6 : 1 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}><span style={{ fontWeight: isToday || isSel ? 700 : 500, fontSize: isMobile ? 13 : 15, color: isToday ? '#FF9800' : (dow === 0 || dow === 6) ? '#c62828' : '#5c4a3a' }}>{day}</span>{bk?.pending > 0 && <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#FF9800' }} />}</div>
-          {staffList.length > 0 && <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>{staffList.map(s => <span key={s.id} title={s.name} style={{ width: isMobile ? 6 : 8, height: isMobile ? 6 : 8, borderRadius: '50%', background: avail?.[s.id] === 'available' ? '#4CAF50' : '#ddd' }} />)}</div>}
-          {bk && bk.total > 0 ? <div style={{ fontSize: isMobile ? 10 : 12, fontWeight: 600, color: '#5c4a3a', lineHeight: 1.3 }}>{bk.total} 預約{!isMobile && <div style={{ fontWeight: 400, color: '#999', fontSize: 11 }}>${bk.revenue}</div>}</div> : null}
-        </div>);
-      })}
-    </div>
-  </div>
-  <div style={card}>
-    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
-      <div><div style={{ fontSize: 18, fontWeight: 700, color: '#5c4a3a' }}>{schedDate}（星期{DAYS[new Date(schedDate + 'T00:00:00').getDay()]}）</div>{schedDate === todayStr && <span style={{ padding: '2px 10px', background: '#FF9800', color: '#fff', borderRadius: 4, fontSize: 11, fontWeight: 600 }}>今日</span>}</div>
-      <div style={{ display: 'flex', gap: 8 }}>{dayStats.pending > 0 && <button onClick={confirmDayPending} style={{ padding: '6px 14px', borderRadius: 6, border: 'none', background: '#4CAF50', color: '#fff', cursor: 'pointer', fontSize: 12, fontFamily: font, fontWeight: 600 }}>✅ 確認當日全部 ({dayStats.pending})</button>}<button onClick={() => loadDaySlots(schedDate)} style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid #d0c8bc', background: '#faf6f0', color: '#5c4a3a', cursor: 'pointer', fontSize: 12, fontFamily: font }}>🔄</button></div>
-    </div>
-    <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', padding: '10px 14px', background: '#f9f6f3', borderRadius: 8, fontSize: 13, marginBottom: 16 }}><span>📊 <b>{dayStats.total}</b></span><span>💰 <b>${dayStats.revenue}</b></span>{dayStats.pending > 0 && <span style={{ color: '#FF9800' }}>⏳ {dayStats.pending}</span>}{dayStats.confirmed > 0 && <span style={{ color: '#4CAF50' }}>✅ {dayStats.confirmed}</span>}{dayStats.completed > 0 && <span style={{ color: '#2196F3' }}>✔️ {dayStats.completed}</span>}</div>
-    {dayLoading ? <p style={{ textAlign: 'center', color: '#999', padding: 30 }}>載入中...</p> : timetableTimes.length === 0 && dayBks.length === 0 ? (<div style={{ textAlign: 'center', padding: '40px 20px', color: '#999' }}><div style={{ fontSize: 40, marginBottom: 10 }}>📭</div><div style={{ fontSize: 14 }}>此日未有開放時段或預約</div></div>) : (
-      <div style={{ overflowX: 'auto', border: '1px solid #e8e0d8', borderRadius: 10 }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: timetableStaff.length * 160 + 80 }}>
-          <thead><tr style={{ background: '#f9f6f3' }}>
-            <th style={{ padding: '12px 8px', borderBottom: '2px solid #e8e0d8', fontSize: 13, color: '#5c4a3a', fontWeight: 600, position: 'sticky', left: 0, background: '#f9f6f3', zIndex: 2, minWidth: 65, textAlign: 'center' }}>時間</th>
-            {timetableStaff.map(s => { const cnt = dayBks.filter(b => (b.technician_label || '未指定') === s.name).length; const slotCnt = s.id ? (daySlots[s.id]?.size || 0) : 0; return <th key={s.name} style={{ padding: '12px 8px', borderBottom: '2px solid #e8e0d8', borderLeft: '1px solid #e8e0d8', fontSize: 14, color: '#5c4a3a', fontWeight: 700, minWidth: 150, textAlign: 'center' }}>{s.name}<div style={{ fontSize: 11, fontWeight: 400, marginTop: 2 }}>{s.id && <span style={{ color: slotCnt > 0 ? '#4CAF50' : '#ccc' }}>{slotCnt} 時段</span>}{cnt > 0 && <span style={{ color: '#FF9800', marginLeft: 6 }}>{cnt} 預約</span>}</div></th>; })}
-          </tr></thead>
-          <tbody>{timetableTimes.map((time, ti) => {
-            const isHour = time.endsWith(':00');
-            return (<tr key={time} style={{ borderBottom: isHour ? '2px solid #e8e0d8' : '1px solid #f0ebe3' }}>
-              <td style={{ padding: '4px 6px', fontSize: 13, color: isHour ? '#5c4a3a' : '#bbb', fontWeight: isHour ? 700 : 400, position: 'sticky', left: 0, background: '#faf8f5', zIndex: 1, borderRight: '2px solid #e8e0d8', textAlign: 'center', verticalAlign: 'top', height: 52 }}>{time}</td>
-              {timetableStaff.map(s => {
-                const bks = timetableGrid[`${time}|${s.name}`] || [];
-                const hasSlot = s.id ? daySlots[s.id]?.has(time) : false;
-                return (<td key={s.name} style={{ padding: '3px 5px', borderLeft: '1px solid #f0ebe3', verticalAlign: 'top', height: 52, background: bks.length > 0 ? 'transparent' : hasSlot ? '#f0faf0' : (ti % 2 === 0 ? '#fafafa' : '#f5f5f5') }}>
-                  {bks.length > 0 ? bks.map(b => (<div key={b.id} onClick={() => openBooking(b)} style={{ padding: '5px 8px', borderRadius: 6, marginBottom: 2, cursor: 'pointer', borderLeft: `4px solid ${statusColor(b.status)}`, background: rowBg(b.status), fontSize: 12, lineHeight: 1.4 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}><span style={{ fontWeight: 700, color: '#5c4a3a', fontSize: 13 }}>{b.customer_name}</span>{b.status === 'pending' && <button onClick={e => { e.stopPropagation(); updateStatus(b.id, 'confirmed'); }} style={{ padding: '2px 8px', borderRadius: 4, border: 'none', background: '#4CAF50', color: '#fff', cursor: 'pointer', fontSize: 10, fontFamily: font }}>✅</button>}</div>
-                    <div style={{ color: '#888', marginTop: 1 }}>{b.service_name}</div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 2 }}><span style={{ color: statusColor(b.status), fontWeight: 600, fontSize: 11 }}>{statusText(b.status)}</span><span style={{ fontWeight: 700, color: '#5c4a3a' }}>${b.total_price}</span></div>
-                  </div>)) : hasSlot ? <div style={{ color: '#c8e6c9', fontSize: 11, textAlign: 'center', paddingTop: 16 }}>空</div> : null}
-                </td>);
+{tab === 'calendar' && (<>
+          <div style={card}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}><button onClick={prevSchedCal} style={navBtn}>◀</button><span style={{ fontSize: 20, fontWeight: 700, color: '#5c4a3a' }}>{schedYear}年 {schedMonth + 1}月</span><button onClick={nextSchedCal} style={navBtn}>▶</button></div>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}><button onClick={schedToToday} style={{ padding: '6px 16px', borderRadius: 6, border: '1px solid #d0c8bc', background: '#faf6f0', color: '#5c4a3a', cursor: 'pointer', fontSize: 13, fontFamily: font, fontWeight: 600 }}>📍 今日</button><button onClick={() => { setSchedRefreshKey(k => k + 1); showToast('🔄 已刷新'); }} style={{ padding: '6px 16px', borderRadius: 6, border: '1px solid #d0c8bc', background: '#faf6f0', color: '#5c4a3a', cursor: 'pointer', fontSize: 13, fontFamily: font }}>🔄</button><label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: '#999', cursor: 'pointer', marginLeft: 'auto' }}><input type="checkbox" checked={showCancelled} onChange={e => setShowCancelled(e.target.checked)} /> 顯示已取消</label></div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: 4 }}>
+              {DAYS.map((d, i) => <div key={`h${i}`} style={{ padding: '10px 0', textAlign: 'center', fontSize: 13, fontWeight: 600, color: i === 0 || i === 6 ? '#c62828' : '#5c4a3a', background: '#f9f6f3', borderRadius: 6 }}>{d}</div>)}
+              {schedCalDays.map((day, i) => {
+                if (!day) return <div key={`e${i}`} style={{ minHeight: isMobile ? 52 : 90 }} />;
+                const ds = toDS(schedYear, schedMonth, day); const isSel = ds === schedDate; const isToday = ds === todayStr;
+                const bk = monthBkStats[ds]; const avail = monthAvail[ds]; const isPast = ds < todayStr; const dow = new Date(ds + 'T00:00:00').getDay();
+                return (<div key={`d${i}`} onClick={() => setSchedDate(ds)} style={{ minHeight: isMobile ? 52 : 90, padding: isMobile ? '4px 3px' : '6px 8px', borderRadius: 8, cursor: 'pointer', border: isSel ? '3px solid #FF9800' : '1px solid #e8e0d8', background: isSel ? '#FFF8E1' : isToday ? '#FFFDE7' : isPast ? '#fafafa' : '#fff', display: 'flex', flexDirection: 'column', gap: isMobile ? 1 : 3, opacity: isPast ? 0.6 : 1 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}><span style={{ fontWeight: isToday || isSel ? 700 : 500, fontSize: isMobile ? 13 : 15, color: isToday ? '#FF9800' : (dow === 0 || dow === 6) ? '#c62828' : '#5c4a3a' }}>{day}</span>{bk?.pending > 0 && <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#FF9800' }} />}</div>
+                  {staffList.length > 0 && <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>{staffList.map(s => <span key={s.id} title={s.name} style={{ width: isMobile ? 6 : 8, height: isMobile ? 6 : 8, borderRadius: '50%', background: avail?.[s.id] === 'available' ? '#4CAF50' : '#ddd' }} />)}</div>}
+                  {bk && bk.total > 0 ? <div style={{ fontSize: isMobile ? 10 : 12, fontWeight: 600, color: '#5c4a3a', lineHeight: 1.3 }}>{bk.total} 預約{!isMobile && <div style={{ fontWeight: 400, color: '#999', fontSize: 11 }}>${bk.revenue}</div>}</div> : null}
+                </div>);
               })}
-            </tr>);
-          })}</tbody>
-        </table>
-      </div>
-    )}
-  </div>
-</>)}
+            </div>
+          </div>
+          <div style={card}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
+              <div><div style={{ fontSize: 18, fontWeight: 700, color: '#5c4a3a' }}>{schedDate}（星期{DAYS[new Date(schedDate + 'T00:00:00').getDay()]}）</div>{schedDate === todayStr && <span style={{ padding: '2px 10px', background: '#FF9800', color: '#fff', borderRadius: 4, fontSize: 11, fontWeight: 600 }}>今日</span>}</div>
+              <div style={{ display: 'flex', gap: 8 }}>{dayStats.pending > 0 && <button onClick={confirmDayPending} style={{ padding: '6px 14px', borderRadius: 6, border: 'none', background: '#4CAF50', color: '#fff', cursor: 'pointer', fontSize: 12, fontFamily: font, fontWeight: 600 }}>✅ 確認當日全部 ({dayStats.pending})</button>}<button onClick={() => loadDaySlots(schedDate)} style={{ padding: '6px 14px', borderRadius: 6, border: '1px solid #d0c8bc', background: '#faf6f0', color: '#5c4a3a', cursor: 'pointer', fontSize: 12, fontFamily: font }}>🔄</button></div>
+            </div>
+            <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', padding: '10px 14px', background: '#f9f6f3', borderRadius: 8, fontSize: 13, marginBottom: 16 }}><span>📊 <b>{dayStats.total}</b></span><span>💰 <b>${dayStats.revenue}</b></span>{dayStats.pending > 0 && <span style={{ color: '#FF9800' }}>⏳ {dayStats.pending}</span>}{dayStats.confirmed > 0 && <span style={{ color: '#4CAF50' }}>✅ {dayStats.confirmed}</span>}{dayStats.completed > 0 && <span style={{ color: '#2196F3' }}>✔️ {dayStats.completed}</span>}</div>
+            {dayLoading ? <p style={{ textAlign: 'center', color: '#999', padding: 30 }}>載入中...</p> : timetableTimes.length === 0 && dayBks.length === 0 ? (<div style={{ textAlign: 'center', padding: '40px 20px', color: '#999' }}><div style={{ fontSize: 40, marginBottom: 10 }}>📭</div><div style={{ fontSize: 14 }}>此日未有開放時段或預約</div></div>) : (
+              <div style={{ overflowX: 'auto', border: '1px solid #e8e0d8', borderRadius: 10 }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: timetableStaff.length * 160 + 80 }}>
+                  <thead><tr style={{ background: '#f9f6f3' }}>
+                    <th style={{ padding: '12px 8px', borderBottom: '2px solid #e8e0d8', fontSize: 13, color: '#5c4a3a', fontWeight: 600, position: 'sticky', left: 0, background: '#f9f6f3', zIndex: 2, minWidth: 65, textAlign: 'center' }}>時間</th>
+                    {timetableStaff.map(s => { const cnt = dayBks.filter(b => (b.technician_label || '未指定') === s.name).length; const slotCnt = s.id ? (daySlots[s.id]?.size || 0) : 0; return <th key={s.name} style={{ padding: '12px 8px', borderBottom: '2px solid #e8e0d8', borderLeft: '1px solid #e8e0d8', fontSize: 14, color: '#5c4a3a', fontWeight: 700, minWidth: 150, textAlign: 'center' }}>{s.name}<div style={{ fontSize: 11, fontWeight: 400, marginTop: 2 }}>{s.id && <span style={{ color: slotCnt > 0 ? '#4CAF50' : '#ccc' }}>{slotCnt} 時段</span>}{cnt > 0 && <span style={{ color: '#FF9800', marginLeft: 6 }}>{cnt} 預約</span>}</div></th>; })}
+                  </tr></thead>
+                  <tbody>{timetableTimes.map((time, ti) => {
+                    const isHour = time.endsWith(':00');
+                    return (<tr key={time} style={{ borderBottom: isHour ? '2px solid #e8e0d8' : '1px solid #f0ebe3' }}>
+                      <td style={{ padding: '4px 6px', fontSize: 13, color: isHour ? '#5c4a3a' : '#bbb', fontWeight: isHour ? 700 : 400, position: 'sticky', left: 0, background: '#faf8f5', zIndex: 1, borderRight: '2px solid #e8e0d8', textAlign: 'center', verticalAlign: 'top', height: 52 }}>{time}</td>
+                      {timetableStaff.map(s => {
+                        const bks = timetableGrid[`${time}|${s.name}`] || [];
+                        const hasSlot = s.id ? daySlots[s.id]?.has(time) : false;
+                        return (<td key={s.name} style={{ padding: '3px 5px', borderLeft: '1px solid #f0ebe3', verticalAlign: 'top', height: 52, background: bks.length > 0 ? 'transparent' : hasSlot ? '#f0faf0' : (ti % 2 === 0 ? '#fafafa' : '#f5f5f5') }}>
+                          {bks.length > 0 ? bks.map(b => (<div key={b.id} onClick={() => openBooking(b)} style={{ padding: '5px 8px', borderRadius: 6, marginBottom: 2, cursor: 'pointer', borderLeft: `4px solid ${statusColor(b.status)}`, background: rowBg(b.status), fontSize: 12, lineHeight: 1.4 }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}><span style={{ fontWeight: 700, color: '#5c4a3a', fontSize: 13 }}>{b.customer_name}</span>{b.status === 'pending' && <button onClick={e => { e.stopPropagation(); updateStatus(b.id, 'confirmed'); }} style={{ padding: '2px 8px', borderRadius: 4, border: 'none', background: '#4CAF50', color: '#fff', cursor: 'pointer', fontSize: 10, fontFamily: font }}>✅</button>}</div>
+                            <div style={{ color: '#888', marginTop: 1 }}>{b.service_name}</div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 2 }}><span style={{ color: statusColor(b.status), fontWeight: 600, fontSize: 11 }}>{statusText(b.status)}</span><span style={{ fontWeight: 700, color: '#5c4a3a' }}>${b.total_price}</span></div>
+                          </div>)) : hasSlot ? <div style={{ color: '#c8e6c9', fontSize: 11, textAlign: 'center', paddingTop: 16 }}>空</div> : null}
+                        </td>);
+                      })}
+                    </tr>);
+                  })}</tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </>)}
               </div>
             </div>
 
