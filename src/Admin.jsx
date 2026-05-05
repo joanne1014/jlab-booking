@@ -234,6 +234,7 @@ useEffect(() => {
     setAuth(false);
     showToast('⚠️ 登入已過期，請重新登入');
   };
+  }, []);   // 
 // ═══ useEffect 2: 跨日檢查 ═══
 useEffect(() => {
   const checkDate = () => {
