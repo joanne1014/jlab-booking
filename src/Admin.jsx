@@ -228,11 +228,13 @@ const [previewUrl, setPreviewUrl] = useState('https://jlab-booking.vercel.app/bo
  useEffect(() => {
   let expired = false;
   onAuthExpired = () => {
-    if (expired) return; // 只觸發一次
+    if (expired) return;
     expired = true;
     setAuth(false);
     showToast('⚠️ 登入已過期，請重新登入');
   };
+
+  useEffect(() => {
 
   useEffect(() => {
     const checkDate = () => {
