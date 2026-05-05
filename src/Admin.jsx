@@ -225,10 +225,14 @@ const [previewUrl, setPreviewUrl] = useState('https://jlab-booking.vercel.app/bo
   const bookingCountRef = useRef(0);
   const showToast = (m) => { setToast(m); setTimeout(() => setToast(''), 3000); };
 
-  useEffect(() => {
-    onAuthExpired = () => { setAuth(false); showToast('⚠️ 登入已過期，請重新登入'); };
-    return () => { onAuthExpired = null; };
-  }, []);
+ useEffect(() => {
+  let expired = false;
+  onAuthExpired = () => {
+    if (expired) return; // 只觸發一次
+    expired = true;
+    setAuth(false);
+    showToast('⚠️ 登入已過期，請重新登入');
+  };
 
   useEffect(() => {
     const checkDate = () => {
@@ -292,14 +296,7 @@ const [previewUrl, setPreviewUrl] = useState('https://jlab-booking.vercel.app/bo
       window.history.replaceState(null, '', window.location.pathname + window.location.search);
     }
   }, []);
-useEffect(() => {
-  let expired = false;
-  onAuthExpired = () => {
-    if (expired) return; // 只觸發一次
-    expired = true;
-    setAuth(false);
-    showToast('⚠️ 登入已過期，請重新登入');
-  };
+
   return () => { onAuthExpired = null; };
 }, []);
   const handleResetNewPw = async () => { setResetPwError(''); if (!resetNewPw || resetNewPw.length < 6) { setResetPwError('新密碼至少要 6 個字元'); return; } if (resetNewPw !== resetConfirmPw) { setResetPwError('兩次密碼不一致'); return; } setResetPwLoading(true); try { await apiCall('reset-via-token', { token: recoveryToken, newPassword: resetNewPw }); showToast('✅ 密碼已重設，請重新登入'); setShowResetForm(false); setRecoveryToken(''); setResetNewPw(''); setResetConfirmPw(''); } catch (err) { setResetPwError(err.message || '重設失敗'); } setResetPwLoading(false); };
