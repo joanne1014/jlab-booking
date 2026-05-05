@@ -211,6 +211,16 @@ const [previewUrl, setPreviewUrl] = useState('https://jlab-booking.vercel.app/bo
   const [auditLogs, setAuditLogs] = useState([]);
   const [auditLoading, setAuditLoading] = useState(false);
   const [historyTab, setHistoryTab] = useState('changes');
+  // ★ 收據系統
+  const [receiptList, setReceiptList] = useState([]);
+  const [receiptLoading, setReceiptLoading] = useState(false);
+  const [receiptFilter, setReceiptFilter] = useState('all');
+  const [receiptSearch, setReceiptSearch] = useState('');
+  const [showNewReceipt, setShowNewReceipt] = useState(false);
+  const [newReceipt, setNewReceipt] = useState({ customer_name: '', customer_phone: '', staff_name: '', items: [], payment_method: '', discount_type: 'none', discount_value: 0, remarks: '' });
+  const [newReceiptItem, setNewReceiptItem] = useState({ name: '', qty: 1, price: 0 });
+  const [receiptSending, setReceiptSending] = useState(null);
+  const [selectedReceipt, setSelectedReceipt] = useState(null);
 
   const bookingCountRef = useRef(0);
   const showToast = (m) => { setToast(m); setTimeout(() => setToast(''), 3000); };
@@ -285,9 +295,9 @@ const [previewUrl, setPreviewUrl] = useState('https://jlab-booking.vercel.app/bo
 
   const handleResetNewPw = async () => { setResetPwError(''); if (!resetNewPw || resetNewPw.length < 6) { setResetPwError('新密碼至少要 6 個字元'); return; } if (resetNewPw !== resetConfirmPw) { setResetPwError('兩次密碼不一致'); return; } setResetPwLoading(true); try { await apiCall('reset-via-token', { token: recoveryToken, newPassword: resetNewPw }); showToast('✅ 密碼已重設，請重新登入'); setShowResetForm(false); setRecoveryToken(''); setResetNewPw(''); setResetConfirmPw(''); } catch (err) { setResetPwError(err.message || '重設失敗'); } setResetPwLoading(false); };
 
-  const handleLogin = async (e) => { e.preventDefault(); setLoginError(''); setLoginLoading(true); try { const result = await apiCall('login', { email: loginEmail, password: pw }); authToken = result.access_token; try { sessionStorage.setItem('jlab_token', result.access_token); } catch (_) {} setAuth(true); try { const roles = await sbGet(`admin_users?email=eq.${encodeURIComponent(loginEmail)}`); if (roles && roles.length > 0) { setUserRole(roles[0].role || 'owner'); setUserStaffId(roles[0].staff_id || null); } else { setUserRole('owner'); } } catch (_) { setUserRole('owner'); } fetchBookings(); fetchBlocked(); fetchStaff(); fetchServices(); fetchAddons(); fetchLogs(); fetchCustomers(); fetchPackageTypes(); fetchAllPackages(); fetchBusinessHours();; apiCall('auto-backup').catch(() => {}); } catch (err) { setLoginError(err.message || '帳號或密碼錯誤'); } setLoginLoading(false); };
+  const handleLogin = async (e) => { e.preventDefault(); setLoginError(''); setLoginLoading(true); try { const result = await apiCall('login', { email: loginEmail, password: pw }); authToken = result.access_token; try { sessionStorage.setItem('jlab_token', result.access_token); } catch (_) {} setAuth(true); try { const roles = await sbGet(`admin_users?email=eq.${encodeURIComponent(loginEmail)}`); if (roles && roles.length > 0) { setUserRole(roles[0].role || 'owner'); setUserStaffId(roles[0].staff_id || null); } else { setUserRole('owner'); } } catch (_) { setUserRole('owner'); } fetchBookings(); fetchReceipts();fetchBlocked(); fetchStaff(); fetchServices(); fetchAddons(); fetchLogs(); fetchCustomers(); fetchPackageTypes(); fetchAllPackages(); fetchBusinessHours();; apiCall('auto-backup').catch(() => {}); } catch (err) { setLoginError(err.message || '帳號或密碼錯誤'); } setLoginLoading(false); };
 
-  useEffect(() => { const saved = sessionStorage.getItem('jlab_token'); if (saved) { authToken = saved; apiCall('verify').then(() => { setAuth(true); fetchBookings(); fetchBlocked(); fetchStaff(); fetchServices(); fetchAddons(); fetchLogs(); fetchCustomers();fetchPackageTypes(); fetchAllPackages(); fetchBusinessHours();; apiCall('auto-backup').catch(() => {}); }).catch(() => { authToken = null; sessionStorage.removeItem('jlab_token'); }); } }, []);
+  useEffect(() => { const saved = sessionStorage.getItem('jlab_token');fetchReceipts(); if (saved) { authToken = saved; apiCall('verify').then(() => { setAuth(true); fetchBookings(); fetchBlocked(); fetchStaff(); fetchServices(); fetchAddons(); fetchLogs(); fetchCustomers();fetchPackageTypes(); fetchAllPackages(); fetchBusinessHours();; apiCall('auto-backup').catch(() => {}); }).catch(() => { authToken = null; sessionStorage.removeItem('jlab_token'); }); } }, []);
 
   const logChange = (text) => { const id = Date.now(); const ts = new Date().toLocaleTimeString('zh-HK', { hour: '2-digit', minute: '2-digit', second: '2-digit' }); setChangeLog(prev => [{ id, text, ts }, ...prev].slice(0, 30)); try { sbPost('admin_logs', [{ action: text, admin_email: loginEmail || 'admin' }]); } catch (e) { console.error('Log save failed:', e); } };
   const fetchLogs = async () => { setLogLoading(true); try { const data = await sbGet('admin_logs?order=created_at.desc&limit=100'); setDbLogs(data || []); } catch (e) { console.error(e); } setLogLoading(false); };
@@ -324,6 +334,121 @@ const [previewUrl, setPreviewUrl] = useState('https://jlab-booking.vercel.app/bo
       logChange('🕐 更新營業時間');
     } catch (e) { showToast('❌ 儲存失敗：' + e.message); }
   };
+  // ★ 收據 Functions
+  const fetchReceipts = async () => {
+    setReceiptLoading(true);
+    try {
+      let query = 'receipts?order=created_at.desc&limit=200';
+      if (receiptFilter !== 'all') query += `&status=eq.${receiptFilter}`;
+      if (receiptSearch) query += `&or=(receipt_no.ilike.%${receiptSearch}%,customer_name.ilike.%${receiptSearch}%)`;
+      const data = await sbGet(query);
+      setReceiptList(data || []);
+    } catch (e) { console.error(e); }
+    setReceiptLoading(false);
+  };
+
+  const createReceipt = async () => {
+    if (!newReceipt.customer_name || newReceipt.items.length === 0) return showToast('❌ 請填寫客戶名同至少一項服務');
+    try {
+      const res = await fetch('/api/receipts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newReceipt)
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setReceiptList(prev => [data, ...prev]);
+        setShowNewReceipt(false);
+        setNewReceipt({ customer_name: '', customer_phone: '', staff_name: '', items: [], payment_method: '', discount_type: 'none', discount_value: 0, remarks: '' });
+        showToast('✅ 收據已建立：' + data.receipt_no);
+        logChange(`🧾 新增收據 ${data.receipt_no} — ${data.customer_name} $${data.total}`);
+      } else { showToast('❌ ' + (data.error || '建立失敗')); }
+    } catch (e) { showToast('❌ ' + e.message); }
+  };
+
+  const markReceiptPaid = async (receipt) => {
+    try {
+      await sbPatch(`receipts?id=eq.${receipt.id}`, { status: 'paid', paid_at: new Date().toISOString() });
+      setReceiptList(prev => prev.map(r => r.id === receipt.id ? { ...r, status: 'paid', paid_at: new Date().toISOString() } : r));
+      showToast('✅ 已標記為已付');
+      logChange(`💰 收據 ${receipt.receipt_no} 已付清`);
+    } catch (e) { showToast('❌ 更新失敗'); }
+  };
+
+  const sendReceiptWhatsApp = async (receipt) => {
+    setReceiptSending(receipt.id);
+    try {
+      const res = await fetch('/api/send-receipt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          receipt_id: receipt.id,
+          method: 'whatsapp',
+          phone: receipt.customer_phone ? '852' + receipt.customer_phone.replace(/[^0-9]/g, '') : '',
+        })
+      });
+      const data = await res.json();
+      if (data.success && data.wa_link) {
+        window.open(data.wa_link, '_blank');
+        showToast('✅ 已開啟 WhatsApp');
+      } else { showToast('❌ ' + (data.error || '發送失敗')); }
+    } catch (e) { showToast('❌ ' + e.message); }
+    setReceiptSending(null);
+  };
+
+  const printReceipt = async (receipt) => {
+    try {
+      const res = await fetch('/api/receipt-pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ receipt_id: receipt.id })
+      });
+      const data = await res.json();
+      if (data.html) {
+        const w = window.open('', '', 'width=420,height=700');
+        w.document.write(data.html);
+        w.document.close();
+        setTimeout(() => w.print(), 600);
+      }
+    } catch (e) { showToast('❌ 列印失敗'); }
+  };
+
+  const deleteReceipt = async (id) => {
+    if (!window.confirm('確定刪除此收據？')) return;
+    try {
+      await sbDel(`receipts?id=eq.${id}`);
+      setReceiptList(prev => prev.filter(r => r.id !== id));
+      showToast('✅ 已刪除');
+    } catch (e) { showToast('❌ 刪除失敗'); }
+  };
+
+  const addReceiptItem = () => {
+    if (!newReceiptItem.name || !newReceiptItem.price) return showToast('❌ 請填寫項目名同價格');
+    setNewReceipt(prev => ({ ...prev, items: [...prev.items, { ...newReceiptItem }] }));
+    setNewReceiptItem({ name: '', qty: 1, price: 0 });
+  };
+
+  const removeReceiptItem = (idx) => {
+    setNewReceipt(prev => ({ ...prev, items: prev.items.filter((_, i) => i !== idx) }));
+  };
+
+  const receiptSubtotal = useMemo(() => newReceipt.items.reduce((s, i) => s + i.price * i.qty, 0), [newReceipt.items]);
+  const receiptDiscount = useMemo(() => {
+    if (newReceipt.discount_type === 'percent') return Math.round(receiptSubtotal * (newReceipt.discount_value / 100));
+    if (newReceipt.discount_type === 'fixed') return newReceipt.discount_value || 0;
+    return 0;
+  }, [receiptSubtotal, newReceipt.discount_type, newReceipt.discount_value]);
+  const receiptTotal = receiptSubtotal - receiptDiscount;
+
+  const filteredReceipts = useMemo(() => {
+    let r = receiptList;
+    if (receiptFilter !== 'all') r = r.filter(x => x.status === receiptFilter);
+    if (receiptSearch.trim()) {
+      const s = receiptSearch.trim().toLowerCase();
+      r = r.filter(x => (x.receipt_no || '').toLowerCase().includes(s) || (x.customer_name || '').toLowerCase().includes(s) || (x.customer_phone || '').includes(s));
+    }
+    return r;
+  }, [receiptList, receiptFilter, receiptSearch]);
   // ★ 月曆輔助函數
   const getCalendarDays = () => {
     const firstDay = new Date(calYear, calMonth, 1).getDay();
@@ -622,8 +747,9 @@ const allTabs = [
   { key: 'customers', label: '👥 客戶', show: true },
   { key: 'calendar', label: '📅 月曆', show: true },
   { key: 'packages', label: '🎫 套票', show: true },
+  { key: 'receipts', label: '🧾 收據', show: true },
   { key: 'reminders', label: '📱 提醒', show: true },
-  { key: 'reports', label: '📊 報表', show: isOwner }, 
+  { key: 'reports', label: '📊 報表', show: isOwner },
   { key: 'frontend', label: '🎨 前台管理', show: isOwner },
   { key: 'templates', label: '📝 訊息模板', show: isOwner },
   { key: 'hours', label: '🕐 營業時間', show: true },
@@ -1638,6 +1764,227 @@ const allTabs = [
         {tab === 'reports' && (
   <ReportsPanel />
 )}
+       {/* ═══ RECEIPTS TAB ═══ */}
+        {tab === 'receipts' && (
+          <div>
+            {/* Header */}
+            <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap', alignItems: 'center' }}>
+              <input type="text" placeholder="🔍 搜尋單號 / 客戶..." value={receiptSearch} onChange={e => setReceiptSearch(e.target.value)} style={{ flex: 1, minWidth: 180, padding: '10px 14px', border: '1px solid #d0c8bc', borderRadius: 8, fontSize: 14, fontFamily: font }} />
+              <select value={receiptFilter} onChange={e => setReceiptFilter(e.target.value)} style={{ padding: '10px 14px', border: '1px solid #d0c8bc', borderRadius: 8, fontSize: 13, fontFamily: font }}>
+                <option value="all">全部</option>
+                <option value="paid">已付</option>
+                <option value="unpaid">未付</option>
+                <option value="cancelled">已取消</option>
+              </select>
+              <button onClick={fetchReceipts} style={{ padding: '10px 14px', background: '#f5f0eb', border: '1px solid #d0c8bc', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontFamily: font, color: '#5c4a3a' }}>🔄</button>
+              <button onClick={() => setShowNewReceipt(true)} style={{ padding: '10px 18px', background: '#5c4a3a', color: '#fff', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 13, fontFamily: font, fontWeight: 600 }}>+ 新收據</button>
+            </div>
+
+            {/* 快速統計 */}
+            <div style={{ display: 'flex', gap: 10, marginBottom: 16 }}>
+              {[
+                { label: '今日收入', value: `$${receiptList.filter(r => r.status === 'paid' && r.created_at?.startsWith(todayStr)).reduce((s, r) => s + (parseFloat(r.total) || 0), 0)}`, color: '#4CAF50' },
+                { label: '未付款', value: receiptList.filter(r => r.status === 'unpaid').length, color: '#FF9800' },
+                { label: '總收據', value: receiptList.length, color: '#5c4a3a' },
+              ].map((s, i) => (
+                <div key={i} style={{ flex: 1, background: '#fff', padding: '12px 14px', borderRadius: 10, textAlign: 'center', boxShadow: '0 2px 8px rgba(0,0,0,0.04)', borderLeft: `3px solid ${s.color}` }}>
+                  <div style={{ fontSize: 11, color: '#999' }}>{s.label}</div>
+                  <div style={{ fontSize: 20, fontWeight: 700, color: s.color, marginTop: 2 }}>{s.value}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* 新建收據表單 */}
+            {showNewReceipt && (
+              <div style={{ background: '#fff', borderRadius: 14, padding: 24, marginBottom: 16, boxShadow: '0 4px 20px rgba(0,0,0,0.08)', border: '2px solid #FFB74D' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                  <h3 style={{ margin: 0, color: '#E65100', fontSize: 17 }}>🧾 新建收據</h3>
+                  <button onClick={() => setShowNewReceipt(false)} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#999' }}>✕</button>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 16 }}>
+                  <div>
+                    <label style={{ fontSize: 11, color: '#666', marginBottom: 4, display: 'block' }}>客戶名 *</label>
+                    <input value={newReceipt.customer_name} onChange={e => setNewReceipt(p => ({ ...p, customer_name: e.target.value }))} placeholder="陳小姐" style={{ width: '100%', padding: '10px 12px', border: '1px solid #ddd', borderRadius: 8, fontSize: 13, boxSizing: 'border-box', fontFamily: font }} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 11, color: '#666', marginBottom: 4, display: 'block' }}>電話</label>
+                    <input value={newReceipt.customer_phone} onChange={e => setNewReceipt(p => ({ ...p, customer_phone: e.target.value }))} placeholder="91234567" style={{ width: '100%', padding: '10px 12px', border: '1px solid #ddd', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }} />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 11, color: '#666', marginBottom: 4, display: 'block' }}>服務員</label>
+                    <select value={newReceipt.staff_name} onChange={e => setNewReceipt(p => ({ ...p, staff_name: e.target.value }))} style={{ width: '100%', padding: '10px 12px', border: '1px solid #ddd', borderRadius: 8, fontSize: 13, fontFamily: font, boxSizing: 'border-box' }}>
+                      <option value="">選擇</option>
+                      {staffList.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
+                    </select>
+                  </div>
+                </div>
+
+                {/* 項目列表 */}
+                <div style={{ marginBottom: 16 }}>
+                  <label style={{ fontSize: 12, fontWeight: 600, color: '#5c4a3a', marginBottom: 8, display: 'block' }}>📋 服務項目</label>
+                  {newReceipt.items.map((item, idx) => (
+                    <div key={idx} style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '8px 12px', background: '#f9f6f3', borderRadius: 8, marginBottom: 6 }}>
+                      <span style={{ flex: 2, fontSize: 13, fontWeight: 500, color: '#5c4a3a' }}>{item.name}</span>
+                      <span style={{ fontSize: 12, color: '#888' }}>×{item.qty}</span>
+                      <span style={{ fontSize: 14, fontWeight: 700, color: '#5c4a3a' }}>${item.price * item.qty}</span>
+                      <button onClick={() => removeReceiptItem(idx)} style={{ padding: '4px 8px', border: 'none', background: '#ffebee', color: '#c62828', borderRadius: 4, cursor: 'pointer', fontSize: 11 }}>✕</button>
+                    </div>
+                  ))}
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8 }}>
+                    <input value={newReceiptItem.name} onChange={e => setNewReceiptItem(p => ({ ...p, name: e.target.value }))} placeholder="服務名稱" style={{ flex: 2, padding: '8px 10px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13, fontFamily: font }} />
+                    <input type="number" value={newReceiptItem.qty} onChange={e => setNewReceiptItem(p => ({ ...p, qty: Math.max(1, +e.target.value) }))} style={{ width: 50, padding: '8px 6px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13, textAlign: 'center' }} />
+                    <input type="number" value={newReceiptItem.price || ''} onChange={e => setNewReceiptItem(p => ({ ...p, price: +e.target.value }))} placeholder="$" style={{ width: 80, padding: '8px 10px', border: '1px solid #ddd', borderRadius: 6, fontSize: 13 }} />
+                    <button onClick={addReceiptItem} style={{ padding: '8px 14px', border: 'none', background: '#5c4a3a', color: '#fff', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontFamily: font, fontWeight: 600 }}>+</button>
+                  </div>
+                  {/* 快速選擇服務 */}
+                  {svcList.length > 0 && (
+                    <div style={{ marginTop: 10 }}>
+                      <div style={{ fontSize: 11, color: '#999', marginBottom: 6 }}>⚡ 快速加入：</div>
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                        {svcList.filter(s => s.is_active).slice(0, 8).map(s => (
+                          <button key={s.id} onClick={() => { setNewReceipt(prev => ({ ...prev, items: [...prev.items, { name: s.name, qty: 1, price: s.base_price }] })); }} style={{ padding: '5px 10px', borderRadius: 6, border: '1px solid #e8e0d8', background: '#faf6f0', color: '#5c4a3a', cursor: 'pointer', fontSize: 11, fontFamily: font }}>{s.name} ${s.base_price}</button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* 折扣 + 付款方式 */}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 16 }}>
+                  <div>
+                    <label style={{ fontSize: 11, color: '#666', marginBottom: 4, display: 'block' }}>折扣類型</label>
+                    <select value={newReceipt.discount_type} onChange={e => setNewReceipt(p => ({ ...p, discount_type: e.target.value }))} style={{ width: '100%', padding: '10px 12px', border: '1px solid #ddd', borderRadius: 8, fontSize: 13, fontFamily: font, boxSizing: 'border-box' }}>
+                      <option value="none">無折扣</option>
+                      <option value="percent">百分比 %</option>
+                      <option value="fixed">固定金額 $</option>
+                    </select>
+                  </div>
+                  {newReceipt.discount_type !== 'none' && (
+                    <div>
+                      <label style={{ fontSize: 11, color: '#666', marginBottom: 4, display: 'block' }}>折扣值</label>
+                      <input type="number" value={newReceipt.discount_value || ''} onChange={e => setNewReceipt(p => ({ ...p, discount_value: +e.target.value }))} placeholder={newReceipt.discount_type === 'percent' ? '10' : '50'} style={{ width: '100%', padding: '10px 12px', border: '1px solid #ddd', borderRadius: 8, fontSize: 13, boxSizing: 'border-box' }} />
+                    </div>
+                  )}
+                  <div>
+                    <label style={{ fontSize: 11, color: '#666', marginBottom: 4, display: 'block' }}>付款方式</label>
+                    <select value={newReceipt.payment_method} onChange={e => setNewReceipt(p => ({ ...p, payment_method: e.target.value }))} style={{ width: '100%', padding: '10px 12px', border: '1px solid #ddd', borderRadius: 8, fontSize: 13, fontFamily: font, boxSizing: 'border-box' }}>
+                      <option value="">— 選擇 —</option>
+                      <option value="現金">現金</option>
+                      <option value="轉數快">轉數快</option>
+                      <option value="Payme">Payme</option>
+                      <option value="信用卡">信用卡</option>
+                      <option value="八達通">八達通</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* 備註 */}
+                <div style={{ marginBottom: 16 }}>
+                  <label style={{ fontSize: 11, color: '#666', marginBottom: 4, display: 'block' }}>備註</label>
+                  <input value={newReceipt.remarks} onChange={e => setNewReceipt(p => ({ ...p, remarks: e.target.value }))} placeholder="可選..." style={{ width: '100%', padding: '10px 12px', border: '1px solid #ddd', borderRadius: 8, fontSize: 13, boxSizing: 'border-box', fontFamily: font }} />
+                </div>
+
+                {/* 金額總結 */}
+                <div style={{ padding: '14px 18px', background: '#f9f6f3', borderRadius: 10, marginBottom: 16 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: '#888', marginBottom: 6 }}>
+                    <span>小計</span><span>${receiptSubtotal}</span>
+                  </div>
+                  {receiptDiscount > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: '#c06060', marginBottom: 6 }}>
+                      <span>折扣</span><span>-${receiptDiscount}</span>
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 20, fontWeight: 700, color: '#5c4a3a', paddingTop: 8, borderTop: '2px solid #e8e0d8' }}>
+                    <span>總計</span><span>${receiptTotal}</span>
+                  </div>
+                </div>
+
+                {/* 動作按鈕 */}
+                <div style={{ display: 'flex', gap: 10 }}>
+                  <button onClick={() => { setNewReceipt(p => ({ ...p, status: 'paid' })); createReceipt(); }} disabled={newReceipt.items.length === 0} style={{ padding: '12px 24px', borderRadius: 8, border: 'none', background: newReceipt.items.length > 0 ? '#4CAF50' : '#ddd', color: '#fff', cursor: newReceipt.items.length > 0 ? 'pointer' : 'not-allowed', fontSize: 14, fontFamily: font, fontWeight: 600 }}>✅ 建立（已付）</button>
+                  <button onClick={() => { setNewReceipt(p => ({ ...p, status: 'unpaid' })); createReceipt(); }} disabled={newReceipt.items.length === 0} style={{ padding: '12px 24px', borderRadius: 8, border: '1px solid #FFB74D', background: '#FFF3E0', color: '#E65100', cursor: newReceipt.items.length > 0 ? 'pointer' : 'not-allowed', fontSize: 14, fontFamily: font, fontWeight: 600 }}>📋 建立（未付）</button>
+                  <button onClick={() => setShowNewReceipt(false)} style={{ padding: '12px 16px', borderRadius: 8, border: '1px solid #ccc', background: '#fff', color: '#666', cursor: 'pointer', fontSize: 14, fontFamily: font }}>取消</button>
+                </div>
+              </div>
+            )}
+
+            {/* 收據列表 */}
+            <div style={{ background: '#fff', borderRadius: 14, overflow: 'hidden', boxShadow: '0 2px 10px rgba(0,0,0,0.06)' }}>
+              <div style={{ padding: '14px 16px', borderBottom: '1px solid #eee', fontSize: 15, fontWeight: 600, color: '#5c4a3a' }}>🧾 收據列表（{filteredReceipts.length}）</div>
+              {receiptLoading ? <div style={{ padding: 40, textAlign: 'center', color: '#999' }}>載入中...</div> : filteredReceipts.length === 0 ? <div style={{ padding: 40, textAlign: 'center', color: '#999' }}>暫無收據</div> : (
+                isMobile ? (
+                  <div style={{ padding: '12px 16px' }}>
+                    {filteredReceipts.map(r => (
+                      <div key={r.id} style={{ background: r.status === 'paid' ? '#f0fdf4' : '#fffbeb', borderRadius: 10, padding: 14, marginBottom: 10, border: '1px solid #e8e0d8' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+                          <div>
+                            <div style={{ fontSize: 11, color: '#999' }}>{r.receipt_no}</div>
+                            <div style={{ fontWeight: 700, fontSize: 15, color: '#5c4a3a' }}>{r.customer_name}</div>
+                          </div>
+                          <span style={{ padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 600, background: r.status === 'paid' ? '#E8F5E9' : r.status === 'cancelled' ? '#FFEBEE' : '#FFF3E0', color: r.status === 'paid' ? '#2e7d32' : r.status === 'cancelled' ? '#c62828' : '#E65100' }}>{r.status === 'paid' ? '已付' : r.status === 'cancelled' ? '已取消' : '未付'}</span>
+                        </div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                          <span style={{ fontSize: 12, color: '#888' }}>{new Date(r.created_at).toLocaleDateString('zh-HK')} · {r.staff_name || ''}</span>
+                          <span style={{ fontSize: 20, fontWeight: 700, color: '#5c4a3a' }}>${r.total}</span>
+                        </div>
+                        <div style={{ display: 'flex', gap: 6 }}>
+                          {r.status === 'unpaid' && <button onClick={() => markReceiptPaid(r)} style={{ padding: '6px 12px', borderRadius: 6, border: 'none', background: '#4CAF50', color: '#fff', cursor: 'pointer', fontSize: 11, fontFamily: font, fontWeight: 600 }}>💰 收款</button>}
+                          <button onClick={() => sendReceiptWhatsApp(r)} disabled={receiptSending === r.id} style={{ padding: '6px 12px', borderRadius: 6, border: 'none', background: '#25D366', color: '#fff', cursor: 'pointer', fontSize: 11, fontFamily: font }}>📱 WA</button>
+                          <button onClick={() => printReceipt(r)} style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid #ddd', background: '#fff', color: '#5c4a3a', cursor: 'pointer', fontSize: 11, fontFamily: font }}>🖨️</button>
+                          <button onClick={() => deleteReceipt(r.id)} style={{ padding: '6px 8px', borderRadius: 6, border: '1px solid #ffcdd2', background: '#ffebee', color: '#c62828', cursor: 'pointer', fontSize: 11 }}>🗑️</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{ overflowX: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                      <thead>
+                        <tr style={{ background: '#f9f6f3' }}>
+                          {['單號', '日期', '客戶', '服務員', '項目', '金額', '狀態', '操作'].map(h => (
+                            <th key={h} style={{ padding: '12px 10px', textAlign: 'left', color: '#5c4a3a', fontWeight: 600, fontSize: 12, whiteSpace: 'nowrap' }}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredReceipts.map(r => (
+                          <tr key={r.id} style={{ borderBottom: '1px solid #f0ebe3', background: r.status === 'paid' ? '#fafff8' : r.status === 'unpaid' ? '#fffcf5' : '#fff' }}>
+                            <td style={{ padding: '10px', fontSize: 11, color: '#999', whiteSpace: 'nowrap' }}>{r.receipt_no}</td>
+                            <td style={{ padding: '10px', fontSize: 12 }}>{new Date(r.created_at).toLocaleDateString('zh-HK')}</td>
+                            <td style={{ padding: '10px', fontWeight: 600 }}>{r.customer_name}{r.customer_phone && <div style={{ fontSize: 11, color: '#888' }}>{r.customer_phone}</div>}</td>
+                            <td style={{ padding: '10px', color: '#888' }}>{r.staff_name || '-'}</td>
+                            <td style={{ padding: '10px', maxWidth: 180 }}>
+                              {(r.items || []).map((item, i) => (
+                                <span key={i} style={{ fontSize: 11, color: '#666' }}>{item.name}{i < r.items.length - 1 ? '、' : ''}</span>
+                              ))}
+                            </td>
+                            <td style={{ padding: '10px', fontWeight: 700, fontSize: 15, color: '#5c4a3a' }}>${r.total}</td>
+                            <td style={{ padding: '10px' }}>
+                              <span style={{ padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 600, background: r.status === 'paid' ? '#E8F5E9' : r.status === 'cancelled' ? '#FFEBEE' : '#FFF3E0', color: r.status === 'paid' ? '#2e7d32' : r.status === 'cancelled' ? '#c62828' : '#E65100' }}>
+                                {r.status === 'paid' ? '已付' : r.status === 'cancelled' ? '已取消' : '未付'}
+                              </span>
+                              {r.payment_method && <div style={{ fontSize: 10, color: '#999', marginTop: 2 }}>💳 {r.payment_method}</div>}
+                              {r.sent_via && <div style={{ fontSize: 10, color: '#4CAF50', marginTop: 2 }}>📤 {r.sent_via}</div>}
+                            </td>
+                            <td style={{ padding: '10px', whiteSpace: 'nowrap' }}>
+                              <div style={{ display: 'flex', gap: 4 }}>
+                                {r.status === 'unpaid' && <button onClick={() => markReceiptPaid(r)} title="標記已付" style={{ padding: '5px 9px', background: '#E8F5E9', border: '1px solid #A5D6A7', borderRadius: 6, cursor: 'pointer', fontSize: 13, lineHeight: 1 }}>💰</button>}
+                                <button onClick={() => sendReceiptWhatsApp(r)} disabled={receiptSending === r.id} title="WhatsApp 發送" style={{ padding: '5px 9px', background: '#e8f8e8', border: '1px solid #25D366', borderRadius: 6, cursor: 'pointer', fontSize: 13, lineHeight: 1, opacity: receiptSending === r.id ? 0.5 : 1 }}>📱</button>
+                                <button onClick={() => printReceipt(r)} title="列印" style={{ padding: '5px 9px', background: '#f5f0eb', border: '1px solid #d0c8bc', borderRadius: 6, cursor: 'pointer', fontSize: 13, lineHeight: 1 }}>🖨️</button>
+                                <button onClick={() => deleteReceipt(r.id)} title="刪除" style={{ padding: '5px 9px', background: '#ffebee', border: '1px solid #ffcdd2', borderRadius: 6, cursor: 'pointer', fontSize: 13, lineHeight: 1 }}>🗑️</button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )
+              )}
+            </div>
+          </div>
+        )}
         {tab === 'templates' && (
           <div style={{ background: '#fff', borderRadius: 14, padding: 20, margin: '0 auto', maxWidth: 800, boxShadow: '0 2px 12px rgba(0,0,0,0.08)' }}>
             <h3 style={{ margin: '0 0 16px', color: '#5c4a3a', fontSize: 18 }}>📝 WhatsApp 訊息模板</h3>
