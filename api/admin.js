@@ -531,7 +531,119 @@ export default async function handler(req, res) {
         updated,
       });
     }
+/* ══════════════════════════════════════
+   收據相關
+   ══════════════════════════════════════ */
 
+if (action === 'create-receipt') {
+  const { customer_id, customer_name, customer_phone, staff_name, items, subtotal, discount, total, payment_method, remarks } = payload;
+  
+  // 生成收據編號
+  const now = new Date();
+  const receipt_no = 'R' + now.getFullYear().toString().slice(2) + 
+    String(now.getMonth()+1).padStart(2,'0') + 
+    String(now.getDate()).padStart(2,'0') + '-' + 
+    String(now.getHours()).padStart(2,'0') + 
+    String(now.getMinutes()).padStart(2,'0') + 
+    String(now.getSeconds()).padStart(2,'0');
+
+  const { data, error } = await supabase
+    .from('receipts')
+    .insert([{
+      receipt_no,
+      customer_id: customer_id || null,
+      customer_name,
+      customer_phone,
+      staff_name,
+      items: items || [],
+      subtotal: subtotal || 0,
+      discount: discount || 0,
+      total: total || 0,
+      payment_method,
+      remarks,
+      status: 'unpaid',
+      created_at: now.toISOString(),
+    }])
+    .select()
+    .single();
+
+  if (error) return res.status(500).json({ error: error.message });
+
+  await supabase.from('audit_logs').insert([{
+    action: 'receipt_created',
+    target_type: 'receipt',
+    target_id: data.id,
+    details: { receipt_no, total, customer_name },
+  }]).catch(() => {});
+
+  return res.status(200).json({ success: true, receipt: data });
+}
+
+if (action === 'get-receipts') {
+  let query = supabase
+    .from('receipts')
+    .select('*')
+    .order('created_at', { ascending: false });
+  
+  if (payload.customer_phone) query = query.eq('customer_phone', payload.customer_phone);
+  if (payload.status) query = query.eq('status', payload.status);
+  if (payload.limit) query = query.limit(payload.limit);
+  else query = query.limit(100);
+
+  const { data, error } = await query;
+  if (error) return res.status(500).json({ error: error.message });
+  return res.status(200).json({ data: data || [] });
+}
+
+if (action === 'update-receipt-status') {
+  const { receiptId, status: rStatus, payment_method: pMethod } = payload;
+  if (!receiptId) return res.status(400).json({ error: 'Missing receiptId' });
+  
+  const updateData = { status: rStatus };
+  if (pMethod) updateData.payment_method = pMethod;
+  if (rStatus === 'paid') updateData.paid_at = new Date().toISOString();
+
+  const { data, error } = await supabase
+    .from('receipts')
+    .update(updateData)
+    .eq('id', receiptId)
+    .select()
+    .single();
+
+  if (error) return res.status(500).json({ error: error.message });
+  return res.status(200).json({ success: true, receipt: data });
+}
+    /* ══════════════════════════════════════
+   營業時間
+   ══════════════════════════════════════ */
+
+if (action === 'get-business-hours') {
+  const { data, error } = await supabase
+    .from('business_hours')
+    .select('*')
+    .order('day_of_week', { ascending: true });
+  if (error) return res.status(500).json({ error: error.message });
+  return res.status(200).json({ data: data || [] });
+}
+
+if (action === 'save-business-hours') {
+  const { hours } = payload;
+  if (!hours || !Array.isArray(hours)) return res.status(400).json({ error: 'Missing hours array' });
+  
+  for (const h of hours) {
+    await supabase
+      .from('business_hours')
+      .upsert({
+        day_of_week: h.day_of_week,
+        day_name: h.day_name,
+        is_open: h.is_open,
+        open_time: h.open_time,
+        close_time: h.close_time,
+      }, { onConflict: 'day_of_week' });
+  }
+  
+  return res.status(200).json({ success: true });
+}
     /* ══════════════════════════════════════
        統計 / 審計
        ══════════════════════════════════════ */
