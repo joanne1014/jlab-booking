@@ -1000,9 +1000,22 @@ const allTabs = [
             </div>
           )}
 
-          <div style={{ display: 'flex', gap: 0, marginBottom: 16 }}>
-            {[['list', '📋 列表模式'], ['schedule',
-          </div>
+<div style={{ display: 'flex', gap: 0, marginBottom: 16 }}>
+  {[['list', '📋 列表模式'], ['schedule', '📅 日程表']].map(([key, label]) => (
+    <button key={key} onClick={() => setViewMode(key)} style={{
+      padding: '8px 16px',
+      border: '1px solid #ddd',
+      background: viewMode === key ? '#5c4a3a' : '#fff',
+      color: viewMode === key ? '#fff' : '#333',
+      cursor: 'pointer',
+      fontSize: 14,
+      fontFamily: font,
+      borderRadius: key === 'list' ? '8px 0 0 8px' : '0 8px 8px 0',
+    }}>
+      {label}
+    </button>
+  ))}
+</div>
 
           {viewMode === 'list' && (<>
             <div style={{ background: '#fff', padding: '14px 16px', borderRadius: 12, marginBottom: 14, boxShadow: '0 2px 10px rgba(0,0,0,0.05)' }}>
