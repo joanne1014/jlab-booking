@@ -225,7 +225,8 @@ const [previewUrl, setPreviewUrl] = useState('https://jlab-booking.vercel.app/bo
   const bookingCountRef = useRef(0);
   const showToast = (m) => { setToast(m); setTimeout(() => setToast(''), 3000); };
 
- useEffect(() => {
+// ═══ useEffect 1: onAuthExpired ═══
+useEffect(() => {
   let expired = false;
   onAuthExpired = () => {
     if (expired) return;
@@ -233,71 +234,70 @@ const [previewUrl, setPreviewUrl] = useState('https://jlab-booking.vercel.app/bo
     setAuth(false);
     showToast('⚠️ 登入已過期，請重新登入');
   };
+  return () => { onAuthExpired = null; };
+}, []);
 
-  useEffect(() => {
+// ═══ useEffect 2: 跨日檢查 ═══
+useEffect(() => {
+  const checkDate = () => {
+    const now = getLocalDate();
+    setTodayStr(prev => {
+      if (prev !== now) { showToast('📅 日期已跨日，自動刷新中...'); fetchBookings(); return now; }
+      return prev;
+    });
+  };
+  const id = setInterval(checkDate, 60000);
+  return () => clearInterval(id);
+}, []);
 
-  useEffect(() => {
-    const checkDate = () => {
-      const now = getLocalDate();
-      setTodayStr(prev => {
-        if (prev !== now) { showToast('📅 日期已跨日，自動刷新中...'); fetchBookings(); return now; }
-        return prev;
-      });
-    };
-    const id = setInterval(checkDate, 60000);
-    return () => clearInterval(id);
-  }, []);
+// ═══ useEffect 3: 自動刷新 ═══
+useEffect(() => {
+  if (!auth || !autoRefresh) return;
+  const id = setInterval(() => fetchBookings(), 30000);
+  return () => clearInterval(id);
+}, [auth, autoRefresh]);
 
-  useEffect(() => {
-    if (!auth || !autoRefresh) return;
-    const id = setInterval(() => fetchBookings(), 30000);
-    return () => clearInterval(id);
-  }, [auth, autoRefresh]);
+// ═══ useEffect 4: Realtime ═══
+useEffect(() => {
+  if (!auth || !realtimeClient) return;
+  const channel = realtimeClient
+    .channel('bookings-realtime')
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings' }, (payload) => {
+      if (payload.eventType === 'INSERT') {
+        setAllBookings(prev => [payload.new, ...prev]);
+        showToast(`🔔 新預約：${payload.new.customer_name} — ${payload.new.booking_date} ${payload.new.booking_time}`);
+      }
+      if (payload.eventType === 'UPDATE') {
+        setAllBookings(prev => prev.map(b => b.id === payload.new.id ? payload.new : b));
+      }
+      if (payload.eventType === 'DELETE') {
+        setAllBookings(prev => prev.filter(b => b.id !== payload.old.id));
+      }
+    })
+    .subscribe();
+  return () => { realtimeClient.removeChannel(channel); };
+}, [auth]);
 
-  useEffect(() => {
-    if (!auth || !realtimeClient) return;
-    const channel = realtimeClient
-      .channel('bookings-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'bookings' }, (payload) => {
-        if (payload.eventType === 'INSERT') {
-          setAllBookings(prev => [payload.new, ...prev]);
-          showToast(`🔔 新預約：${payload.new.customer_name} — ${payload.new.booking_date} ${payload.new.booking_time}`);
-        }
-        if (payload.eventType === 'UPDATE') {
-          setAllBookings(prev => prev.map(b => b.id === payload.new.id ? payload.new : b));
-        }
-        if (payload.eventType === 'DELETE') {
-          setAllBookings(prev => prev.filter(b => b.id !== payload.old.id));
-        }
-      })
-      .subscribe();
-    return () => { realtimeClient.removeChannel(channel); };
-  }, [auth]);
+// ═══ useEffect 5: Service Worker ═══
+useEffect(() => {
+  if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+  }
+}, []);
 
-  useEffect(() => {
-    if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js').catch(() => {});
-    }
-  }, []);
-
-  const toDS = (y, m, d) => `${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-  const navBtn = { padding: '8px 16px', background: '#f5f0eb', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 16, color: '#5c4a3a', fontFamily: font };
-  const smallBtn = (bg, co, bd) => ({ padding: '6px 14px', borderRadius: 6, border: bd ? `1px solid ${bd}` : 'none', background: bg, color: co, cursor: 'pointer', fontSize: 12, fontFamily: font });
-  const headerBtn = { padding: '8px 16px', background: 'transparent', border: '1px solid #ccc', borderRadius: 6, cursor: 'pointer', color: '#666', fontFamily: font, fontSize: 13, height: 38, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', whiteSpace: 'nowrap' };
-
-  useEffect(() => { const h = () => setIsMobile(window.innerWidth < 768); h(); window.addEventListener('resize', h); return () => window.removeEventListener('resize', h); }, []);
-
-  useEffect(() => {
-    const hash = window.location.hash.substring(1);
-    if (!hash) return;
-    const params = new URLSearchParams(hash);
-    const accessToken = params.get('access_token');
-    const type = params.get('type');
-    if (accessToken && type === 'recovery') {
-      setRecoveryToken(accessToken); setShowResetForm(true);
-      window.history.replaceState(null, '', window.location.pathname + window.location.search);
-    }
-  }, []);
+// ═══ useEffect 6: Recovery URL ═══
+useEffect(() => {
+  const hash = window.location.hash.substring(1);
+  if (!hash) return;
+  const params = new URLSearchParams(hash);
+  const accessToken = params.get('access_token');
+  const type = params.get('type');
+  if (accessToken && type === 'recovery') {
+    setRecoveryToken(accessToken);
+    setShowResetForm(true);
+    window.history.replaceState(null, '', window.location.pathname + window.location.search);
+  }
+}, []);
 
   return () => { onAuthExpired = null; };
 }, []);
