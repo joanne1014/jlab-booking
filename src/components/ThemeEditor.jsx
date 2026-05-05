@@ -1,15 +1,14 @@
-// components/ThemeEditor.jsx
-import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+// src/components/ThemeEditor.jsx
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Check, Upload, Trash2, Eye, EyeOff, RotateCcw, Save,
-  Palette, Type, Image, Settings, Diamond, Monitor,
-  Sun, Moon, ChevronDown, ChevronUp, X, ExternalLink,
-  Smartphone, Loader2
+  Palette, Type, Image, Settings, Diamond,
+  ChevronDown, ChevronUp, Smartphone, Loader2
 } from 'lucide-react';
 
 // ═══════════════════════════════════════════════════════
-// themeConfig（同你原本一樣，唔改）
+// Theme Configuration Data
 // ═══════════════════════════════════════════════════════
 
 const PG = [
@@ -90,6 +89,10 @@ function texCss(id, opacity = 0.7) {
   }
 }
 
+// ═══════════════════════════════════════════════════════
+// Build Theme Helper
+// ═══════════════════════════════════════════════════════
+
 function buildTheme(s) {
   if (!s) s = {};
   const palId = s.palette_id || 'rosemorn';
@@ -98,7 +101,10 @@ function buildTheme(s) {
   const dark = s.dark_mode || false;
 
   let pal = null;
-  for (const g of PG) { const found = g.items.find(p => p.id === palId); if (found) { pal = found; break; } }
+  for (const g of PG) {
+    const found = g.items.find(p => p.id === palId);
+    if (found) { pal = found; break; }
+  }
   if (!pal) pal = PG[0].items[0];
   const c = dark ? pal.d : pal.l;
 
@@ -151,7 +157,7 @@ function buildTheme(s) {
 }
 
 // ═══════════════════════════════════════════════════════
-// 子組件（同你原本一樣）
+// Sub-components
 // ═══════════════════════════════════════════════════════
 
 const Sec = ({ title, icon, children, th, defaultOpen = true }) => {
@@ -188,9 +194,9 @@ const Slider = ({ label, value, min, max, step, onChange, suffix = '', th }) => 
     <input type="range" min={min} max={max} step={step} value={value}
       onChange={e => onChange(parseFloat(e.target.value))}
       style={{
-        width: '100%', height: 5, appearance: 'none',
+        width: '100%', height: 5, appearance: 'none', WebkitAppearance: 'none',
         background: `linear-gradient(90deg, ${th.pri} ${((value - min) / (max - min)) * 100}%, ${th.brd} ${((value - min) / (max - min)) * 100}%)`,
-        borderRadius: 3, outline: 'none', cursor: 'pointer'
+        borderRadius: 3, outline: 'none', cursor: 'pointer',
       }} />
   </div>
 );
@@ -237,7 +243,7 @@ const ColorInput = ({ label, value, onChange, placeholder, th }) => (
 );
 
 // ═══════════════════════════════════════════════════════
-// 主組件
+// Main Component
 // ═══════════════════════════════════════════════════════
 
 export default function ThemeEditor() {
@@ -264,23 +270,17 @@ export default function ThemeEditor() {
   const [density, setDensity] = useState('normal');
   const [letterSpc, setLetterSpc] = useState('normal');
   const [dividerStyle, setDividerStyle] = useState('line');
-
-  // Logo
   const [logoUrl, setLogoUrl] = useState('');
   const [logoShape, setLogoShape] = useState('circle');
   const [logoSize, setLogoSize] = useState('md');
-
-  // 自訂字體
   const [customFontUrl, setCustomFontUrl] = useState('');
   const [customFontFamily, setCustomFontFamily] = useState('');
-
-  // 品牌
   const [brandName, setBrandName] = useState('J.LAB');
   const [brandSub, setBrandSub] = useState('LASH & BEAUTY STUDIO');
   const [whatsapp, setWhatsapp] = useState('');
   const [notifyEmail, setNotifyEmail] = useState('');
 
-  // UI
+  // UI state
   const [tab, setTab] = useState('palette');
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState('');
@@ -291,11 +291,10 @@ export default function ThemeEditor() {
   const [uploadTarget, setUploadTarget] = useState('');
   const [loading, setLoading] = useState(true);
 
-  const iframeRef = useRef(null);
   const fileInputRef = useRef(null);
 
   // ══════════════════════════════════════════════
-  // ★ 新增：開頁自動載入已儲存設定
+  // Load settings on mount
   // ══════════════════════════════════════════════
   useEffect(() => {
     loadSettings();
@@ -312,7 +311,6 @@ export default function ThemeEditor() {
       const data = await res.json();
       const s = data.settings;
       if (s) {
-        // 逐個設定（有值先 set，避免 undefined 覆蓋預設值）
         if (s.palette_id) sPid(s.palette_id);
         if (s.font_id) sFid(s.font_id);
         if (s.radius_id) sRid(s.radius_id);
@@ -351,7 +349,7 @@ export default function ThemeEditor() {
     setLoading(false);
   };
 
-  // ═══ Build theme ═══
+  // ═══ Build theme for editor UI ═══
   const currentSettings = useMemo(() => ({
     palette_id: pid, font_id: fid, radius_id: rid, dark_mode: dk, card_opacity: op,
     custom_primary: customPri, custom_secondary: customSec, custom_tertiary: customTer,
@@ -367,63 +365,78 @@ export default function ThemeEditor() {
 
   const th = useMemo(() => buildTheme(currentSettings), [currentSettings]);
 
-  // 發送 preview 訊息到 iframe
-  useEffect(() => {
-    if (iframeRef.current && iframeRef.current.contentWindow) {
-      iframeRef.current.contentWindow.postMessage({ type: 'theme-preview', settings: currentSettings }, '*');
-    }
-  }, [currentSettings]);
-
   // ══════════════════════════════════════════════
-  // ★ 修改：真正儲存到 Supabase
+  // Save to Supabase via API
   // ══════════════════════════════════════════════
   const handleSave = async () => {
     setSaving(true);
     setSaveMsg('');
     try {
+      const payload = {
+        action: 'update-frontend-settings',
+        palette_id: pid,
+        font_id: fid,
+        radius_id: rid,
+        dark_mode: dk,
+        card_opacity: op,
+        custom_primary: customPri,
+        custom_secondary: customSec,
+        custom_tertiary: customTer,
+        hue_shift: hueShift,
+        saturation_adj: satAdj,
+        brightness_adj: brightAdj,
+        bg_texture: bgTex,
+        bg_texture_opacity: bgTexOp,
+        bg_image: bgImg,
+        bg_image_opacity: bgImgOp,
+        bg_image_blur: bgImgBlur,
+        glass_card: glassCard,
+        btn_style: btnStyle,
+        shadow_depth: shadowDepth,
+        density: density,
+        letter_spacing: letterSpc,
+        divider_style: dividerStyle,
+        logo_url: logoUrl,
+        logo_shape: logoShape,
+        logo_size: logoSize,
+        custom_font_url: customFontUrl,
+        custom_font_family: customFontFamily,
+        brand_name: brandName,
+        brand_subtitle: brandSub,
+        whatsapp: whatsapp,
+        notify_email: notifyEmail,
+      };
+
       const res = await fetch('/api/booking', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          action: 'update-frontend-settings',
-          palette_id: pid,
-          font_id: fid,
-          radius_id: rid,
-          dark_mode: dk,
-          card_opacity: op,
-          custom_primary: customPri,
-          custom_secondary: customSec,
-          custom_tertiary: customTer,
-          hue_shift: hueShift,
-          saturation_adj: satAdj,
-          brightness_adj: brightAdj,
-          bg_texture: bgTex,
-          bg_texture_opacity: bgTexOp,
-          bg_image: bgImg,
-          bg_image_opacity: bgImgOp,
-          bg_image_blur: bgImgBlur,
-          glass_card: glassCard,
-          btn_style: btnStyle,
-          shadow_depth: shadowDepth,
-          density: density,
-          letter_spacing: letterSpc,
-          divider_style: dividerStyle,
-          logo_url: logoUrl,
-          logo_shape: logoShape,
-          logo_size: logoSize,
-          custom_font_url: customFontUrl,
-          custom_font_family: customFontFamily,
-          brand_name: brandName,
-          brand_subtitle: brandSub,
-          whatsapp: whatsapp,
-          notify_email: notifyEmail,
-        }),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
+
       if (data.error) {
         setSaveMsg('❌ 儲存失敗: ' + data.error);
       } else {
-        setSaveMsg('✅ 主題已儲存');
+        // 同步更新 receipt_template（收據風格都用同一套配色）
+        try {
+          await fetch('/api/receipts', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              action: 'update-template',
+              palette: pid,
+              font: fid,
+              layout: 'classic',
+              texture: bgTex,
+              shop_name: brandName,
+              logo_url: logoUrl,
+            }),
+          });
+        } catch (e) {
+          // 收據 template sync 失敗唔影響主流程
+          console.warn('Receipt template sync failed:', e);
+        }
+        setSaveMsg('✅ 主題已儲存並套用');
       }
     } catch (err) {
       setSaveMsg('❌ 儲存失敗: ' + err.message);
@@ -434,7 +447,7 @@ export default function ThemeEditor() {
 
   // ═══ Reset ═══
   const handleReset = () => {
-    if (!confirm('確定要重設所有主題設定？')) return;
+    if (!window.confirm('確定要重設所有主題設定？')) return;
     sPid('rosemorn'); sFid('corm'); sRid('sm'); sDk(false); sOp(0.9);
     sCustomPri(''); sCustomSec(''); sCustomTer('');
     setHueShift(0); setSatAdj(100); setBrightAdj(0);
@@ -444,11 +457,10 @@ export default function ThemeEditor() {
     setLogoUrl(''); setLogoShape('circle'); setLogoSize('md');
     setCustomFontUrl(''); setCustomFontFamily('');
     setBrandName('J.LAB'); setBrandSub('LASH & BEAUTY STUDIO');
+    setWhatsapp(''); setNotifyEmail('');
   };
 
-  // ══════════════════════════════════════════════
-  // ★ 修改：真正上傳到 Supabase Storage
-  // ══════════════════════════════════════════════
+  // ═══ Upload ═══
   const handleUpload = (target) => {
     setUploadTarget(target);
     fileInputRef.current?.click();
@@ -458,19 +470,18 @@ export default function ThemeEditor() {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // 驗證
     if (!file.type.startsWith('image/')) {
-      alert('請選擇圖片檔案（JPG、PNG、SVG）');
+      window.alert('請選擇圖片檔案（JPG、PNG、SVG）');
       return;
     }
     if (file.size > 5 * 1024 * 1024) {
-      alert('檔案太大，最大 5MB');
+      window.alert('檔案太大，最大 5MB');
       return;
     }
 
     setUploading(true);
 
-    // 先做本地預覽（立即顯示）
+    // 本地預覽
     const reader = new FileReader();
     reader.onload = () => {
       if (uploadTarget === 'bgImg') sBgImg(reader.result);
@@ -492,22 +503,18 @@ export default function ThemeEditor() {
         method: 'POST',
         body: fd,
       });
-
       const data = await res.json();
 
       if (data.url) {
-        // 用真正嘅 Supabase URL 取代本地 DataURL
         if (uploadTarget === 'bgImg') sBgImg(data.url);
         if (uploadTarget === 'logo') setLogoUrl(data.url);
-        console.log('✅ 上傳成功:', data.url);
       } else {
-        alert('上傳失敗: ' + (data.error || '未知錯誤'));
-        // 上傳失敗就清除本地預覽
+        window.alert('上傳失敗: ' + (data.error || '未知錯誤'));
         if (uploadTarget === 'bgImg') sBgImg('');
         if (uploadTarget === 'logo') setLogoUrl('');
       }
     } catch (err) {
-      alert('上傳失敗: ' + err.message);
+      window.alert('上傳失敗: ' + err.message);
       if (uploadTarget === 'bgImg') sBgImg('');
       if (uploadTarget === 'logo') setLogoUrl('');
     }
@@ -525,14 +532,10 @@ export default function ThemeEditor() {
     { id: 'brand', icon: <Diamond size={14} />, label: '品牌' },
   ];
 
-  // ═══ Loading 狀態 ═══
+  // ═══ Loading ═══
   if (loading) {
     return (
-      <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        height: '100vh', background: '#f8f7f6',
-        fontFamily: '-apple-system, sans-serif',
-      }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', minHeight: 400, fontFamily: '-apple-system, sans-serif' }}>
         <div style={{ textAlign: 'center' }}>
           <Loader2 size={28} color="#9e6b5a" style={{ animation: 'spin 1s linear infinite' }} />
           <div style={{ marginTop: 12, fontSize: 13, color: '#888' }}>載入主題設定...</div>
@@ -546,12 +549,12 @@ export default function ThemeEditor() {
   // RENDER
   // ═══════════════════════════════════════
   return (
-    <div style={{ display: 'flex', gap: 0, height: '100vh', fontFamily: '-apple-system, sans-serif', background: '#f8f7f6', overflow: 'hidden' }}>
+    <div style={{ display: 'flex', gap: 0, height: '100%', minHeight: '80vh', fontFamily: '-apple-system, sans-serif', background: '#f8f7f6', overflow: 'hidden', borderRadius: 12 }}>
       {/* Hidden file input */}
       <input ref={fileInputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={onFileSelect} />
 
       {/* ═══ LEFT: Editor Panel ═══ */}
-      <div style={{ width: showPreview ? '55%' : '100%', minWidth: 380, display: 'flex', flexDirection: 'column', transition: 'width 0.3s', borderRight: '1px solid #e8e4e0' }}>
+      <div style={{ width: showPreview ? '55%' : '100%', minWidth: 340, display: 'flex', flexDirection: 'column', transition: 'width 0.3s', borderRight: '1px solid #e8e4e0' }}>
 
         {/* Top bar */}
         <div style={{ padding: '12px 20px', borderBottom: '1px solid #e8e4e0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#fff' }}>
@@ -847,7 +850,6 @@ export default function ThemeEditor() {
           {/* ═══ 品牌 Tab ═══ */}
           {tab === 'brand' && (
             <div>
-              {/* Logo */}
               <Sec title="店舖 Logo" icon="🏪" th={th}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 14 }}>
                   <div style={{
@@ -903,21 +905,19 @@ export default function ThemeEditor() {
                 </div>
               </Sec>
 
-              {/* 品牌資訊 */}
               <Sec title="品牌名稱" icon="💎" th={th}>
-                {[
-                  { label: '品牌名稱', val: brandName, set: setBrandName, ph: 'J.LAB' },
-                  { label: '副標題 / Slogan', val: brandSub, set: setBrandSub, ph: 'LASH & BEAUTY STUDIO' },
-                ].map(f => (
-                  <div key={f.label} style={{ marginBottom: 12 }}>
-                    <div style={{ fontSize: 10, color: '#888', marginBottom: 4 }}>{f.label}</div>
-                    <input type="text" value={f.val} onChange={e => f.set(e.target.value)} placeholder={f.ph}
-                      style={{ width: '100%', padding: '10px 14px', fontSize: 13, border: '1px solid #e0dcd8', borderRadius: 8, background: '#fff', color: '#333', boxSizing: 'border-box', outline: 'none', fontWeight: 500 }} />
-                  </div>
-                ))}
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{ fontSize: 10, color: '#888', marginBottom: 4 }}>品牌名稱</div>
+                  <input type="text" value={brandName} onChange={e => setBrandName(e.target.value)} placeholder="J.LAB"
+                    style={{ width: '100%', padding: '10px 14px', fontSize: 13, border: '1px solid #e0dcd8', borderRadius: 8, background: '#fff', color: '#333', boxSizing: 'border-box', outline: 'none', fontWeight: 500 }} />
+                </div>
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{ fontSize: 10, color: '#888', marginBottom: 4 }}>副標題 / Slogan</div>
+                  <input type="text" value={brandSub} onChange={e => setBrandSub(e.target.value)} placeholder="LASH & BEAUTY STUDIO"
+                    style={{ width: '100%', padding: '10px 14px', fontSize: 13, border: '1px solid #e0dcd8', borderRadius: 8, background: '#fff', color: '#333', boxSizing: 'border-box', outline: 'none', fontWeight: 500 }} />
+                </div>
               </Sec>
 
-              {/* 通知設定 */}
               <Sec title="通知設定" icon="🔔" th={th}>
                 <div style={{ marginBottom: 12 }}>
                   <div style={{ fontSize: 10, color: '#888', marginBottom: 4 }}>WhatsApp 號碼（含區碼）</div>
@@ -980,7 +980,9 @@ export default function ThemeEditor() {
             width: 320, height: 580, borderRadius: 32, background: '#111',
             padding: 8, boxShadow: '0 20px 60px rgba(0,0,0,0.3)', position: 'relative',
           }}>
+            {/* Notch */}
             <div style={{ position: 'absolute', top: 8, left: '50%', transform: 'translateX(-50%)', width: 80, height: 20, background: '#111', borderRadius: '0 0 12px 12px', zIndex: 2 }} />
+            {/* Screen */}
             <div style={{ width: '100%', height: '100%', borderRadius: 24, overflow: 'hidden', background: th.bg, position: 'relative' }}>
               <div style={{
                 width: '100%', height: '100%', overflowY: 'auto', padding: 0,
@@ -989,6 +991,7 @@ export default function ThemeEditor() {
                 ...(bgTex !== 'none' ? texCss(bgTex, bgTexOp) : {}),
                 position: 'relative',
               }}>
+                {/* Background image */}
                 {bgImg && (
                   <div style={{ position: 'absolute', inset: 0, zIndex: 0 }}>
                     <img src={bgImg} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: bgImgOp, filter: bgImgBlur ? `blur(${bgImgBlur}px)` : undefined }} />
@@ -1017,7 +1020,7 @@ export default function ThemeEditor() {
                     <div style={{ fontSize: 8, letterSpacing: '0.18em', color: th.t3, fontStyle: 'italic' }}>ONLINE BOOKING SYSTEM</div>
                   </div>
 
-                  {/* Cards */}
+                  {/* Service cards */}
                   <div style={{ padding: '0 14px' }}>
                     {[
                       { name: '經典單根嫁接', sub: '自然款 · 約 90 分鐘', price: '$680', sel: false },
@@ -1070,10 +1073,10 @@ export default function ThemeEditor() {
                       ))}
                     </div>
 
-                    {/* Button */}
+                    {/* CTA Button */}
                     <div style={{
                       padding: '14px', borderRadius: th.r, textAlign: 'center', fontSize: 11,
-                      fontWeight: 500, letterSpacing: '0.08em', marginBottom: 20,
+                      fontWeight: 500, letterSpacing: '0.08em', marginBottom: 20, cursor: 'pointer',
                       ...(btnStyle === 'solid' ? { background: th.pri, color: '#fff' } :
                         btnStyle === 'outline' ? { border: `2px solid ${th.pri}`, color: th.pri, background: 'transparent' } :
                         btnStyle === 'soft' ? { background: th.pri + '20', color: th.pri } :
@@ -1110,7 +1113,7 @@ export default function ThemeEditor() {
         </div>
       )}
 
-      {/* Spin animation */}
+      {/* Spin keyframe */}
       <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
     </div>
   );
