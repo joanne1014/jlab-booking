@@ -1,8 +1,8 @@
-// api/admin.js — 完整修正版（修復 .catch is not a function）
-import { createClient } from '@supabase/supabase-js'
+// api/admin.js — 完整版 v2
+import { createClient } from '@supabase/supabase-js';
 
-const SB_URL = process.env.SUPABASE_URL
-const SB_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
+const SB_URL = process.env.SUPABASE_URL;
+const SB_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 let supabase = null;
 try {
@@ -63,6 +63,9 @@ const ALLOWED_TABLES = [
   'business_hours',
   'receipts',
   'admin_users',
+  'invoice_styles',      // ★ InvoiceStyleEditor 用
+  'frontend_settings',   // ★ 補上
+  'audit_logs',          // ★ 補上
 ];
 
 /* ═══ DB Proxy ═══ */
@@ -86,7 +89,7 @@ async function handleDbProxy(payload, res) {
   if (method === 'DELETE') headers['Prefer'] = 'return=minimal';
 
   const fetchOpts = { method, headers };
-  if (body && ['POST','PATCH','PUT'].includes(method)) {
+  if (body && ['POST', 'PATCH', 'PUT'].includes(method)) {
     fetchOpts.body = JSON.stringify(body);
   }
 
@@ -100,13 +103,11 @@ async function handleDbProxy(payload, res) {
   return res.status(200).json(responseData);
 }
 
-/* ═══ 安全寫入 audit_logs（唔會 crash） ═══ */
+/* ═══ Audit Log（靜默失敗） ═══ */
 async function logAudit(entry) {
   try {
     await supabase.from('audit_logs').insert([entry]);
-  } catch (_) {
-    // 靜默失敗，唔影響主流程
-  }
+  } catch (_) {}
 }
 
 /* ═══════════════════════════════════════════
@@ -132,11 +133,12 @@ export default async function handler(req, res) {
   try {
 
     /* ══════════════════════════════════════
-       不需要 Token
+       不需要 Token 的 Actions
        ══════════════════════════════════════ */
 
     if (action === 'login') {
-      const ip = (req.headers['x-forwarded-for'] || req.socket?.remoteAddress || 'unknown').split(',')[0].trim();
+      const ip = (req.headers['x-forwarded-for'] || req.socket?.remoteAddress || 'unknown')
+        .split(',')[0].trim();
       if (!checkRateLimit(ip)) {
         return res.status(429).json({ error: '嘗試次數過多，請15分鐘後再試' });
       }
@@ -169,7 +171,8 @@ export default async function handler(req, res) {
     if (action === 'recover') {
       const { email, redirectUrl } = payload;
       if (!email) return res.status(400).json({ error: '請輸入 Email' });
-      const ip = (req.headers['x-forwarded-for'] || req.socket?.remoteAddress || 'unknown').split(',')[0].trim();
+      const ip = (req.headers['x-forwarded-for'] || req.socket?.remoteAddress || 'unknown')
+        .split(',')[0].trim();
       if (!checkRateLimit(ip)) return res.status(429).json({ error: '嘗試次數過多，請稍後再試' });
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
         redirectTo: redirectUrl || undefined,
@@ -181,22 +184,29 @@ export default async function handler(req, res) {
     if (action === 'reset-via-token') {
       const { access_token, token, newPassword } = payload;
       const actualToken = access_token || token;
-      if (!newPassword || newPassword.length < 6) return res.status(400).json({ error: '密碼最少 6 位' });
-      if (!actualToken) return res.status(400).json({ error: '重設連結已過期或無效（缺少 token）' });
-      const { data: { user: resetUser }, error: verifyError } = await supabase.auth.getUser(actualToken);
-      if (verifyError || !resetUser) return res.status(401).json({ error: '重設連結已過期或無效，請重新申請' });
-      const { error } = await supabase.auth.admin.updateUserById(resetUser.id, { password: newPassword });
+      if (!newPassword || newPassword.length < 6)
+        return res.status(400).json({ error: '密碼最少 6 位' });
+      if (!actualToken)
+        return res.status(400).json({ error: '重設連結已過期或無效（缺少 token）' });
+      const { data: { user: resetUser }, error: verifyError } =
+        await supabase.auth.getUser(actualToken);
+      if (verifyError || !resetUser)
+        return res.status(401).json({ error: '重設連結已過期或無效，請重新申請' });
+      const { error } = await supabase.auth.admin.updateUserById(resetUser.id, {
+        password: newPassword,
+      });
       if (error) return res.status(500).json({ error: error.message });
       return res.status(200).json({ success: true });
     }
 
     /* ══════════════════════════════════════
-       需要 Token
+       需要 Token 的 Actions
        ══════════════════════════════════════ */
 
     const user = await verifyToken(req);
     if (!user) return res.status(401).json({ error: '認證已過期，請重新登入' });
 
+    // ── 基礎 ──
     if (action === 'verify') {
       return res.status(200).json({ valid: true, email: user.email });
     }
@@ -207,12 +217,18 @@ export default async function handler(req, res) {
 
     if (action === 'change-password') {
       const { oldPassword, newPassword } = payload;
-      if (!newPassword || newPassword.length < 6) return res.status(400).json({ error: '密碼最少 6 位' });
+      if (!newPassword || newPassword.length < 6)
+        return res.status(400).json({ error: '密碼最少 6 位' });
       if (oldPassword) {
-        const { error: loginErr } = await supabase.auth.signInWithPassword({ email: user.email, password: oldPassword });
+        const { error: loginErr } = await supabase.auth.signInWithPassword({
+          email: user.email,
+          password: oldPassword,
+        });
         if (loginErr) return res.status(401).json({ error: '舊密碼不正確' });
       }
-      const { error } = await supabase.auth.admin.updateUserById(user.id, { password: newPassword });
+      const { error } = await supabase.auth.admin.updateUserById(user.id, {
+        password: newPassword,
+      });
       if (error) return res.status(500).json({ error: error.message });
       return res.status(200).json({ success: true });
     }
@@ -223,47 +239,37 @@ export default async function handler(req, res) {
 
     if (action === 'get-frontend-settings') {
       const { data, error } = await supabase
-        .from('frontend_settings')
-        .select('*')
-        .limit(1)
-        .single();
-      if (error && error.code !== 'PGRST116') return res.status(500).json({ error: error.message });
+        .from('frontend_settings').select('*').limit(1).single();
+      if (error && error.code !== 'PGRST116')
+        return res.status(500).json({ error: error.message });
       return res.status(200).json({ settings: data || null });
     }
 
     if (action === 'save-frontend-settings') {
       const { settings } = payload;
       if (!settings) return res.status(400).json({ error: 'Missing settings' });
-
       const { id: _removeId, ...settingsWithoutId } = settings;
 
       const { data: existing } = await supabase
-        .from('frontend_settings')
-        .select('id')
-        .limit(1)
-        .single();
+        .from('frontend_settings').select('id').limit(1).single();
 
       let result;
       if (existing) {
         const { data, error } = await supabase
           .from('frontend_settings')
           .update({ ...settingsWithoutId, updated_at: new Date().toISOString() })
-          .eq('id', existing.id)
-          .select()
-          .single();
+          .eq('id', existing.id).select().single();
         if (error) return res.status(500).json({ error: error.message });
         result = data;
       } else {
         const { data, error } = await supabase
           .from('frontend_settings')
           .insert([{ ...settingsWithoutId, updated_at: new Date().toISOString() }])
-          .select()
-          .single();
+          .select().single();
         if (error) return res.status(500).json({ error: error.message });
         result = data;
       }
 
-      // ★ 修正：用 logAudit 代替 .catch()
       await logAudit({
         action: 'frontend_settings_update',
         target_type: 'settings',
@@ -272,6 +278,40 @@ export default async function handler(req, res) {
       });
 
       return res.status(200).json({ success: true, settings: result });
+    }
+
+    /* ══════════════════════════════════════
+       單據風格
+       ══════════════════════════════════════ */
+
+    if (action === 'get-invoice-style') {
+      const { data, error } = await supabase
+        .from('invoice_styles')
+        .select('*')
+        .eq('is_active', true)
+        .limit(1)
+        .single();
+      if (error && error.code !== 'PGRST116')
+        return res.status(500).json({ error: error.message });
+      return res.status(200).json({ style: data || null });
+    }
+
+    if (action === 'save-invoice-style') {
+      const { id: styleId, ...updates } = payload;
+      updates.updated_at = new Date().toISOString();
+
+      if (styleId) {
+        const { data, error } = await supabase
+          .from('invoice_styles').update(updates).eq('id', styleId).select().single();
+        if (error) return res.status(500).json({ error: error.message });
+        return res.status(200).json({ success: true, style: data });
+      } else {
+        const { data, error } = await supabase
+          .from('invoice_styles')
+          .insert([{ ...updates, is_active: true }]).select().single();
+        if (error) return res.status(500).json({ error: error.message });
+        return res.status(200).json({ success: true, style: data });
+      }
     }
 
     /* ══════════════════════════════════════
@@ -297,27 +337,27 @@ export default async function handler(req, res) {
 
     if (action === 'update-booking-status') {
       const { bookingId, status: newStatus, cancel_reason } = payload;
-      if (!bookingId || !newStatus) return res.status(400).json({ error: 'Missing bookingId or status' });
+      if (!bookingId || !newStatus)
+        return res.status(400).json({ error: 'Missing bookingId or status' });
+
       const updateData = { status: newStatus };
       if (cancel_reason) updateData.cancel_reason = cancel_reason;
+
       const { error } = await supabase.from('bookings').update(updateData).eq('id', bookingId);
       if (error) return res.status(500).json({ error: error.message });
 
-      // ★ 確認/完成時自動建立或更新客戶
+      // 確認/完成時自動建立或更新客戶
       if (['confirmed', 'completed'].includes(newStatus)) {
         try {
           const { data: booking } = await supabase
             .from('bookings')
             .select('customer_name, customer_phone, booking_date, total_price')
-            .eq('id', bookingId)
-            .single();
+            .eq('id', bookingId).single();
 
-          if (booking && booking.customer_phone) {
+          if (booking?.customer_phone) {
             const { data: existCust } = await supabase
-              .from('customers')
-              .select('id, total_visits, total_spent')
-              .eq('phone', booking.customer_phone)
-              .limit(1);
+              .from('customers').select('id, total_visits, total_spent')
+              .eq('phone', booking.customer_phone).limit(1);
 
             if (existCust && existCust.length > 0) {
               await supabase.from('customers').update({
@@ -344,7 +384,6 @@ export default async function handler(req, res) {
         }
       }
 
-      // ★ 修正：用 logAudit 代替 .catch()
       await logAudit({
         action: 'booking_' + newStatus,
         target_type: 'booking',
@@ -382,13 +421,13 @@ export default async function handler(req, res) {
     if (action === 'get-bookings') {
       const { fromDate, toDate, status: bookingStatus } = payload;
       let query = supabase
-        .from('bookings')
-        .select('*')
+        .from('bookings').select('*')
         .order('booking_date', { ascending: false })
         .order('booking_time', { ascending: false });
       if (fromDate) query = query.gte('booking_date', fromDate);
       if (toDate)   query = query.lte('booking_date', toDate);
-      if (bookingStatus && bookingStatus !== 'all') query = query.eq('status', bookingStatus);
+      if (bookingStatus && bookingStatus !== 'all')
+        query = query.eq('status', bookingStatus);
       const { data, error } = await query.limit(500);
       if (error) return res.status(500).json({ error: error.message });
       return res.status(200).json({ data });
@@ -399,17 +438,18 @@ export default async function handler(req, res) {
       const pageSize = Math.min(payload.pageSize || 50, 200);
       const offset = (page - 1) * pageSize;
       let query = supabase
-        .from('bookings')
-        .select('*', { count: 'exact' })
+        .from('bookings').select('*', { count: 'exact' })
         .order('booking_date', { ascending: false })
         .order('booking_time', { ascending: false })
         .range(offset, offset + pageSize - 1);
-      if (payload.dateFrom)    query = query.gte('booking_date', payload.dateFrom);
-      if (payload.dateTo)      query = query.lte('booking_date', payload.dateTo);
-      if (payload.status)      query = query.eq('status', payload.status);
-      if (payload.technician)  query = query.eq('technician_label', payload.technician);
+      if (payload.dateFrom)   query = query.gte('booking_date', payload.dateFrom);
+      if (payload.dateTo)     query = query.lte('booking_date', payload.dateTo);
+      if (payload.status)     query = query.eq('status', payload.status);
+      if (payload.technician) query = query.eq('technician_label', payload.technician);
       if (payload.search) {
-        query = query.or(`customer_name.ilike.%${payload.search}%,customer_phone.ilike.%${payload.search}%`);
+        query = query.or(
+          `customer_name.ilike.%${payload.search}%,customer_phone.ilike.%${payload.search}%`
+        );
       }
       const { data, error, count } = await query;
       if (error) return res.status(500).json({ error: error.message });
@@ -428,83 +468,84 @@ export default async function handler(req, res) {
 
     if (action === 'load-customers') {
       const { data } = await supabase
-        .from('customers')
-        .select('*')
+        .from('customers').select('*')
         .order('last_visit_date', { ascending: false, nullsFirst: false })
         .limit(payload.limit || 200);
       return res.status(200).json(data || []);
     }
-// ★ 新增客戶
-if (action === 'add-customer') {
-  const { name, phone, email, notes, tags, vip } = payload;
-  if (!name) return res.status(400).json({ error: '請輸入客戶名稱' });
 
-  const { data, error } = await supabase
-    .from('customers')
-    .insert([{
-      name,
-      phone: phone || '',
-      email: email || '',
-      notes: notes || '',
-      tags: tags || [],
-      is_vip: vip || false,
-      total_visits: 0,
-      total_spent: 0,
-      is_blacklisted: false,
-    }])
-    .select()
-    .single();
+    if (action === 'add-customer') {
+      const { name, phone, email, notes, tags, vip } = payload;
+      if (!name) return res.status(400).json({ error: '請輸入客戶名稱' });
 
-  if (error) return res.status(500).json({ error: error.message });
+      const { data, error } = await supabase
+        .from('customers')
+        .insert([{
+          name,
+          phone: phone || '',
+          email: email || '',
+          notes: notes || '',
+          tags: tags || [],
+          is_vip: vip || false,
+          total_visits: 0,
+          total_spent: 0,
+          is_blacklisted: false,
+        }])
+        .select().single();
+      if (error) return res.status(500).json({ error: error.message });
 
-  await logAudit({
-    action: 'customer_created',
-    target_type: 'customer',
-    target_id: String(data.id),
-    details: { name, phone },
-  });
+      await logAudit({
+        action: 'customer_created',
+        target_type: 'customer',
+        target_id: String(data.id),
+        details: { name, phone },
+      });
 
-  return res.status(200).json({ success: true, data });
-}
+      return res.status(200).json({ success: true, data });
+    }
 
-// ★ 刪除客戶
-if (action === 'delete-customer') {
-  const { id } = payload;
-  if (!id) return res.status(400).json({ error: 'Missing customer id' });
+    if (action === 'delete-customer') {
+      const { id } = payload;
+      if (!id) return res.status(400).json({ error: 'Missing customer id' });
 
-  const { error } = await supabase
-    .from('customers')
-    .delete()
-    .eq('id', id);
+      const { error } = await supabase.from('customers').delete().eq('id', id);
+      if (error) return res.status(500).json({ error: error.message });
 
-  if (error) return res.status(500).json({ error: error.message });
+      await logAudit({
+        action: 'customer_deleted',
+        target_type: 'customer',
+        target_id: String(id),
+        details: {},
+      });
 
-  await logAudit({
-    action: 'customer_deleted',
-    target_type: 'customer',
-    target_id: String(id),
-    details: {},
-  });
+      return res.status(200).json({ success: true });
+    }
 
-  return res.status(200).json({ success: true });
-}
     if (action === 'update-customer') {
       const customerId = payload.id || payload.customerId;
       if (!customerId) return res.status(400).json({ error: 'Missing customer id' });
+
       let updateData = {};
       if (payload.updates) {
         updateData = payload.updates;
       } else {
-        if (payload.notes !== undefined)          updateData.notes = payload.notes;
+        if (payload.notes !== undefined)           updateData.notes = payload.notes;
         if (payload.is_blacklisted !== undefined)  updateData.is_blacklisted = payload.is_blacklisted;
+        if (payload.tags !== undefined)            updateData.tags = payload.tags;
+        if (payload.name !== undefined)            updateData.name = payload.name;
+        if (payload.phone !== undefined)           updateData.phone = payload.phone;
+        if (payload.email !== undefined)           updateData.email = payload.email;
       }
+      updateData.updated_at = new Date().toISOString();
+
       const { data, error } = await supabase
         .from('customers').update(updateData).eq('id', customerId).select().single();
       if (error) return res.status(500).json({ error: error.message });
 
-      // ★ 修正：用 logAudit 代替 .catch()
       await logAudit({
-        action: payload.is_blacklisted !== undefined ? 'customer_blacklist_toggle' : 'customer_update',
+        action: payload.is_blacklisted !== undefined
+          ? 'customer_blacklist_toggle'
+          : 'customer_update',
         target_type: 'customer',
         target_id: String(customerId),
         details: updateData,
@@ -516,8 +557,7 @@ if (action === 'delete-customer') {
     if (action === 'customer-bookings') {
       const { phone } = payload;
       const { data } = await supabase
-        .from('bookings')
-        .select('*')
+        .from('bookings').select('*')
         .eq('customer_phone', phone)
         .order('booking_date', { ascending: false })
         .limit(50);
@@ -526,17 +566,14 @@ if (action === 'delete-customer') {
 
     if (action === 'refresh-customer-stats') {
       const { data: bookings, error: bErr } = await supabase
-        .from('bookings')
-        .select('*')
+        .from('bookings').select('*')
         .in('status', ['confirmed', 'completed']);
-
       if (bErr) return res.status(500).json({ error: bErr.message });
 
       const phoneMap = {};
       for (const b of (bookings || [])) {
         const phone = b.customer_phone;
         if (!phone) continue;
-
         if (!phoneMap[phone]) {
           phoneMap[phone] = {
             name: b.customer_name || '未知',
@@ -546,57 +583,42 @@ if (action === 'delete-customer') {
             last_visit_date: null,
           };
         }
-
         phoneMap[phone].total_visits++;
         phoneMap[phone].total_spent += (b.total_price || 0);
-
         if (b.booking_date) {
-          if (!phoneMap[phone].last_visit_date || b.booking_date > phoneMap[phone].last_visit_date) {
+          if (!phoneMap[phone].last_visit_date ||
+              b.booking_date > phoneMap[phone].last_visit_date) {
             phoneMap[phone].last_visit_date = b.booking_date;
           }
         }
-
-        if (b.customer_name) {
-          phoneMap[phone].name = b.customer_name;
-        }
+        if (b.customer_name) phoneMap[phone].name = b.customer_name;
       }
 
-      let created = 0;
-      let updated = 0;
-
+      let created = 0, updated = 0;
       for (const phone of Object.keys(phoneMap)) {
         const cust = phoneMap[phone];
-
         const { data: existing } = await supabase
-          .from('customers')
-          .select('id')
-          .eq('phone', phone)
-          .limit(1);
+          .from('customers').select('id').eq('phone', phone).limit(1);
 
         if (existing && existing.length > 0) {
-          await supabase
-            .from('customers')
-            .update({
-              name: cust.name,
-              total_visits: cust.total_visits,
-              total_spent: cust.total_spent,
-              last_visit_date: cust.last_visit_date,
-            })
-            .eq('id', existing[0].id);
+          await supabase.from('customers').update({
+            name: cust.name,
+            total_visits: cust.total_visits,
+            total_spent: cust.total_spent,
+            last_visit_date: cust.last_visit_date,
+          }).eq('id', existing[0].id);
           updated++;
         } else {
-          await supabase
-            .from('customers')
-            .insert([{
-              name: cust.name,
-              phone: cust.phone,
-              total_visits: cust.total_visits,
-              total_spent: cust.total_spent,
-              last_visit_date: cust.last_visit_date,
-              tags: [],
-              notes: '',
-              is_blacklisted: false,
-            }]);
+          await supabase.from('customers').insert([{
+            name: cust.name,
+            phone: cust.phone,
+            total_visits: cust.total_visits,
+            total_spent: cust.total_spent,
+            last_visit_date: cust.last_visit_date,
+            tags: [],
+            notes: '',
+            is_blacklisted: false,
+          }]);
           created++;
         }
       }
@@ -614,10 +636,14 @@ if (action === 'delete-customer') {
        ══════════════════════════════════════ */
 
     if (action === 'create-receipt') {
-      const { customer_id, customer_name, customer_phone, staff_name, items, subtotal, discount, total, payment_method, remarks } = payload;
+      const {
+        customer_id, customer_name, customer_phone, staff_name,
+        items, subtotal, discount, total, payment_method, remarks,
+      } = payload;
 
       const now = new Date();
-      const receipt_no = 'R' + now.getFullYear().toString().slice(2) +
+      const receipt_no = 'R' +
+        now.getFullYear().toString().slice(2) +
         String(now.getMonth() + 1).padStart(2, '0') +
         String(now.getDate()).padStart(2, '0') + '-' +
         String(now.getHours()).padStart(2, '0') +
@@ -641,12 +667,9 @@ if (action === 'delete-customer') {
           status: 'unpaid',
           created_at: now.toISOString(),
         }])
-        .select()
-        .single();
-
+        .select().single();
       if (error) return res.status(500).json({ error: error.message });
 
-      // ★ 修正：用 logAudit 代替 .catch()
       await logAudit({
         action: 'receipt_created',
         target_type: 'receipt',
@@ -659,15 +682,11 @@ if (action === 'delete-customer') {
 
     if (action === 'get-receipts') {
       let query = supabase
-        .from('receipts')
-        .select('*')
+        .from('receipts').select('*')
         .order('created_at', { ascending: false });
-
       if (payload.customer_phone) query = query.eq('customer_phone', payload.customer_phone);
-      if (payload.status) query = query.eq('status', payload.status);
-      if (payload.limit) query = query.limit(payload.limit);
-      else query = query.limit(100);
-
+      if (payload.status)         query = query.eq('status', payload.status);
+      query = query.limit(payload.limit || 100);
       const { data, error } = await query;
       if (error) return res.status(500).json({ error: error.message });
       return res.status(200).json({ data: data || [] });
@@ -682,12 +701,7 @@ if (action === 'delete-customer') {
       if (rStatus === 'paid') updateData.paid_at = new Date().toISOString();
 
       const { data, error } = await supabase
-        .from('receipts')
-        .update(updateData)
-        .eq('id', receiptId)
-        .select()
-        .single();
-
+        .from('receipts').update(updateData).eq('id', receiptId).select().single();
       if (error) return res.status(500).json({ error: error.message });
       return res.status(200).json({ success: true, receipt: data });
     }
@@ -698,8 +712,7 @@ if (action === 'delete-customer') {
 
     if (action === 'get-business-hours') {
       const { data, error } = await supabase
-        .from('business_hours')
-        .select('*')
+        .from('business_hours').select('*')
         .order('day_of_week', { ascending: true });
       if (error) return res.status(500).json({ error: error.message });
       return res.status(200).json({ data: data || [] });
@@ -707,38 +720,42 @@ if (action === 'delete-customer') {
 
     if (action === 'save-business-hours') {
       const { hours } = payload;
-      if (!hours || !Array.isArray(hours)) return res.status(400).json({ error: 'Missing hours array' });
+      if (!hours || !Array.isArray(hours))
+        return res.status(400).json({ error: 'Missing hours array' });
 
       for (const h of hours) {
-        await supabase
-          .from('business_hours')
-          .upsert({
-            day_of_week: h.day_of_week,
-            day_name: h.day_name,
-            is_open: h.is_open,
-            open_time: h.open_time,
-            close_time: h.close_time,
-          }, { onConflict: 'day_of_week' });
+        await supabase.from('business_hours').upsert({
+          day_of_week: h.day_of_week,
+          day_name: h.day_name,
+          is_open: h.is_open,
+          open_time: h.open_time,
+          close_time: h.close_time,
+        }, { onConflict: 'day_of_week' });
       }
-
       return res.status(200).json({ success: true });
     }
 
     /* ══════════════════════════════════════
-       統計 / 審計
+       統計 / Dashboard
        ══════════════════════════════════════ */
 
     if (action === 'dashboard-stats') {
       const today = new Date().toISOString().slice(0, 10);
       const weekAgo = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
       const monthStart = today.slice(0, 7) + '-01';
+
       const [r1, r2, r3, r4, r5] = await Promise.all([
-        supabase.from('bookings').select('*', { count: 'exact', head: true }).eq('booking_date', today).neq('status', 'cancelled'),
-        supabase.from('bookings').select('*', { count: 'exact', head: true }).gte('booking_date', weekAgo).neq('status', 'cancelled'),
-        supabase.from('bookings').select('*', { count: 'exact', head: true }).gte('booking_date', monthStart).neq('status', 'cancelled'),
+        supabase.from('bookings').select('*', { count: 'exact', head: true })
+          .eq('booking_date', today).neq('status', 'cancelled'),
+        supabase.from('bookings').select('*', { count: 'exact', head: true })
+          .gte('booking_date', weekAgo).neq('status', 'cancelled'),
+        supabase.from('bookings').select('*', { count: 'exact', head: true })
+          .gte('booking_date', monthStart).neq('status', 'cancelled'),
         supabase.from('customers').select('*', { count: 'exact', head: true }),
-        supabase.from('bookings').select('*', { count: 'exact', head: true }).eq('booking_date', today).eq('status', 'cancelled'),
+        supabase.from('bookings').select('*', { count: 'exact', head: true })
+          .eq('booking_date', today).eq('status', 'cancelled'),
       ]);
+
       return res.status(200).json({
         today: r1.count || 0,
         week: r2.count || 0,
@@ -750,8 +767,7 @@ if (action === 'delete-customer') {
 
     if (action === 'get-audit-logs') {
       const { data, error } = await supabase
-        .from('audit_logs')
-        .select('*')
+        .from('audit_logs').select('*')
         .order('performed_at', { ascending: false })
         .limit(200);
       if (error) return res.status(500).json({ error: error.message });
@@ -773,10 +789,8 @@ if (action === 'delete-customer') {
 
     if (action === 'load-logs') {
       const { data } = await supabase
-        .from('admin_logs')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(50);
+        .from('admin_logs').select('*')
+        .order('created_at', { ascending: false }).limit(50);
       return res.status(200).json(data || []);
     }
 
@@ -787,11 +801,12 @@ if (action === 'delete-customer') {
     if (action === 'generate-reminders') {
       const targetDate = payload.date;
       if (!targetDate) return res.status(400).json({ error: 'Missing date' });
+
       const { data: bookings } = await supabase
-        .from('bookings')
-        .select('*')
+        .from('bookings').select('*')
         .eq('booking_date', targetDate)
         .in('status', ['confirmed', 'pending']);
+
       const reminders = (bookings || [])
         .filter(b => b.customer_phone)
         .map(b => {
@@ -806,6 +821,7 @@ if (action === 'delete-customer') {
             waLink: `https://wa.me/${fullPhone}?text=${encodeURIComponent(msg)}`,
           };
         });
+
       return res.status(200).json({ reminders, count: reminders.length });
     }
 
@@ -820,11 +836,13 @@ if (action === 'delete-customer') {
       if (existing && existing.length > 0) {
         return res.status(200).json({ skipped: true, message: '今日已備份' });
       }
+
       const backup = {};
       const tablesToBackup = [
-        'staff','services','service_variants','service_addons',
-        'enabled_timeslots','date_availability','blocked_dates',
-        'customers','notification_templates','frontend_settings',
+        'staff', 'services', 'service_variants', 'service_addons',
+        'enabled_timeslots', 'date_availability', 'blocked_dates',
+        'customers', 'notification_templates', 'frontend_settings',
+        'invoice_styles',
       ];
       for (const t of tablesToBackup) {
         try {
@@ -832,13 +850,16 @@ if (action === 'delete-customer') {
           backup[t] = data || [];
         } catch { backup[t] = []; }
       }
+
       const { error: insertErr } = await supabase.from('backups').insert([{
         backup_date: today,
         data: backup,
       }]);
       if (insertErr) return res.status(500).json({ error: insertErr.message });
+
       const cutoff = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
       await supabase.from('backups').delete().lt('backup_date', cutoff);
+
       return res.status(200).json({ success: true, date: today });
     }
 
@@ -848,9 +869,13 @@ if (action === 'delete-customer') {
 
     if (action === 'health') {
       const tables = {};
-      for (const t of ['staff','services','bookings','enabled_timeslots','frontend_settings']) {
+      for (const t of [
+        'staff', 'services', 'bookings',
+        'enabled_timeslots', 'frontend_settings', 'invoice_styles',
+      ]) {
         try {
-          const { count } = await supabase.from(t).select('*', { count: 'exact', head: true });
+          const { count } = await supabase
+            .from(t).select('*', { count: 'exact', head: true });
           tables[t] = count;
         } catch { tables[t] = 'error'; }
       }
